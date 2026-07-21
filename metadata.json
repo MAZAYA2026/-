@@ -1,0 +1,6 @@
+{
+  "name": "Mazaya Passports Billing System",
+  "description": "نظام إدارة فواتير خدمات مكتب مزايا للجوازات وتسهيل المعاملات مع ميزة ترجمة الأسماء والربط بجوجل شيت.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,459 @@
+import React, { useState } from "react";
+import { Service, Employee } from "../types";
+import { createServiceOnServer, updateServiceOnServer, deleteServiceOnServer } from "../lib/api";
+import { Plus, Edit3, Trash2, Check, X, ShieldAlert, Sparkles, FolderPlus, DollarSign, Clock, FileText } from "lucide-react";
+
+interface ServicesConfigProps {
+  services: Service[];
+  activeEmployee: Employee;
+  onServiceCreated: (srv: Service) => void;
+  onServiceUpdated: (srv: Service) => void;
+  onServiceDeleted: (id: string) => void;
+}
+
+export default function ServicesConfig({ services, activeEmployee, onServiceCreated, onServiceUpdated, onServiceDeleted }: ServicesConfigProps) {
+  const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
+
+  // Form states for creating/editing
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [name, setName] = useState("");
+  const [govPrice, setGovPrice] = useState(0);
+  const [officeFee, setOfficeFee] = useState(0);
+  const [duration, setDuration] = useState("");
+  const [instructions, setInstructions] = useState("");
+  const [deliveryDaysOffset, setDeliveryDaysOffset] = useState(1);
+  const [notes, setNotes] = useState("");
+
+  const resetForm = () => {
+    setName("");
+    setGovPrice(0);
+    setOfficeFee(0);
+    setDuration("");
+    setInstructions("");
+    setDeliveryDaysOffset(1);
+    setNotes("");
+    setEditingServiceId(null);
+  };
+
+  const handleCreateService = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeEmployee.permissions.canManageServices) {
+      alert("عذراً، ليست لديك صلاحية لإدارة وتعديل الخدمات.");
+      return;
+    }
+
+    if (!name.trim()) return;
+
+    try {
+      const payload: Partial<Service> = {
+        name: name.trim(),
+        govPrice,
+        officeFee,
+        duration: duration.trim(),
+        instructions: instructions.trim(),
+        deliveryDaysOffset,
+        notes: notes.trim()
+      };
+
+      const result = await createServiceOnServer(payload);
+      onServiceCreated(result);
+      resetForm();
+      setShowCreateForm(false);
+      alert("تمت إضافة الخدمة الجديدة بنجاح في كتالوج المكتب.");
+    } catch (err) {
+      console.error(err);
+      alert("حدث خطأ أثناء إضافة الخدمة الجديدة.");
+    }
+  };
+
+  const handleOpenEdit = (srv: Service) => {
+    if (!activeEmployee.permissions.canManageServices) {
+      alert("عذراً، ليست لديك صلاحية لإدارة وتعديل الخدمات.");
+      return;
+    }
+    setEditingServiceId(srv.id);
+    setName(srv.name);
+    setGovPrice(srv.govPrice);
+    setOfficeFee(srv.officeFee);
+    setDuration(srv.duration);
+    setInstructions(srv.instructions);
+    setDeliveryDaysOffset(srv.deliveryDaysOffset || 1);
+    setNotes(srv.notes || "");
+  };
+
+  const handleUpdateService = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingServiceId) return;
+
+    try {
+      const payload: Partial<Service> = {
+        name: name.trim(),
+        govPrice,
+        officeFee,
+        duration: duration.trim(),
+        instructions: instructions.trim(),
+        deliveryDaysOffset,
+        notes: notes.trim()
+      };
+
+      const result = await updateServiceOnServer(editingServiceId, payload);
+      onServiceUpdated(result);
+      resetForm();
+      alert("تم تحديث معلومات الخدمة المحددة بنجاح.");
+    } catch (err) {
+      console.error(err);
+      alert("حدث خطأ أثناء حفظ التحديثات للخدمة.");
+    }
+  };
+
+  const handleDeleteService = async (id: string) => {
+    if (!activeEmployee.permissions.canManageServices) {
+      alert("عذراً، ليست لديك صلاحية لإدارة وتعديل الخدمات.");
+      return;
+    }
+
+    if (!confirm("هل أنت متأكد من حذف هذه الخدمة نهائياً من الكتالوج؟ الفواتير الحالية التي تستخدمها لن تتأثر.")) return;
+
+    try {
+      await deleteServiceOnServer(id);
+      onServiceDeleted(id);
+    } catch (err) {
+      console.error(err);
+      alert("حدث خطأ أثناء حذف الخدمة.");
+    }
+  };
+
+  return (
+    <div className="space-y-6 font-cairo">
+      
+      {/* Header */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-5">
+        <div>
+          <h2 className="text-xl font-extrabold text-slate-900">شاشة كتالوج وإعدادات الخدمات</h2>
+          <p className="text-sm text-slate-500 mt-1">تحديد الرسوم والمدد الزمنية والتعليمات وتوليد الهاشات الفردية (#)</p>
+        </div>
+        {!showCreateForm && (
+          <button
+            onClick={() => {
+              resetForm();
+              setShowCreateForm(true);
+            }}
+            className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5 transition-colors shadow-xs"
+          >
+            <Plus className="w-4.5 h-4.5" />
+            إضافة خدمة جديدة
+          </button>
+        )}
+      </div>
+
+      {/* Permission guard info */}
+      {!activeEmployee.permissions.canManageServices && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-2xl p-4 flex items-start gap-3 text-xs leading-relaxed">
+          <ShieldAlert className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+          <div>
+            أنت مسجل حالياً بحساب <strong>{activeEmployee.name}</strong> وليس لديك صلاحيات لتعديل رسوم خدمات مكتب مزايا. يرجى تسجيل الدخول بحساب المدير <strong>SHERIF</strong> للتحكم الكامل.
+          </div>
+        </div>
+      )}
+
+      {/* CREATE FORM */}
+      {showCreateForm && (
+        <form onSubmit={handleCreateService} className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4 max-w-2xl">
+          <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+            <h3 className="font-bold text-sm text-slate-800 flex items-center gap-1.5">
+              <FolderPlus className="w-5 h-5 text-blue-500" />
+              تكوين وإدراج خدمة جديدة
+            </h3>
+            <button type="button" onClick={() => setShowCreateForm(false)}>
+              <X className="w-5 h-5 text-slate-400" />
+            </button>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-700 block">اسم الخدمة بالكامل (ابدأ بـ # أو ## للجوازات):</label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="مثال: # استخراج جواز سفر مستعجل"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs"
+                required
+              />
+              <span className="text-[9px] text-slate-400 leading-none">تنبيه: خدمات الجوازات الفردية تبدأ برمز الهاش الواحد (#) والمزدوجة (##) لتفعيل حقول الترجمة والرقم القومي.</span>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-700 block">عدد أيام التنفيذ التلقائي للاستلام:</label>
+              <input
+                type="number"
+                min="0"
+                value={deliveryDaysOffset}
+                onChange={(e) => setDeliveryDaysOffset(parseInt(e.target.value) || 0)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono"
+                required
+              />
+            </div>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-700 block">الرسوم الحكومية بالجنيه:</label>
+              <input
+                type="number"
+                min="0"
+                value={govPrice}
+                onChange={(e) => setGovPrice(parseFloat(e.target.value) || 0)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono"
+                required
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-700 block">رسوم وأتعاب المكتب بالجنيه:</label>
+              <input
+                type="number"
+                min="0"
+                value={officeFee}
+                onChange={(e) => setOfficeFee(parseFloat(e.target.value) || 0)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono"
+                required
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-bold text-slate-700 block">مدة تنفيذ الخدمة بالتفصيل (نص طويل):</label>
+            <input
+              type="text"
+              value={duration}
+              onChange={(e) => setDuration(e.target.value)}
+              placeholder="مثال: 3 أيام عمل من تاريخ توريد الأوراق الرسمية"
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs"
+              required
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-bold text-slate-700 block">تعليمات التسليم للعميل:</label>
+            <textarea
+              value={instructions}
+              onChange={(e) => setInstructions(e.target.value)}
+              placeholder="مثال: يرجى الحضور الشخصي بالمكتب مع أصل البطاقة لاستلام الأرشيف المجهز..."
+              rows={2}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs"
+              required
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-bold text-slate-700 block">ملاحظات إضافية اختيارية:</label>
+            <input
+              type="text"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="أية شروط أو ملاحظات أمان أخرى..."
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs"
+            />
+          </div>
+
+          <div className="flex gap-2 justify-end pt-2">
+            <button
+              type="button"
+              onClick={() => setShowCreateForm(false)}
+              className="px-4 py-2 border border-slate-200 text-slate-500 text-xs font-bold rounded-lg"
+            >
+              إلغاء
+            </button>
+            <button
+              type="submit"
+              className="px-5 py-2 bg-slate-900 text-white hover:bg-slate-800 text-xs font-bold rounded-lg"
+            >
+              حفظ وإدراج الخدمة 💾
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* EDIT FORM (INLINE OR BLOCK) */}
+      {editingServiceId && (
+        <form onSubmit={handleUpdateService} className="bg-white border-2 border-blue-500 rounded-2xl p-6 shadow-md space-y-4 max-w-2xl">
+          <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+            <h3 className="font-bold text-sm text-blue-700 flex items-center gap-1.5">
+              <Edit3 className="w-5 h-5" />
+              تعديل تفاصيل الخدمة الحالية
+            </h3>
+            <button type="button" onClick={resetForm}>
+              <X className="w-5 h-5 text-slate-400" />
+            </button>
+          </div>
+
+          {/* Same inputs as Create Form but populated */}
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-700 block">اسم الخدمة بالكامل:</label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs"
+                required
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-700 block">أيام التنفيذ التلقائي للاستلام:</label>
+              <input
+                type="number"
+                min="0"
+                value={deliveryDaysOffset}
+                onChange={(e) => setDeliveryDaysOffset(parseInt(e.target.value) || 0)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono"
+                required
+              />
+            </div>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-700 block">الرسوم الحكومية بالجنيه:</label>
+              <input
+                type="number"
+                min="0"
+                value={govPrice}
+                onChange={(e) => setGovPrice(parseFloat(e.target.value) || 0)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono"
+                required
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-700 block">رسوم وأتعاب المكتب بالجنيه:</label>
+              <input
+                type="number"
+                min="0"
+                value={officeFee}
+                onChange={(e) => setOfficeFee(parseFloat(e.target.value) || 0)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono"
+                required
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-bold text-slate-700 block">مدة تنفيذ الخدمة بالتفصيل (نص طويل):</label>
+            <input
+              type="text"
+              value={duration}
+              onChange={(e) => setDuration(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs"
+              required
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-bold text-slate-700 block">تعليمات التسليم للعميل:</label>
+            <textarea
+              value={instructions}
+              onChange={(e) => setInstructions(e.target.value)}
+              rows={2}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs"
+              required
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-bold text-slate-700 block">ملاحظات إضافية اختيارية:</label>
+            <input
+              type="text"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs"
+            />
+          </div>
+
+          <div className="flex gap-2 justify-end pt-2">
+            <button
+              type="button"
+              onClick={resetForm}
+              className="px-4 py-2 border border-slate-200 text-slate-500 text-xs font-bold rounded-lg"
+            >
+              تجاهل التعديلات
+            </button>
+            <button
+              type="submit"
+              className="px-5 py-2 bg-blue-600 text-white hover:bg-blue-500 text-xs font-bold rounded-lg"
+            >
+              تأكيد الحفظ والتحديث 💾
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* SERVICES LIST */}
+      <div className="bg-white border border-slate-200 rounded-2xl shadow-xs overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-right text-xs">
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-100 text-slate-500 font-bold">
+                <th className="p-3">اسم الخدمة بالكامل</th>
+                <th className="p-3">الرسوم الحكومية</th>
+                <th className="p-3">رسوم أتعاب المكتب</th>
+                <th className="p-3">الإجمالي الجاري</th>
+                <th className="p-3">مدة تنفيذ الخدمة</th>
+                <th className="p-3">التعليمات</th>
+                <th className="p-3 text-left">الخيارات</th>
+              </tr>
+            </thead>
+            <tbody>
+              {services.map((srv) => {
+                const isPassport = srv.name.startsWith("#") || srv.name.startsWith("##");
+                const total = srv.govPrice + srv.officeFee;
+
+                return (
+                  <tr key={srv.id} className="border-b border-slate-150 hover:bg-slate-50/40">
+                    <td className="p-3">
+                      <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                        <span>{srv.name}</span>
+                        {isPassport && (
+                          <span className="bg-blue-50 border border-blue-100 text-blue-600 text-[8px] px-1.5 py-0.5 rounded-sm">
+                            مصلحة الجوازات
+                          </span>
+                        )}
+                      </div>
+                      {srv.notes && <div className="text-[10px] text-slate-400 mt-0.5">{srv.notes}</div>}
+                    </td>
+                    <td className="p-3 font-mono font-bold text-slate-800">{srv.govPrice.toFixed(2)} ج.م</td>
+                    <td className="p-3 font-mono font-bold text-emerald-600">{srv.officeFee.toFixed(2)} ج.م</td>
+                    <td className="p-3 font-mono font-black text-slate-900">{total.toFixed(2)} ج.م</td>
+                    <td className="p-3 text-slate-600 font-medium">{srv.duration}</td>
+                    <td className="p-3 text-slate-400 max-w-xs truncate" title={srv.instructions}>{srv.instructions}</td>
+                    <td className="p-3 text-left">
+                      <div className="inline-flex gap-1">
+                        <button
+                          onClick={() => handleOpenEdit(srv)}
+                          className="p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-900 rounded-lg transition-colors"
+                          title="تعديل الخدمة"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteService(srv.id)}
+                          className="p-1.5 text-rose-500 hover:bg-rose-50 hover:text-rose-700 rounded-lg transition-colors"
+                          title="حذف من الكتالوج"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  );
+}

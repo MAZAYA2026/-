@@ -1,0 +1,38 @@
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", "Cairo", ui-sans-serif, system-ui, sans-serif;
+  --font-cairo: "Cairo", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+}
+
+/* Custom CSS styles for print layouts */
+@media print {
+  body {
+    background-color: white !important;
+    color: black !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+  .print-a4 {
+    width: 210mm !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 15mm !important;
+    box-shadow: none !important;
+    font-family: 'Cairo', sans-serif !important;
+  }
+  /* Page break styling */
+  .page-break {
+    page-break-after: always;
+  }
+}
+
+.print-only {
+  display: none;
+}
