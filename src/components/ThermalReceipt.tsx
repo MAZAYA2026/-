@@ -99,7 +99,11 @@ export default function ThermalReceipt({ invoice, settings, services, onClose }:
               <div className="font-bold text-sm leading-tight whitespace-pre-line mb-1">
                 {settings.headerText || "مكتب مزايا للجوازات"}
               </div>
-              <div className="text-[10px] text-slate-500">جوازات طنطا والمعاملات الحكومية</div>
+              {(settings.subHeaderText !== undefined ? settings.subHeaderText : "جوازات طنطا والمعاملات الحكومية") && (
+                <div className="text-[10px] text-slate-500">
+                  {settings.subHeaderText !== undefined ? settings.subHeaderText : "جوازات طنطا والمعاملات الحكومية"}
+                </div>
+              )}
             </div>
 
             <div className="border-t border-dashed border-slate-400 my-2"></div>

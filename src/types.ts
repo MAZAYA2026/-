@@ -76,6 +76,7 @@ export interface Employee {
 
 export interface AppSettings {
   headerText: string; // نص مقدمة الفاتورة
+  subHeaderText?: string; // السطر الفرعي أسفل ترويسة الفاتورة المطبوعة (مثل: جوازات طنطا والمعاملات الحكومية)
   footerText: string; // خاتمة الفاتورة
   welcomeMessage: string; // رسالة ترحيب
   readyMessage: string; // رسالة جاهز للتسليم

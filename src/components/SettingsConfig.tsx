@@ -50,6 +50,7 @@ interface SettingsConfigProps {
 
 export default function SettingsConfig({ settings, activeEmployee, onSettingsUpdated, employees, onEmployeesUpdated }: SettingsConfigProps) {
   const [headerText, setHeaderText] = useState(settings.headerText || "مكتب مزايا للجوازات والمعاملات");
+  const [subHeaderText, setSubHeaderText] = useState(settings.subHeaderText ?? "جوازات طنطا والمعاملات الحكومية");
   const [welcomeMessage, setWelcomeMessage] = useState(settings.welcomeMessage || "");
   const [whatsappTemplate, setWhatsappTemplate] = useState(settings.whatsappTemplate || "");
   const [readyMessage, setReadyMessage] = useState(settings.readyMessage || "");
@@ -384,6 +385,7 @@ function getOrCreateSheet(ss, name) {
   useEffect(() => {
     if (settings) {
       setHeaderText(settings.headerText || "مكتب مزايا للجوازات والمعاملات");
+      setSubHeaderText(settings.subHeaderText ?? "جوازات طنطا والمعاملات الحكومية");
       setWelcomeMessage(settings.welcomeMessage || "");
       setWhatsappTemplate(settings.whatsappTemplate || "");
       setReadyMessage(settings.readyMessage || "");
@@ -574,6 +576,7 @@ function getOrCreateSheet(ss, name) {
     try {
       const payload: AppSettings = {
         headerText: headerText.trim(),
+        subHeaderText: subHeaderText.trim(),
         welcomeMessage: welcomeMessage.trim(),
         whatsappTemplate: whatsappTemplate.trim(),
         readyMessage: readyMessage.trim(),
@@ -640,6 +643,20 @@ function getOrCreateSheet(ss, name) {
                 required
               />
             </div>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-bold text-slate-700 block">السطر الفرعي في ترويسة الفاتورة المطبوعة:</label>
+            <input 
+              type="text" 
+              value={subHeaderText}
+              onChange={(e) => setSubHeaderText(e.target.value)}
+              placeholder="e.g. جوازات طنطا والمعاملات الحكومية"
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs"
+            />
+            <p className="text-[10px] text-slate-400">
+              النص الذي يظهر مباشرة أسفل اسم المكتب في إيصال الطباعة الحرارية (افتراضياً: جوازات طنطا والمعاملات الحكومية)
+            </p>
           </div>
 
           <div className="space-y-1">
