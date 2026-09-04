@@ -203,3 +203,44 @@ export async function pullDataFromGoogleSheets(accessToken: string): Promise<any
   }
   return response.json();
 }
+
+// Direct Webhook (Google Apps Script Web App URL) API Helpers
+export async function testGoogleWebhook(webhookUrl: string): Promise<any> {
+  const response = await fetch("/api/sheets/webhook/test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ webhookUrl }),
+  });
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || "فشل اختبار الاتصال بالرابط");
+  }
+  return response.json();
+}
+
+export async function pushDataToGoogleWebhook(webhookUrl?: string): Promise<any> {
+  const response = await fetch("/api/sheets/webhook/push", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ webhookUrl }),
+  });
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || "فشل تصدير البيانات إلى رابط السكربت");
+  }
+  return response.json();
+}
+
+export async function pullDataFromGoogleWebhook(webhookUrl?: string): Promise<any> {
+  const response = await fetch("/api/sheets/webhook/pull", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ webhookUrl }),
+  });
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || "فشل استيراد البيانات من رابط السكربت");
+  }
+  return response.json();
+}
+

@@ -189,9 +189,11 @@ const initialData = {
     readyMessage: "عزيزنا {اسم_العميل}، نفيدكم علماً بأن أوراقكم الخاصة بالفاتورة رقم {رقم_الفاتورة} جاهزة للتسليم الآن.\nالخدمات: {الخدمات}\nمكان الحفظ: درج رقم ({رقم_الارشيف})\nبرجاء التوجه للمكتب للاستلام مع إحضار الفاتورة الحرارية.",
     deliveryMessage: "تم تسليم جواز السفر والأوراق الخاصة بك بنجاح يا {اسم_العميل}.\nرقم الفاتورة: {رقم_الفاتورة}\nنسعد بتقييمكم لخدمات مكتب مزايا للجوازات ونراكم قريباً في معاملات أخرى.",
     whatsappTemplate: "مكتب مزايا للجوازات\n\nالعميل: {اسم_العميل}\n{الاسم_الانجليزي}\n{المهنة}\nالخدمات:\n{الخدمات}\n\nالإجمالي: {السعر} جنيه.\n\n{رسالة_الشكر}",
+    googleSheetWebhookUrl: "https://script.google.com/macros/s/AKfycbz6j-7b_lwkN7wy2nkeIFcbx2rRw19yjTTAxtWVmt6CoualXSXno0UvIuDfpxcrJ15j/exec",
+    autoSyncWebhook: true,
     googleSheetId: "",
     googleSheetUrl: "",
-    googleSheetsConnected: false
+    googleSheetsConnected: true
   }
 };
 
@@ -358,6 +360,7 @@ app.post("/api/db/invoices", (req, res) => {
 
   db.invoices.push(newInvoice);
   writeDB(db);
+  triggerBackgroundWebhookSync(db);
 
   res.json({ status: "success", invoice: newInvoice });
 });
@@ -380,6 +383,7 @@ app.put("/api/db/invoices/:id", (req, res) => {
   };
   
   writeDB(db);
+  triggerBackgroundWebhookSync(db);
   res.json({ status: "success", invoice: db.invoices[index] });
 });
 
@@ -395,6 +399,7 @@ app.delete("/api/db/invoices/:id", (req, res) => {
 
   db.invoices = filtered;
   writeDB(db);
+  triggerBackgroundWebhookSync(db);
   res.json({ status: "success", message: "Invoice deleted" });
 });
 
@@ -405,6 +410,7 @@ app.post("/api/db/services", (req, res) => {
   service.id = "srv-" + Date.now();
   db.services.push(service);
   writeDB(db);
+  triggerBackgroundWebhookSync(db);
   res.json({ status: "success", service });
 });
 
@@ -420,6 +426,7 @@ app.put("/api/db/services/:id", (req, res) => {
 
   db.services[index] = { ...db.services[index], ...updatedService, id };
   writeDB(db);
+  triggerBackgroundWebhookSync(db);
   res.json({ status: "success", service: db.services[index] });
 });
 
@@ -428,6 +435,7 @@ app.delete("/api/db/services/:id", (req, res) => {
   const db = readDB();
   db.services = db.services.filter((srv: any) => srv.id !== id);
   writeDB(db);
+  triggerBackgroundWebhookSync(db);
   res.json({ status: "success", message: "Service deleted" });
 });
 
@@ -439,6 +447,7 @@ app.post("/api/db/closings", (req, res) => {
   closing.closeDate = new Date().toISOString().split("T")[0];
   db.collectionClosings.push(closing);
   writeDB(db);
+  triggerBackgroundWebhookSync(db);
   res.json({ status: "success", closing });
 });
 
@@ -899,6 +908,141 @@ app.post("/api/sheets/pull", async (req, res) => {
   }
 });
 
+// Google Apps Script Webhook Helpers & Endpoints
+async function pushToGoogleWebhook(webhookUrl: string, db: any) {
+  try {
+    const response = await fetch(webhookUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        action: "push",
+        db: db,
+      }),
+      redirect: "follow",
+    });
+    const result = await response.json().catch(() => ({ status: "success", message: "تم إرسال البيانات بنجاح" }));
+    return result;
+  } catch (err: any) {
+    console.error("Webhook push error:", err);
+    throw new Error(err.message || "تعذر إرسال البيانات إلى رابط السكربت");
+  }
+}
+
+async function pullFromGoogleWebhook(webhookUrl: string) {
+  try {
+    const response = await fetch(webhookUrl, {
+      method: "GET",
+      redirect: "follow",
+    });
+    const result = await response.json();
+    if (!result || !result.db) {
+      throw new Error("لم يتم العثور على حقل البيانات db في استجابة السكربت.");
+    }
+    return result.db;
+  } catch (err: any) {
+    console.error("Webhook pull error:", err);
+    throw new Error(err.message || "تعذر سحب البيانات من رابط السكربت");
+  }
+}
+
+// Background auto sync trigger
+function triggerBackgroundWebhookSync(db: any) {
+  const webhookUrl = db.settings?.googleSheetWebhookUrl;
+  const autoSync = db.settings?.autoSyncWebhook;
+  if (webhookUrl && autoSync) {
+    pushToGoogleWebhook(webhookUrl, db).catch((err) => {
+      console.warn("Background Webhook sync deferred:", err.message);
+    });
+  }
+}
+
+// Webhook test connection endpoint
+app.post("/api/sheets/webhook/test", async (req, res) => {
+  const { webhookUrl } = req.body;
+  if (!webhookUrl || !webhookUrl.startsWith("http")) {
+    return res.status(400).json({ error: "الرجاء إدخال رابط سكربت صالح يبدأ بـ https://" });
+  }
+
+  try {
+    const testResponse = await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "test" }),
+      redirect: "follow",
+    });
+
+    const data = await testResponse.json().catch(() => ({ status: "success" }));
+    res.json({
+      status: "success",
+      message: data.message || "تم اختبار الاتصال بالسكربت بنجاح والملف يستجيب! 📊",
+      data,
+    });
+  } catch (err: any) {
+    console.error("Webhook test failed:", err);
+    res.status(500).json({ error: "فشل اختبار الاتصال بالرابط: " + err.message });
+  }
+});
+
+// Webhook Push DB Endpoint
+app.post("/api/sheets/webhook/push", async (req, res) => {
+  const { webhookUrl } = req.body;
+  const db = readDB();
+  const targetUrl = webhookUrl || db.settings.googleSheetWebhookUrl;
+
+  if (!targetUrl || !targetUrl.startsWith("http")) {
+    return res.status(400).json({ error: "الرجاء إدخال رابط سكربت Webhook صالح أولاً." });
+  }
+
+  try {
+    const result = await pushToGoogleWebhook(targetUrl, db);
+    res.json({
+      status: "success",
+      message: result.message || "تم تصدير وحفظ كامل البيانات في جوجل شيت بنجاح! 🚀",
+      result,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: "فشل تصدير البيانات إلى السكربت: " + err.message });
+  }
+});
+
+// Webhook Pull DB Endpoint
+app.post("/api/sheets/webhook/pull", async (req, res) => {
+  const { webhookUrl } = req.body;
+  const db = readDB();
+  const targetUrl = webhookUrl || db.settings.googleSheetWebhookUrl;
+
+  if (!targetUrl || !targetUrl.startsWith("http")) {
+    return res.status(400).json({ error: "الرجاء إدخال رابط سكربت Webhook صالح أولاً." });
+  }
+
+  try {
+    const pulledDB = await pullFromGoogleWebhook(targetUrl);
+    
+    // Retain webhook configuration
+    pulledDB.settings = {
+      ...pulledDB.settings,
+      googleSheetWebhookUrl: targetUrl,
+      autoSyncWebhook: db.settings.autoSyncWebhook ?? true,
+      googleSheetId: db.settings.googleSheetId,
+      googleSheetUrl: db.settings.googleSheetUrl,
+      googleSheetsConnected: true,
+    };
+
+    // Save to local file
+    writeDB(pulledDB);
+
+    res.json({
+      status: "success",
+      message: "تم استيراد كافة البيانات بنجاح من جوجل شيت واعتمادها كقاعدة بيانات نشطة! 📥",
+      db: pulledDB,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: "فشل استيراد البيانات من السكربت: " + err.message });
+  }
+});
+
 app.post("/api/sheets/sync", (req, res) => {
   const { sheetUrl, sheetId } = req.body;
   const db = readDB();
@@ -919,6 +1063,7 @@ app.post("/api/db/settings", (req, res) => {
   const db = readDB();
   db.settings = { ...db.settings, ...newSettings };
   writeDB(db);
+  triggerBackgroundWebhookSync(db);
   res.json({ status: "success", settings: db.settings });
 });
 

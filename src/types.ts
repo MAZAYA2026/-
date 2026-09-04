@@ -81,7 +81,9 @@ export interface AppSettings {
   readyMessage: string; // رسالة جاهز للتسليم
   deliveryMessage: string; // رسالة تم التسليم
   whatsappTemplate: string; // General template
-  googleSheetId: string; // Spreadsheet ID for database integration
-  googleSheetUrl: string; // URL for direct access
-  googleSheetsConnected: boolean; // Integration toggle
+  googleSheetWebhookUrl?: string; // Web App Webhook URL (https://script.google.com/macros/s/.../exec)
+  autoSyncWebhook?: boolean; // Automatic background sync on invoice create/edit
+  googleSheetId?: string; // Spreadsheet ID for database integration
+  googleSheetUrl?: string; // URL for direct access
+  googleSheetsConnected?: boolean; // Integration toggle
 }

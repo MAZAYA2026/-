@@ -1,8 +1,44 @@
 import React, { useState, useEffect } from "react";
 import { AppSettings, Employee } from "../types";
-import { updateSettingsOnServer, connectGoogleSheetsOnServer, pushDataToGoogleSheets, pullDataFromGoogleSheets } from "../lib/api";
+import { 
+  updateSettingsOnServer, 
+  connectGoogleSheetsOnServer, 
+  pushDataToGoogleSheets, 
+  pullDataFromGoogleSheets,
+  testGoogleWebhook,
+  pushDataToGoogleWebhook,
+  pullDataFromGoogleWebhook,
+  fetchDB,
+  saveDB
+} from "../lib/api";
 import { googleSignIn, logoutGoogle, getAccessToken } from "../lib/firebaseAuth";
-import { Save, ShieldCheck, MessageCircle, FileText, Settings, Globe, HelpCircle, AlertCircle, Lock, Unlock, Users, CloudRain, CheckCircle, RefreshCw, LogIn, LogOut, ExternalLink } from "lucide-react";
+import { 
+  Save, 
+  ShieldCheck, 
+  MessageCircle, 
+  FileText, 
+  Settings, 
+  Globe, 
+  HelpCircle, 
+  AlertCircle, 
+  Lock, 
+  Unlock, 
+  Users, 
+  CloudRain, 
+  CheckCircle, 
+  RefreshCw, 
+  LogIn, 
+  LogOut, 
+  ExternalLink,
+  Link as LinkIcon,
+  Code,
+  Copy,
+  Download,
+  Upload,
+  Zap,
+  Check,
+  Radio
+} from "lucide-react";
 
 interface SettingsConfigProps {
   settings: AppSettings;
@@ -19,15 +55,346 @@ export default function SettingsConfig({ settings, activeEmployee, onSettingsUpd
   const [readyMessage, setReadyMessage] = useState(settings.readyMessage || "");
   const [deliveryMessage, setDeliveryMessage] = useState(settings.deliveryMessage || "");
   const [googleSheetId, setGoogleSheetId] = useState(settings.googleSheetId || "");
+  const [googleSheetUrl, setGoogleSheetUrl] = useState(settings.googleSheetUrl || "");
+  const [googleSheetWebhookUrl, setGoogleSheetWebhookUrl] = useState(settings.googleSheetWebhookUrl || "");
+  const [autoSyncWebhook, setAutoSyncWebhook] = useState(settings.autoSyncWebhook ?? true);
   const [footerText, setFooterText] = useState(settings.footerText || "يسعدنا دائماً خدمتكم وثقتكم بنا");
 
   const [saving, setSaving] = useState(false);
+  const [syncMethod, setSyncMethod] = useState<"webhook" | "oauth">("webhook");
+  const [showScriptGuide, setShowScriptGuide] = useState(false);
+  const [copiedScript, setCopiedScript] = useState(false);
 
   // Google Sheets Integration States
   const [googleToken, setGoogleToken] = useState<string | null>(getAccessToken());
   const [isGoogleConnected, setIsGoogleConnected] = useState<boolean>(!!getAccessToken());
   const [syncLoading, setSyncLoading] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
+
+  // Script code to copy
+  const appsScriptCode = `// سكربت الربط التلقائي لقاعدة بيانات مزايا مع جوجل شيت
+function doPost(e) {
+  try {
+    var contents = JSON.parse(e.postData.contents);
+    var action = contents.action || "push";
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+    if (action === "test") {
+      return ContentService.createTextOutput(JSON.stringify({ status: "success", message: "تم الاتصال بنجاح بملف جوجل شيت! 📊" }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (action === "push" || action === "sync") {
+      var db = contents.db || contents;
+      
+      // 1. Invoices Sheet
+      if (db.invoices && Array.isArray(db.invoices)) {
+        var invSheet = getOrCreateSheet(ss, "Invoices");
+        invSheet.clearContents();
+        var invRows = [["رقم الفاتورة", "التاريخ", "الحالة", "الموظف", "رقم الدرج", "إجمالي حكومي", "إجمالي مكتب", "المبلغ الكلي", "بيانات العملاء والخدمات"]];
+        for (var i = 0; i < db.invoices.length; i++) {
+          var inv = db.invoices[i];
+          invRows.push([
+            inv.invoiceId || "",
+            inv.date || "",
+            inv.status || "",
+            inv.employeeName || "",
+            inv.archiveDrawer || "",
+            inv.totalGov || 0,
+            inv.totalOffice || 0,
+            inv.totalAmount || 0,
+            JSON.stringify(inv.customers || [])
+          ]);
+        }
+        if (invRows.length > 0) {
+          invSheet.getRange(1, 1, invRows.length, invRows[0].length).setValues(invRows);
+        }
+      }
+
+      // 2. Services Sheet
+      if (db.services && Array.isArray(db.services)) {
+        var srvSheet = getOrCreateSheet(ss, "Services");
+        srvSheet.clearContents();
+        var srvRows = [["المعرف", "اسم الخدمة", "السعر الحكومي", "رسوم المكتب", "مدة التنفيذ", "تعليمات التسليم", "إزاحة أيام التسليم", "ملاحظات"]];
+        for (var s = 0; s < db.services.length; s++) {
+          var srv = db.services[s];
+          srvRows.push([
+            srv.id || "",
+            srv.name || "",
+            srv.govPrice || 0,
+            srv.officeFee || 0,
+            srv.duration || "",
+            srv.instructions || "",
+            srv.deliveryDaysOffset || 0,
+            srv.notes || ""
+          ]);
+        }
+        if (srvRows.length > 0) {
+          srvSheet.getRange(1, 1, srvRows.length, srvRows[0].length).setValues(srvRows);
+        }
+      }
+
+      // 3. CollectionClosings Sheet
+      if (db.collectionClosings && Array.isArray(db.collectionClosings)) {
+        var clsSheet = getOrCreateSheet(ss, "CollectionClosings");
+        clsSheet.clearContents();
+        var clsRows = [["المعرف", "تاريخ الإغلاق", "تم الإغلاق بواسطة", "الإيراد", "الربح", "النقدي", "الآجل", "ملاحظات"]];
+        for (var c = 0; c < db.collectionClosings.length; c++) {
+          var cls = db.collectionClosings[c];
+          clsRows.push([
+            cls.id || "",
+            cls.closeDate || "",
+            cls.closedBy || "",
+            cls.revenue || 0,
+            cls.profit || 0,
+            cls.cashAmount || 0,
+            cls.deferredAmount || 0,
+            cls.notes || ""
+          ]);
+        }
+        if (clsRows.length > 0) {
+          clsSheet.getRange(1, 1, clsRows.length, clsRows[0].length).setValues(clsRows);
+        }
+      }
+
+      return ContentService.createTextOutput(JSON.stringify({ status: "success", message: "تم تحديث وحفظ البيانات في جوجل شيت بنجاح! 🚀" }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    return ContentService.createTextOutput(JSON.stringify({ error: "Unknown action" }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ error: err.toString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function doGet(e) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var db = {
+      settings: {},
+      services: [],
+      invoices: [],
+      collectionClosings: [],
+      dictionary: []
+    };
+
+    // Read Services
+    var srvSheet = ss.getSheetByName("Services");
+    if (srvSheet) {
+      var srvValues = srvSheet.getDataRange().getValues();
+      for (var s = 1; s < srvValues.length; s++) {
+        var row = srvValues[s];
+        if (row[0] && row[1]) {
+          db.services.push({
+            id: String(row[0]),
+            name: String(row[1]),
+            govPrice: Number(row[2]) || 0,
+            officeFee: Number(row[3]) || 0,
+            duration: String(row[4] || ""),
+            instructions: String(row[5] || ""),
+            deliveryDaysOffset: Number(row[6]) || 0,
+            notes: String(row[7] || "")
+          });
+        }
+      }
+    }
+
+    // Read Invoices
+    var invSheet = ss.getSheetByName("Invoices");
+    if (invSheet) {
+      var invValues = invSheet.getDataRange().getValues();
+      for (var v = 1; v < invValues.length; v++) {
+        var iRow = invValues[v];
+        if (iRow[0]) {
+          var custData = [];
+          try {
+            custData = iRow[8] ? JSON.parse(iRow[8]) : [];
+          } catch(e){}
+          db.invoices.push({
+            invoiceId: Number(iRow[0]),
+            date: String(iRow[1] || ""),
+            status: String(iRow[2] || "NEW"),
+            employeeName: String(iRow[3] || ""),
+            archiveDrawer: String(iRow[4] || ""),
+            totalGov: Number(iRow[5]) || 0,
+            totalOffice: Number(iRow[6]) || 0,
+            totalAmount: Number(iRow[7]) || 0,
+            customers: custData
+          });
+        }
+      }
+    }
+
+    // Read CollectionClosings
+    var clsSheet = ss.getSheetByName("CollectionClosings");
+    if (clsSheet) {
+      var clsValues = clsSheet.getDataRange().getValues();
+      for (var c = 1; c < clsValues.length; c++) {
+        var cRow = clsValues[c];
+        if (cRow[0]) {
+          db.collectionClosings.push({
+            id: String(cRow[0]),
+            closeDate: String(cRow[1] || ""),
+            closedBy: String(cRow[2] || ""),
+            revenue: Number(cRow[3]) || 0,
+            profit: Number(cRow[4]) || 0,
+            cashAmount: Number(cRow[5]) || 0,
+            deferredAmount: Number(cRow[6]) || 0,
+            notes: String(cRow[7] || "")
+          });
+        }
+      }
+    }
+
+    return ContentService.createTextOutput(JSON.stringify({ status: "success", db: db }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ error: err.toString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function getOrCreateSheet(ss, name) {
+  var sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    sheet = ss.insertSheet(name);
+  }
+  return sheet;
+}`;
+
+  const handleCopyScript = () => {
+    navigator.clipboard.writeText(appsScriptCode);
+    setCopiedScript(true);
+    setTimeout(() => setCopiedScript(false), 3000);
+  };
+
+  const handleTestWebhook = async () => {
+    if (!googleSheetWebhookUrl.trim()) {
+      alert("الرجاء إدخال رابط سكربت الويب (Web App URL) أولاً.");
+      return;
+    }
+    setSyncLoading(true);
+    setSyncMessage("جاري اختبار الاتصال برابط السكربت...");
+    try {
+      const res = await testGoogleWebhook(googleSheetWebhookUrl.trim());
+      setSyncMessage(res.message || "تم الاتصال بنجاح برابط جوجل شيت! 📊");
+      alert("تم اختبار الاتصال بالرابط بنجاح! السكربت يستجيب وجاهز لحفظ البيانات دون الحاجة لتسجيل دخول 🚀");
+    } catch (err: any) {
+      console.error(err);
+      setSyncMessage(`فشل الاتصال: ${err.message}`);
+      alert(`فشل اختبار الاتصال بالرابط: ${err.message}\nتأكد من نشر السكربت واختيار Who has access: Anyone.`);
+    } finally {
+      setSyncLoading(false);
+    }
+  };
+
+  const handlePushWebhook = async () => {
+    if (!googleSheetWebhookUrl.trim()) {
+      alert("الرجاء إدخال رابط سكربت الويب أولاً.");
+      return;
+    }
+    const confirmPush = window.confirm("هل ترغب في رفع وتصدير كامل البيانات المحلية (الفواتير، الخدمات، التحصيلات) إلى جوجل شيت الآن؟");
+    if (!confirmPush) return;
+
+    setSyncLoading(true);
+    setSyncMessage("جاري تصدير ونقل كافة البيانات إلى جوجل شيت...");
+    try {
+      const res = await pushDataToGoogleWebhook(googleSheetWebhookUrl.trim());
+      setSyncMessage(res.message || "تم تصدير البيانات بنجاح!");
+      alert("تم تصدير وحفظ كامل البيانات في جوجل شيت بنجاح! 🚀");
+    } catch (err: any) {
+      console.error(err);
+      setSyncMessage(`فشل التصدير: ${err.message}`);
+      alert(`فشل التصدير: ${err.message}`);
+    } finally {
+      setSyncLoading(false);
+    }
+  };
+
+  const handlePullWebhook = async () => {
+    if (!googleSheetWebhookUrl.trim()) {
+      alert("الرجاء إدخال رابط سكربت الويب أولاً.");
+      return;
+    }
+    const confirmPull = window.confirm("تحذير: هل أنت متأكد من رغبتك في استيراد البيانات من جوجل شيت؟ سيتم تحديث قاعدة البيانات المحلية بالبيانات الواردة من شيت.");
+    if (!confirmPull) return;
+
+    setSyncLoading(true);
+    setSyncMessage("جاري سحب واستيراد البيانات من جوجل شيت...");
+    try {
+      const res = await pullDataFromGoogleWebhook(googleSheetWebhookUrl.trim());
+      onSettingsUpdated(res.db.settings);
+      setSyncMessage(res.message || "تم استيراد البيانات بنجاح!");
+      alert("تم استيراد كافة البيانات بنجاح من جوجل شيت! 📥 يرجى إعادة تحميل الصفحة لتحديث العرض.");
+      window.location.reload();
+    } catch (err: any) {
+      console.error(err);
+      setSyncMessage(`فشل الاستيراد: ${err.message}`);
+      alert(`فشل الاستيراد: ${err.message}`);
+    } finally {
+      setSyncLoading(false);
+    }
+  };
+
+  // Local Offline Backup (Export/Import JSON)
+  const handleExportJsonBackup = async () => {
+    try {
+      const fullDB = await fetchDB();
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(fullDB, null, 2));
+      const downloadAnchor = document.createElement("a");
+      const dateStr = new Date().toISOString().split("T")[0];
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", `mazaya_database_backup_${dateStr}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+    } catch (err: any) {
+      alert("حدث خطأ أثناء تصدير النسخة الاحتياطية: " + err.message);
+    }
+  };
+
+  const handleImportJsonBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const text = event.target?.result as string;
+        const parsed = JSON.parse(text);
+        if (!parsed.invoices || !parsed.services) {
+          alert("الملف غير صالح أو لا يحتوي على بنية بيانات نظام مزايا الصحيحة.");
+          return;
+        }
+        const confirmRestore = window.confirm("هل أنت متأكد من استعادة هذه النسخة الاحتياطية؟ سيتم استبدال البيانات الحالية بالبيانات الموجودة في الملف.");
+        if (!confirmRestore) return;
+
+        await saveDB(parsed);
+        alert("تم استعادة النسخة الاحتياطية بنجاح! 🎉 سيتم إعادة تحميل الصفحة الآن.");
+        window.location.reload();
+      } catch (err: any) {
+        alert("خطأ في قراءة ملف النسخة الاحتياطية: " + err.message);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  useEffect(() => {
+    if (settings) {
+      setHeaderText(settings.headerText || "مكتب مزايا للجوازات والمعاملات");
+      setWelcomeMessage(settings.welcomeMessage || "");
+      setWhatsappTemplate(settings.whatsappTemplate || "");
+      setReadyMessage(settings.readyMessage || "");
+      setDeliveryMessage(settings.deliveryMessage || "");
+      setGoogleSheetId(settings.googleSheetId || "");
+      setGoogleSheetUrl(settings.googleSheetUrl || "");
+      setGoogleSheetWebhookUrl(settings.googleSheetWebhookUrl || "");
+      setAutoSyncWebhook(settings.autoSyncWebhook ?? true);
+      setFooterText(settings.footerText || "يسعدنا دائماً خدمتكم وثقتكم بنا");
+    }
+  }, [settings]);
 
   useEffect(() => {
     const tok = getAccessToken();
@@ -212,14 +579,16 @@ export default function SettingsConfig({ settings, activeEmployee, onSettingsUpd
         readyMessage: readyMessage.trim(),
         deliveryMessage: deliveryMessage.trim(),
         googleSheetId: googleSheetId.trim(),
+        googleSheetUrl: googleSheetUrl.trim(),
+        googleSheetWebhookUrl: googleSheetWebhookUrl.trim(),
+        autoSyncWebhook: autoSyncWebhook,
         footerText: footerText.trim(),
-        googleSheetUrl: settings.googleSheetUrl || "",
-        googleSheetsConnected: settings.googleSheetsConnected || false
+        googleSheetsConnected: !!(googleSheetWebhookUrl.trim() || googleSheetId.trim() || settings.googleSheetsConnected)
       };
 
       const result = await updateSettingsOnServer(payload);
       onSettingsUpdated(result);
-      alert("تم حفظ إعدادات النظام وتحديث القوالب الرسمية بالخادم.");
+      alert("تم حفظ إعدادات النظام وتحديث قنوات الربط الرقمي والقوالب بنجاح! 💾");
     } catch (err) {
       console.error(err);
       alert("حدث خطأ أثناء حفظ الإعدادات بالخادم.");
@@ -343,147 +712,335 @@ export default function SettingsConfig({ settings, activeEmployee, onSettingsUpd
 
         {/* Google Sheets Synchronization Card */}
         <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-5">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-            <h3 className="font-extrabold text-sm text-slate-800 flex items-center gap-1.5">
-              <Globe className="w-5 h-5 text-emerald-500" />
-              ربط ومزامنة قاعدة البيانات بجوجل شيت (Google Sheets API):
-            </h3>
-            {isGoogleConnected ? (
-              <span className="bg-emerald-50 text-emerald-700 text-[10px] px-2.5 py-1 rounded-full font-bold flex items-center gap-1 animate-pulse">
-                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>
-                حساب Google متصل
-              </span>
-            ) : (
-              <span className="bg-amber-50 text-amber-700 text-[10px] px-2.5 py-1 rounded-full font-bold">
-                غير متصل بجوجل شيت
-              </span>
-            )}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+            <div>
+              <h3 className="font-extrabold text-sm text-slate-800 flex items-center gap-1.5">
+                <Globe className="w-5 h-5 text-emerald-500" />
+                ربط ومزامنة قاعدة البيانات بجوجل شيت (Google Sheets):
+              </h3>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                اختر طريقة الربط المناسبة لحفظ البيانات واسترجاعها تلقائياً بدون انقطاع
+              </p>
+            </div>
+            
+            {/* Method Tabs */}
+            <div className="flex items-center bg-slate-100 p-1 rounded-xl text-xs">
+              <button
+                type="button"
+                onClick={() => setSyncMethod("webhook")}
+                className={`px-3 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
+                  syncMethod === "webhook" 
+                    ? "bg-white text-emerald-700 shadow-xs" 
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                <Zap className="w-3.5 h-3.5 text-amber-500" />
+                رابط سكربت مباشر (موصى به)
+              </button>
+              <button
+                type="button"
+                onClick={() => setSyncMethod("oauth")}
+                className={`px-3 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
+                  syncMethod === "oauth" 
+                    ? "bg-white text-blue-700 shadow-xs" 
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                <Globe className="w-3.5 h-3.5 text-blue-500" />
+                حساب Google (OAuth)
+              </button>
+            </div>
           </div>
 
-          <div className="space-y-4 text-xs">
-            <p className="text-slate-500 text-[11px] leading-relaxed">
-              يمكنك ربط تطبيق مزايا بشكل كامل بملف <strong>Google Sheets</strong> خاص بك على Google Drive ليقوم بدور قاعدة البيانات الحية. سيتم حفظ وتخزين كافة المعلمات والعمليات (الفواتير)، الخدمات، وقائمة الكلمات المترجمة والتحصيلات في تبويبات مخصصة بالملف.
-            </p>
-
-            {/* Auth State Panel */}
-            {!isGoogleConnected ? (
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 text-center space-y-3">
-                <p className="text-slate-600 font-medium text-[11px]">
-                  للبدء في الاعتماد على جوجل شيت، يرجى تسجيل الدخول بحساب Google الخاص بك لتفويض التطبيق:
-                </p>
-                <div className="flex justify-center">
-                  <button
-                    type="button"
-                    onClick={handleGoogleLogin}
-                    disabled={syncLoading}
-                    className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-250 hover:bg-slate-50 text-slate-700 font-bold rounded-lg shadow-sm transition-all cursor-pointer text-xs"
-                  >
-                    <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="w-4.5 h-4.5">
-                      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
-                      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
-                      <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
-                      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
-                    </svg>
-                    ربط التطبيق بحساب Google 🔗
-                  </button>
+          {/* METHOD 1: DIRECT APPS SCRIPT WEBHOOK URL (Recommended, Never disconnects) */}
+          {syncMethod === "webhook" && (
+            <div className="space-y-4 text-xs">
+              <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-4 space-y-2">
+                <div className="flex items-center gap-2 text-emerald-800 font-bold text-xs">
+                  <CheckCircle className="w-4 h-4 text-emerald-600" />
+                  <span>الربط المباشر عبر رابط السكربت (Webhook Link) - دائم ومستقر ولا يفصل:</span>
                 </div>
+                <p className="text-emerald-700 text-[11px] leading-relaxed">
+                  هذه الطريقة تتيح ربط البرنامج بملف جوجل شيت عبر رابط ويب خاص بالملف مباشرة، 
+                  <strong> دون الحاجة لتسجيل دخول أو تجديد جلسات</strong>، ويعمل الحفظ محلياً أولاً ثم يزامن تلقائياً مع الشيت في الخلفية حتى لا يتوقف العمل عند بطء أو انقطاع الإنترنت.
+                </p>
               </div>
-            ) : (
-              <div className="bg-emerald-50/50 border border-emerald-100 rounded-xl p-4 space-y-4">
-                <div className="flex items-center justify-between text-xs text-emerald-800">
-                  <span className="font-bold flex items-center gap-1">
-                    <CheckCircle className="w-4 h-4 text-emerald-600" />
-                    تم تسجيل الدخول بنجاح!
+
+              {/* Webhook URL Input */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <LinkIcon className="w-3.5 h-3.5 text-emerald-600" />
+                    رابط سكربت الويب (Google Apps Script Web App URL):
                   </span>
                   <button
                     type="button"
-                    onClick={handleGoogleLogout}
-                    className="text-[10px] text-red-600 hover:text-red-800 font-bold flex items-center gap-0.5 cursor-pointer"
+                    onClick={() => setShowScriptGuide(!showScriptGuide)}
+                    className="text-[11px] text-emerald-600 hover:text-emerald-800 font-bold flex items-center gap-1 cursor-pointer"
                   >
-                    <LogOut className="w-3.5 h-3.5" />
-                    قطع الاتصال 🔴
+                    <Code className="w-3.5 h-3.5" />
+                    {showScriptGuide ? "إخفاء كود السكربت" : "عرض ونسخ كود السكربت وطريقة تركيبه 📋"}
+                  </button>
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="url"
+                    value={googleSheetWebhookUrl}
+                    onChange={(e) => setGoogleSheetWebhookUrl(e.target.value)}
+                    placeholder="https://script.google.com/macros/s/AKfycbx.../exec"
+                    className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono text-left dir-ltr"
+                  />
+                  <button
+                    type="button"
+                    disabled={syncLoading || !googleSheetWebhookUrl.trim()}
+                    onClick={handleTestWebhook}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${syncLoading ? "animate-spin" : ""}`} />
+                    اختبار الرابط
                   </button>
                 </div>
+              </div>
 
-                {/* Google Spreadsheet Sync Actions */}
-                <div className="grid md:grid-cols-2 gap-4 pt-1">
-                  {/* Column A: Setup/Create */}
-                  <div className="bg-white p-3 border border-slate-200 rounded-lg space-y-2.5">
-                    <span className="font-extrabold text-[11px] text-slate-700 block">1. إعداد وتوصيل الملف:</span>
-                    <p className="text-[10px] text-slate-400">
-                      سيقوم التطبيق بالبحث عن ملفك الخاص أو إنشاء ملف آمن جديد بالكامل في Google Drive مهيأ بالكامل.
-                    </p>
+              {/* Standard Google Sheet Spreadsheet URL (For viewing) */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <ExternalLink className="w-3.5 h-3.5 text-slate-500" />
+                    رابط مستند جوجل شيت العادي (لفتحه مباشرة من البرنامج):
+                  </span>
+                  {googleSheetUrl && (
+                    <a
+                      href={googleSheetUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[10px] text-emerald-600 hover:text-emerald-800 font-bold flex items-center gap-0.5"
+                    >
+                      فتح ملف جوجل شيت 🌐
+                    </a>
+                  )}
+                </label>
+                <input
+                  type="url"
+                  value={googleSheetUrl}
+                  onChange={(e) => setGoogleSheetUrl(e.target.value)}
+                  placeholder="https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono text-left dir-ltr"
+                />
+              </div>
+
+              {/* Auto Sync Toggle */}
+              <div className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                <div>
+                  <span className="font-bold text-slate-800 block text-xs">المزامنة التلقائية اللحظية في الخلفية:</span>
+                  <span className="text-[10px] text-slate-500 block mt-0.5">
+                    إرسال الفواتير والتعديلات والتحصيلات إلى جوجل شيت فور حفظها مع الحفاظ على سرعة البرنامج دون انتظار
+                  </span>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={autoSyncWebhook}
+                    onChange={(e) => setAutoSyncWebhook(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+                </label>
+              </div>
+
+              {/* Manual Push & Pull Action Buttons */}
+              <div className="grid grid-cols-2 gap-3 pt-1">
+                <button
+                  type="button"
+                  disabled={syncLoading || !googleSheetWebhookUrl.trim()}
+                  onClick={handlePushWebhook}
+                  className="py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-40 shadow-xs"
+                >
+                  <Download className="w-4 h-4 rotate-180" />
+                  مزامنة ودفع كافة البيانات إلى جوجل شيت الآن 📤
+                </button>
+                <button
+                  type="button"
+                  disabled={syncLoading || !googleSheetWebhookUrl.trim()}
+                  onClick={handlePullWebhook}
+                  className="py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-40 shadow-xs"
+                >
+                  <Download className="w-4 h-4" />
+                  استيراد وسحب البيانات من جوجل شيت 📥
+                </button>
+              </div>
+
+              {/* Script Setup Instructions Guide Accordion */}
+              {showScriptGuide && (
+                <div className="bg-slate-900 text-slate-100 rounded-xl p-4 space-y-3 font-sans">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                    <span className="font-bold text-xs text-amber-400 flex items-center gap-1.5">
+                      <Code className="w-4 h-4" />
+                      طريقة تركيب السكربت في ملف جوجل شيت (في دقيقة واحدة):
+                    </span>
                     <button
                       type="button"
-                      disabled={syncLoading}
-                      onClick={handleConnectSheets}
-                      className="w-full py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-[10px] flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                      onClick={handleCopyScript}
+                      className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold rounded-lg flex items-center gap-1 cursor-pointer transition-colors"
                     >
-                      <RefreshCw className={`w-3.5 h-3.5 ${syncLoading ? "animate-spin" : ""}`} />
-                      تجهيز وربط ملف جوجل شيت التلقائي 📊
+                      {copiedScript ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                      {copiedScript ? "تم النسخ بنجاح! ✓" : "نسخ كود السكربت 📋"}
                     </button>
                   </div>
 
-                  {/* Column B: Manual Sync */}
-                  <div className="bg-white p-3 border border-slate-200 rounded-lg space-y-2.5">
-                    <span className="font-extrabold text-[11px] text-slate-700 block">2. مزامنة ونقل البيانات:</span>
-                    <p className="text-[10px] text-slate-400">
-                      التحكم في دفع (تصدير) أو سحب (استيراد) كافة العمليات بين مخزن الموبايل/الخادم والملف.
-                    </p>
-                    <div className="grid grid-cols-2 gap-1.5">
+                  <ol className="text-[11px] space-y-1.5 text-slate-300 list-decimal list-inside leading-relaxed font-cairo">
+                    <li>افتح ملف Google Sheets الخاص بك (أو أنشئ ملفاً جديداً).</li>
+                    <li>من القائمة العلوية اضغط على <strong>امتدادات (Extensions)</strong> ثم اختر <strong>Apps Script</strong>.</li>
+                    <li>امسح أي كود موجود، والصق الكود المنسوخ بالكامل بالأسفل، ثم اضغط <strong>حفظ (Save / Ctrl+S)</strong>.</li>
+                    <li>اضغط على زر <strong>نشر (Deploy)</strong> الأزرق في أعلى اليمين &gt; <strong>نشر جديد (New deployment)</strong>.</li>
+                    <li>اختر النوع <strong>تطبيق ويب (Web app)</strong>، وضع الوصف (Mazaya Sync).</li>
+                    <li>في خيار <strong>من يمكنه الوصول (Who has access)</strong> اختر: <span className="text-amber-400 font-bold">أي شخص (Anyone)</span> ثم اضغط Deploy.</li>
+                    <li>انسخ <strong>رابط تطبيق الويب (Web app URL)</strong> الناتج والصقه في خانة الرابط أعلاه واضغط "اختبار الرابط".</li>
+                  </ol>
+
+                  <div className="relative mt-2">
+                    <pre className="bg-slate-950 p-3 rounded-lg text-[10px] text-emerald-400 font-mono overflow-x-auto max-h-48 dir-ltr text-left">
+                      {appsScriptCode}
+                    </pre>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* METHOD 2: GOOGLE OAUTH POPUP (Optional alternative) */}
+          {syncMethod === "oauth" && (
+            <div className="space-y-4 text-xs">
+              <p className="text-slate-500 text-[11px] leading-relaxed">
+                طريقة التفويض عبر حساب Google المباشر (تتطلب تسجيل دخول بحسابك وإنشاء ملف تلقائي على Google Drive).
+              </p>
+
+              {!isGoogleConnected ? (
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 text-center space-y-3">
+                  <p className="text-slate-600 font-medium text-[11px]">
+                    يرجى تسجيل الدخول بحساب Google لتفويض التطبيق:
+                  </p>
+                  <div className="flex justify-center">
+                    <button
+                      type="button"
+                      onClick={handleGoogleLogin}
+                      disabled={syncLoading}
+                      className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-250 hover:bg-slate-50 text-slate-700 font-bold rounded-lg shadow-sm transition-all cursor-pointer text-xs"
+                    >
+                      <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="w-4.5 h-4.5">
+                        <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
+                        <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
+                        <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
+                        <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
+                      </svg>
+                      ربط التطبيق بحساب Google 🔗
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-emerald-50/50 border border-emerald-100 rounded-xl p-4 space-y-4">
+                  <div className="flex items-center justify-between text-xs text-emerald-800">
+                    <span className="font-bold flex items-center gap-1">
+                      <CheckCircle className="w-4 h-4 text-emerald-600" />
+                      تم تسجيل الدخول بنجاح!
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleGoogleLogout}
+                      className="text-[10px] text-red-600 hover:text-red-800 font-bold flex items-center gap-0.5 cursor-pointer"
+                    >
+                      <LogOut className="w-3.5 h-3.5" />
+                      قطع الاتصال 🔴
+                    </button>
+                  </div>
+
+                  <div className="grid md:grid-cols-2 gap-4 pt-1">
+                    <div className="bg-white p-3 border border-slate-200 rounded-lg space-y-2.5">
+                      <span className="font-extrabold text-[11px] text-slate-700 block">1. إعداد وتوصيل الملف:</span>
+                      <p className="text-[10px] text-slate-400">
+                        إنشاء ملف تلقائي بالكامل في Google Drive مهيأ بالكامل.
+                      </p>
                       <button
                         type="button"
-                        disabled={syncLoading || !googleSheetId}
-                        onClick={handlePushData}
-                        className="py-1.5 bg-slate-950 hover:bg-slate-850 text-white font-bold rounded-lg text-[10px] flex items-center justify-center gap-1 transition-colors cursor-pointer disabled:opacity-40"
-                        title={!googleSheetId ? "يرجى ربط جوجل شيت أولاً" : "تصدير البيانات"}
+                        disabled={syncLoading}
+                        onClick={handleConnectSheets}
+                        className="w-full py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-[10px] flex items-center justify-center gap-1 transition-colors cursor-pointer"
                       >
-                        تصدير للشيت 📤
+                        <RefreshCw className={`w-3.5 h-3.5 ${syncLoading ? "animate-spin" : ""}`} />
+                        تجهيز وربط ملف جوجل شيت التلقائي 📊
                       </button>
-                      <button
-                        type="button"
-                        disabled={syncLoading || !googleSheetId}
-                        onClick={handlePullData}
-                        className="py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg text-[10px] flex items-center justify-center gap-1 transition-colors cursor-pointer disabled:opacity-40"
-                        title={!googleSheetId ? "يرجى ربط جوجل شيت أولاً" : "استيراد البيانات"}
-                      >
-                        استيراد من الشيت 📥
-                      </button>
+                    </div>
+
+                    <div className="bg-white p-3 border border-slate-200 rounded-lg space-y-2.5">
+                      <span className="font-extrabold text-[11px] text-slate-700 block">2. مزامنة ونقل البيانات:</span>
+                      <p className="text-[10px] text-slate-400">
+                        التحكم في دفع أو سحب كافة العمليات بين مخزن الخادم والملف.
+                      </p>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <button
+                          type="button"
+                          disabled={syncLoading || !googleSheetId}
+                          onClick={handlePushData}
+                          className="py-1.5 bg-slate-950 hover:bg-slate-850 text-white font-bold rounded-lg text-[10px] flex items-center justify-center gap-1 transition-colors cursor-pointer disabled:opacity-40"
+                        >
+                          تصدير للشيت 📤
+                        </button>
+                        <button
+                          type="button"
+                          disabled={syncLoading || !googleSheetId}
+                          onClick={handlePullData}
+                          className="py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg text-[10px] flex items-center justify-center gap-1 transition-colors cursor-pointer disabled:opacity-40"
+                        >
+                          استيراد من الشيت 📥
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
+              )}
+            </div>
+          )}
 
-                {/* Spreadsheet Details */}
-                {googleSheetId && (
-                  <div className="p-3 bg-white border border-slate-150 rounded-lg space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-slate-700 text-[10px]">ملف قاعدة البيانات النشط:</span>
-                      <a
-                        href={settings.googleSheetUrl || `https://docs.google.com/spreadsheets/d/${googleSheetId}/edit`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-[10px] text-emerald-600 hover:text-emerald-800 font-bold flex items-center gap-0.5"
-                      >
-                        فتح الملف في علامة تبويب جديدة 🌐
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
-                    </div>
-                    <div className="font-mono text-[9px] text-slate-400 break-all select-all p-1 bg-slate-50 border border-slate-100 rounded">
-                      ID: {googleSheetId}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
+          {/* Local Offline Backup Section */}
+          <div className="border-t border-slate-150 pt-4 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-xs text-slate-800 flex items-center gap-1.5">
+                <Download className="w-4 h-4 text-slate-600" />
+                النسخ الاحتياطي في وضع عدم الاتصال (Offline Backup):
+              </span>
+              <span className="text-[10px] text-slate-400">حفظ محلي فوري على جهازك</span>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={handleExportJsonBackup}
+                className="py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer border border-slate-250"
+              >
+                <Download className="w-3.5 h-3.5 text-slate-600" />
+                تحميل نسخة احتياطية للكمبيوتر (JSON Backup) 💾
+              </button>
 
-            {/* Status Feedback Message */}
-            {syncMessage && (
-              <div className="p-2.5 bg-slate-100 border border-slate-200 rounded-lg flex items-center gap-2 text-slate-700 text-[10px] font-medium font-mono">
-                <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-ping"></span>
-                <span>حالة النظام: {syncMessage}</span>
-              </div>
-            )}
+              <label className="py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer border border-slate-250 text-center">
+                <Upload className="w-3.5 h-3.5 text-slate-600" />
+                استعادة نسخة احتياطية من جهازك 📂
+                <input
+                  type="file"
+                  accept=".json"
+                  onChange={handleImportJsonBackup}
+                  className="hidden"
+                />
+              </label>
+            </div>
           </div>
+
+          {/* Status Feedback Message */}
+          {syncMessage && (
+            <div className="p-2.5 bg-slate-100 border border-slate-200 rounded-lg flex items-center gap-2 text-slate-700 text-[10px] font-medium font-mono">
+              <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-ping"></span>
+              <span>حالة النظام: {syncMessage}</span>
+            </div>
+          )}
         </div>
 
         {/* Passcode / Privacy Management Card */}

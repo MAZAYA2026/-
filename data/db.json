@@ -1,0 +1,281 @@
+{
+  "services": [
+    {
+      "id": "srv-101",
+      "name": "# استخراج جواز سفر مستعجل",
+      "govPrice": 1500,
+      "officeFee": 500,
+      "duration": "3 أيام عمل من تاريخ تقديم الطلب واستيفاء الأوراق",
+      "instructions": "يرجى إحضار أصل وصورة بطاقة الرقم القومي سارية، و3 صور شخصية خلفية بيضاء حديثة 4*6، وأصل جواز السفر القديم إن وجد.",
+      "deliveryDaysOffset": 3,
+      "notes": "يرجى الحضور للاستلام شخصياً أو توكيل رسمي بمقر مكتب مزايا لخدمات الجوازات بطنطا."
+    },
+    {
+      "id": "srv-102",
+      "name": "## استخراج جواز سفر عادي",
+      "govPrice": 1100,
+      "officeFee": 400,
+      "duration": "7 أيام عمل من تاريخ تقديم المستندات",
+      "instructions": "يرجى إحضار أصل بطاقة الرقم القومي سارية، الموقف من التجنيد للذكور، المؤهل الدراسي إن لم يكن مسجلاً بالبطاقة، و3 صور شخصية خلفية بيضاء.",
+      "deliveryDaysOffset": 7,
+      "notes": "يتم تسليم المستندات بمقر المكتب والفرع المخصص."
+    },
+    {
+      "id": "srv-103",
+      "name": "ترجمة مستندات رسمية سريعة",
+      "govPrice": 200,
+      "officeFee": 150,
+      "duration": "يوم عمل واحد",
+      "instructions": "تسليم صورة واضحة من المستند المطلوب ترجمته عبر الواتساب أو تسليمه باليد في المكتب.",
+      "deliveryDaysOffset": 1,
+      "notes": "الترجمة معتمدة لدى جميع السفارات والجهات الحكومية المصرية."
+    },
+    {
+      "id": "srv-104",
+      "name": "# تجديد جواز سفر منتهي الصلاحية",
+      "govPrice": 1300,
+      "officeFee": 450,
+      "duration": "4 أيام عمل من استلام الأوراق",
+      "instructions": "إحضار جواز السفر القديم المنتهي، بطاقة رقم قومي سارية، شهادة تجنيد للذكور، وصور شخصية حديثة.",
+      "deliveryDaysOffset": 4,
+      "notes": "سيتم الحفظ والأرشفة الفورية للأوراق في أدراج المكتب بمجرد التجهيز."
+    }
+  ],
+  "dictionary": [
+    {
+      "arabic": "محمد",
+      "english": "MOHAMED"
+    },
+    {
+      "arabic": "احمد",
+      "english": "AHMED"
+    },
+    {
+      "arabic": "أحمد",
+      "english": "AHMED"
+    },
+    {
+      "arabic": "شريف",
+      "english": "SHERIF"
+    },
+    {
+      "arabic": "علي",
+      "english": "ALI"
+    },
+    {
+      "arabic": "على",
+      "english": "ALI"
+    },
+    {
+      "arabic": "رندا",
+      "english": "RANDA"
+    },
+    {
+      "arabic": "منار",
+      "english": "MANAR"
+    },
+    {
+      "arabic": "امنية",
+      "english": "OMNIA"
+    },
+    {
+      "arabic": "أمنية",
+      "english": "OMNIA"
+    },
+    {
+      "arabic": "عبد",
+      "english": "ABD"
+    },
+    {
+      "arabic": "الله",
+      "english": "ALLAH"
+    },
+    {
+      "arabic": "عبدالله",
+      "english": "ABDALLAH"
+    },
+    {
+      "arabic": "حسين",
+      "english": "HUSSEIN"
+    },
+    {
+      "arabic": "حسن",
+      "english": "HASSAN"
+    },
+    {
+      "arabic": "محمود",
+      "english": "MAHMOUD"
+    },
+    {
+      "arabic": "ابراهيم",
+      "english": "IBRAHIM"
+    },
+    {
+      "arabic": "إبراهيم",
+      "english": "IBRAHIM"
+    },
+    {
+      "arabic": "سيد",
+      "english": "SAYED"
+    },
+    {
+      "arabic": "مصطفى",
+      "english": "MOSTAFA"
+    },
+    {
+      "arabic": "سعيد",
+      "english": "SAEED"
+    },
+    {
+      "arabic": "سليمان",
+      "english": "SOLIMAN"
+    },
+    {
+      "arabic": "يوسف",
+      "english": "YOUSEF"
+    },
+    {
+      "arabic": "خالد",
+      "english": "KHALED"
+    },
+    {
+      "arabic": "طارق",
+      "english": "TAREK"
+    },
+    {
+      "arabic": "كمال",
+      "english": "KAMAL"
+    },
+    {
+      "arabic": "جمال",
+      "english": "GAMAL"
+    },
+    {
+      "arabic": "سماح",
+      "english": "SAMAH"
+    },
+    {
+      "arabic": "منى",
+      "english": "MONA"
+    },
+    {
+      "arabic": "فاطمة",
+      "english": "FATMA"
+    },
+    {
+      "arabic": "زينب",
+      "english": "ZEINAB"
+    },
+    {
+      "arabic": "هدى",
+      "english": "HODA"
+    }
+  ],
+  "invoices": [
+    {
+      "status": "NEW",
+      "employeeName": "شريف (المدير)",
+      "customers": [
+        {
+          "arabicName": "احمد",
+          "englishName": "AHMED",
+          "englishNameOption": "gemini",
+          "nationalId": "25252556565656",
+          "birthDate": "",
+          "phone": "01112506394",
+          "profession": "545545445",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر مستعجل",
+              "quantity": 1,
+              "price": 2000,
+              "deliveryDate": "2026-08-29"
+            }
+          ]
+        }
+      ],
+      "totalGov": 1500,
+      "totalOffice": 500,
+      "totalAmount": 2000,
+      "date": "2026-08-26",
+      "invoiceId": 100,
+      "notificationSent": false
+    }
+  ],
+  "collectionClosings": [],
+  "employees": [
+    {
+      "username": "SHERIF",
+      "name": "شريف (المدير)",
+      "role": "admin",
+      "permissions": {
+        "canCreateInvoices": true,
+        "canEditInvoices": true,
+        "canViewCollection": true,
+        "canManageServices": true,
+        "canViewAmanReport": true
+      }
+    },
+    {
+      "username": "randa",
+      "name": "رندا",
+      "role": "employee",
+      "permissions": {
+        "canCreateInvoices": true,
+        "canEditInvoices": true,
+        "canViewCollection": false,
+        "canManageServices": false,
+        "canViewAmanReport": true
+      }
+    },
+    {
+      "username": "manar",
+      "name": "منار",
+      "role": "employee",
+      "permissions": {
+        "canCreateInvoices": true,
+        "canEditInvoices": true,
+        "canViewCollection": false,
+        "canManageServices": false,
+        "canViewAmanReport": true
+      }
+    },
+    {
+      "username": "omnia",
+      "name": "أمنية",
+      "role": "employee",
+      "permissions": {
+        "canCreateInvoices": true,
+        "canEditInvoices": true,
+        "canViewCollection": false,
+        "canManageServices": false,
+        "canViewAmanReport": true
+      }
+    },
+    {
+      "username": "sherif",
+      "name": "شريف",
+      "role": "employee",
+      "permissions": {
+        "canCreateInvoices": true,
+        "canEditInvoices": true,
+        "canViewCollection": true,
+        "canManageServices": true,
+        "canViewAmanReport": true
+      }
+    }
+  ],
+  "settings": {
+    "headerText": "مكتب مزايا لخدمات الجوازات وتسهيل المعاملات\nطنطا - شارع المديرية - برج المعز - الدور الثاني\nتليفون: 01011223344",
+    "footerText": "شكراً لتعاملكم مع مكتب مزايا للجوازات.\nالرجاء الاحتفاظ بالفاتورة لتقديمها عند الاستلام.\nالاستلام شخصياً أو بتوكيل رسمي.",
+    "welcomeMessage": "عزيزنا {اسم_العميل}، تم استلام طلباتك بمكتب مزايا للجوازات بنجاح.\nرقم الفاتورة: {رقم_الفاتورة}\nالخدمات المطلوبة:\n{الخدمات}\nإجمالي الفاتورة: {السعر} جنيه.\nتاريخ اليوم: {تاريخ_اليوم}\nنسعد دائماً بخدمتكم.",
+    "readyMessage": "عزيزنا {اسم_العميل}، نفيدكم علماً بأن أوراقكم الخاصة بالفاتورة رقم {رقم_الفاتورة} جاهزة للتسليم الآن.\nالخدمات: {الخدمات}\nمكان الحفظ: درج رقم ({رقم_الارشيف})\nبرجاء التوجه للمكتب للاستلام مع إحضار الفاتورة الحرارية.",
+    "deliveryMessage": "تم تسليم جواز السفر والأوراق الخاصة بك بنجاح يا {اسم_العميل}.\nرقم الفاتورة: {رقم_الفاتورة}\nنسعد بتقييمكم لخدمات مكتب مزايا للجوازات ونراكم قريباً في معاملات أخرى.",
+    "whatsappTemplate": "مكتب مزايا للجوازات\n\nالعميل: {اسم_العميل}\n{الاسم_الانجليزي}\n{المهنة}\nالخدمات:\n{الخدمات}\n\nالإجمالي: {السعر} جنيه.\n\n{رسالة_الشكر}",
+    "googleSheetWebhookUrl": "https://script.google.com/macros/s/AKfycbz6j-7b_lwkN7wy2nkeIFcbx2rRw19yjTTAxtWVmt6CoualXSXno0UvIuDfpxcrJ15j/exec",
+    "autoSyncWebhook": true,
+    "googleSheetId": "",
+    "googleSheetUrl": "",
+    "googleSheetsConnected": true
+  }
+}
