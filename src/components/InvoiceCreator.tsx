@@ -19,6 +19,7 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
   
   // States for printing overlay
   const [printInvoice, setPrintInvoice] = useState<Invoice | null>(null);
+  const [lastCreatedInvoice, setLastCreatedInvoice] = useState<Invoice | null>(null);
   const [showSuccessToast, setShowSuccessToast] = useState(false);
   const [createdInvoiceId, setCreatedInvoiceId] = useState<number | null>(null);
 
@@ -321,6 +322,7 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
       const created = await createInvoiceOnServer(invoiceData);
       
       onInvoiceCreated(created);
+      setLastCreatedInvoice(created);
       setPrintInvoice(created);
       setCreatedInvoiceId(created.invoiceId);
       setShowSuccessToast(true);
@@ -390,13 +392,30 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
     // Append generic footer settings
     formattedMessage += `\n\n${settings.footerText || ""}`;
 
-    const mainPhone = inv.customers[0]?.phone;
-    if (mainPhone) {
+    const targetCustomer = inv.customers.find(c => c.phone && c.phone.trim().length > 0) || inv.customers[0];
+    const rawPhone = targetCustomer?.phone ? targetCustomer.phone.trim() : "";
+    if (rawPhone) {
+      let cleanPhone = rawPhone.replace(/\D/g, "");
+      if (cleanPhone.startsWith("0")) {
+        cleanPhone = "2" + cleanPhone;
+      } else if (!cleanPhone.startsWith("20") && cleanPhone.length === 10) {
+        cleanPhone = "20" + cleanPhone;
+      }
       const encodedMsg = encodeURIComponent(formattedMessage);
-      const waUrl = `https://wa.me/${mainPhone.startsWith('0') ? '2' + mainPhone : mainPhone}?text=${encodedMsg}`;
-      window.open(waUrl, "_blank");
+      const waUrl = `https://wa.me/${cleanPhone}?text=${encodedMsg}`;
+      
+      const win = window.open(waUrl, "_blank", "noopener,noreferrer");
+      if (!win) {
+        const link = document.createElement("a");
+        link.href = waUrl;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      }
     } else {
-      alert("رقم هاتف العميل غير متوفر.");
+      alert("رقم هاتف العميل غير متوفر في هذه الفاتورة لإرسال رسالة الواتساب.");
     }
   };
 
@@ -429,28 +448,43 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
           </div>
           <div className="flex items-center gap-2 w-full md:w-auto">
             <button 
+              type="button"
               onClick={() => {
-                const invoiceMock = printInvoice;
-                if (invoiceMock) handleSendWhatsAppWelcome(invoiceMock);
+                const targetInv = lastCreatedInvoice || printInvoice;
+                if (targetInv) {
+                  handleSendWhatsAppWelcome(targetInv);
+                } else {
+                  alert("لم يتم العثور على بيانات الفاتورة لإرسال رسالة الواتساب.");
+                }
               }}
-              className="flex-1 md:flex-initial bg-emerald-600 hover:bg-emerald-700 text-white font-bold font-cairo text-xs px-4 py-2 rounded-lg flex items-center justify-center gap-2 transition-colors shadow-xs"
+              className="flex-1 md:flex-initial bg-emerald-600 hover:bg-emerald-700 text-white font-bold font-cairo text-xs px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-colors shadow-xs cursor-pointer"
             >
               <Send className="w-4 h-4" />
               رسالة واتس ترحيبية
             </button>
             <button 
-              onClick={() => setPrintInvoice(printInvoice)}
-              className="flex-1 md:flex-initial bg-slate-900 hover:bg-slate-800 text-white font-bold font-cairo text-xs px-4 py-2 rounded-lg flex items-center justify-center gap-2 transition-colors shadow-xs"
+              type="button"
+              onClick={() => {
+                const targetInv = lastCreatedInvoice || printInvoice;
+                if (targetInv) {
+                  setPrintInvoice(targetInv);
+                } else {
+                  alert("لم يتم العثور على بيانات الفاتورة لإعادة الطباعة.");
+                }
+              }}
+              className="flex-1 md:flex-initial bg-slate-900 hover:bg-slate-800 text-white font-bold font-cairo text-xs px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-colors shadow-xs cursor-pointer"
             >
               <Printer className="w-4 h-4" />
-              طباعة إيصال 8سم
+              إعادة طباعة إيصال 8سم
             </button>
             <button 
+              type="button"
               onClick={() => {
                 setShowSuccessToast(false);
                 setCreatedInvoiceId(null);
+                setLastCreatedInvoice(null);
               }}
-              className="px-3 py-2 text-slate-500 hover:text-slate-800 font-bold text-xs"
+              className="px-3 py-2 text-slate-500 hover:text-slate-800 font-bold text-xs cursor-pointer"
             >
               تجاهل
             </button>
@@ -559,47 +593,19 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
                       <span>بيانات استمارة الجوازات (مطلوبة لتفعيل الخدمة #)</span>
                     </div>
 
-                    <div className="grid md:grid-cols-3 gap-4">
-                      
-                      {/* English Name translation panel */}
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-bold text-slate-700 font-cairo flex justify-between">
-                          <span>الاسم باللغة الإنجليزية <span className="text-rose-500">*</span></span>
-                          <span className="text-[10px] text-slate-400">تلقائي CAPITAL</span>
+                    {/* English Name translation panel on a separate dedicated full-width row */}
+                    <div className="space-y-2 bg-white/80 p-3.5 rounded-xl border border-blue-200/80 shadow-xs">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <label className="text-xs font-bold text-slate-800 font-cairo flex items-center gap-1.5">
+                          <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+                          <span>الاسم باللغة الإنجليزية (بعد الترجمة)</span>
+                          <span className="text-rose-500">*</span>
+                          <span className="text-[10px] text-slate-400 font-normal mr-1">(أحرف كبيرة CAPITAL تلقائياً)</span>
                         </label>
                         
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            value={customer.englishNameOption === "previous" ? "نفس ترجمة الجواز السابق" : customer.englishName}
-                            onChange={(e) => {
-                              if (customer.englishNameOption === "previous") return;
-                              const updated = [...customers];
-                              updated[cIdx].englishName = e.target.value.toUpperCase();
-                              setCustomers(updated);
-                            }}
-                            disabled={customer.englishNameOption === "previous"}
-                            placeholder="AHMED MOHAMED"
-                            className={`flex-1 bg-slate-50 border rounded-xl px-3 py-2.5 text-xs focus:outline-hidden font-mono ${
-                              errors[`c-${cIdx}-englishName`] ? "border-rose-300 bg-rose-50/10" : "border-slate-200"
-                            }`}
-                          />
-                          {customer.englishNameOption === "gemini" && (
-                            <button
-                              type="button"
-                              onClick={() => handleTranslateName(cIdx)}
-                              className="px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-colors"
-                              title="ترجم بالقاموس والذكاء الاصطناعي"
-                            >
-                              <Sparkles className="w-3.5 h-3.5" />
-                              ترجم
-                            </button>
-                          )}
-                        </div>
-
                         {/* Options */}
-                        <div className="flex gap-3 text-[10px] text-slate-500 pt-1">
-                          <label className="flex items-center gap-1.5 cursor-pointer">
+                        <div className="flex items-center gap-4 text-xs text-slate-600 font-medium">
+                          <label className="flex items-center gap-1.5 cursor-pointer hover:text-blue-700 transition-colors">
                             <input
                               type="radio"
                               name={`c-${cIdx}-eng-opt`}
@@ -609,11 +615,11 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
                                 updated[cIdx].englishNameOption = "gemini";
                                 setCustomers(updated);
                               }}
-                              className="w-3 h-3 text-blue-500 focus:ring-0 bg-slate-50"
+                              className="w-3.5 h-3.5 text-blue-600 focus:ring-0 cursor-pointer"
                             />
-                            <span>ترجمة مباشرة للطلب</span>
+                            <span>ترجمة فورية للطلب</span>
                           </label>
-                          <label className="flex items-center gap-1.5 cursor-pointer">
+                          <label className="flex items-center gap-1.5 cursor-pointer hover:text-blue-700 transition-colors">
                             <input
                               type="radio"
                               name={`c-${cIdx}-eng-opt`}
@@ -624,20 +630,55 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
                                 updated[cIdx].englishName = "نفس ترجمة الجواز السابق";
                                 setCustomers(updated);
                               }}
-                              className="w-3 h-3 text-blue-500 focus:ring-0 bg-slate-50"
+                              className="w-3.5 h-3.5 text-blue-600 focus:ring-0 cursor-pointer"
                             />
                             <span>نفس ترجمة الجواز السابق</span>
                           </label>
                         </div>
-
-                        {errors[`c-${cIdx}-englishName`] && (
-                          <p className="text-[10px] text-rose-600 flex items-center gap-1 mt-1">
-                            <AlertCircle className="w-3 h-3" />
-                            <span>{errors[`c-${cIdx}-englishName`]}</span>
-                          </p>
+                      </div>
+                      
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={customer.englishNameOption === "previous" ? "نفس ترجمة الجواز السابق" : customer.englishName}
+                          onChange={(e) => {
+                            if (customer.englishNameOption === "previous") return;
+                            const updated = [...customers];
+                            updated[cIdx].englishName = e.target.value.toUpperCase();
+                            setCustomers(updated);
+                          }}
+                          disabled={customer.englishNameOption === "previous"}
+                          placeholder="مثال: MOHAMED AHMED MAHMOUD ALI"
+                          dir="ltr"
+                          className={`w-full bg-slate-50 border rounded-xl px-4 py-3 text-sm font-bold font-mono tracking-wide focus:outline-hidden transition-all ${
+                            errors[`c-${cIdx}-englishName`] 
+                              ? "border-rose-400 bg-rose-50/20 text-rose-900 focus:ring-rose-200" 
+                              : "border-slate-300 focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-100 text-slate-800"
+                          } ${customer.englishNameOption === "previous" ? "opacity-75 italic text-slate-500 font-sans" : ""}`}
+                        />
+                        {customer.englishNameOption === "gemini" && (
+                          <button
+                            type="button"
+                            onClick={() => handleTranslateName(cIdx)}
+                            className="px-4 py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shrink-0 shadow-xs cursor-pointer whitespace-nowrap"
+                            title="ترجم بالقاموس والذكاء الاصطناعي"
+                          >
+                            <Sparkles className="w-4 h-4" />
+                            <span>ترجم بالذكاء الاصطناعي</span>
+                          </button>
                         )}
                       </div>
 
+                      {errors[`c-${cIdx}-englishName`] && (
+                        <p className="text-[11px] text-rose-600 flex items-center gap-1 mt-1">
+                          <AlertCircle className="w-3.5 h-3.5" />
+                          <span>{errors[`c-${cIdx}-englishName`]}</span>
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Passport complementary fields in 3 columns: National ID, Birth Date, Profession */}
+                    <div className="grid md:grid-cols-3 gap-4">
                       {/* National ID */}
                       <div className="space-y-1.5">
                         <label className="text-xs font-bold text-slate-700 font-cairo flex justify-between items-center">
@@ -674,15 +715,12 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
                         </div>
                       </div>
 
-                    </div>
-
-                    <div className="grid md:grid-cols-2 gap-4">
                       {/* Profession */}
                       <div className="space-y-1.5">
                         <label className="text-xs font-bold text-slate-700 font-cairo flex justify-between">
-                          <span>المهنة بالبطاقة أو جواز السفر <span className="text-rose-500">*</span></span>
+                          <span>المهنة بالبطاقة أو الجواز <span className="text-rose-500">*</span></span>
                           <span className={`text-[10px] ${customer.profession.length >= 32 ? "text-rose-500 font-bold" : "text-slate-400"}`}>
-                            {customer.profession.length} / 32 حرف بالمسافات
+                            {customer.profession.length} / 32 حرف
                           </span>
                         </label>
                         <input
@@ -690,7 +728,7 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
                           value={customer.profession}
                           onChange={(e) => handleProfessionChange(cIdx, e.target.value)}
                           maxLength={32}
-                          placeholder="المهنة ببطاقة العميل (بحد أقصى 32 حرفاً)"
+                          placeholder="المهنة بالبطاقة (أقصى 32 حرف)"
                           className={`w-full bg-slate-50 border rounded-xl px-3 py-2.5 text-xs focus:outline-hidden ${
                             errors[`c-${cIdx}-profession`] ? "border-rose-300 bg-rose-50/10" : "border-slate-200"
                           }`}
@@ -702,11 +740,11 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
                           </p>
                         )}
                       </div>
+                    </div>
 
-                      <div className="flex items-end text-[11px] text-slate-500 p-2 leading-snug">
-                        <Info className="w-4.5 h-4.5 text-blue-500 shrink-0 ml-1.5" />
-                        <span>سيقوم المعالج باستخلاص القرن وسنة الميلاد بالكامل وفق منظومة مصلحة الجوازات المصرية.</span>
-                      </div>
+                    <div className="flex items-center text-[11px] text-slate-500 px-1 pt-1">
+                      <Info className="w-4 h-4 text-blue-500 shrink-0 ml-1.5" />
+                      <span>سيقوم النظام بحساب تاريخ الميلاد وتجهيز بيانات استمارة الجوازات تلقائياً.</span>
                     </div>
 
                   </div>
@@ -887,6 +925,7 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
           settings={settings}
           services={services}
           onClose={() => setPrintInvoice(null)}
+          onSendWhatsApp={() => handleSendWhatsAppWelcome(printInvoice)}
         />
       )}
 

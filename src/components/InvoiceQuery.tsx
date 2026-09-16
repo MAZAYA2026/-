@@ -130,6 +130,60 @@ export default function InvoiceQuery({ invoices, services, settings, activeEmplo
   };
 
   // WhatsApp triggers
+  const handleSendWhatsAppWelcome = (inv: Invoice) => {
+    let customersText = "";
+    inv.customers.forEach((cust, idx) => {
+      const isPass = cust.englishName || cust.profession;
+      let servicesLines = cust.services.map(s => `• ${s.serviceId} (عدد: ${s.quantity}) - السعر: ${s.price} ج.م`).join("\n");
+      
+      let passDetails = "";
+      if (isPass) {
+        passDetails = `\n  الاسم بالإنجليزي: ${cust.englishName || 'N/A'}\n  المهنة: ${cust.profession || 'N/A'}`;
+      }
+
+      customersText += `العميل (${idx + 1}): ${cust.arabicName}${passDetails}\nالخدمات المطلوبة:\n${servicesLines}\n`;
+      customersText += `------------------------------------\n`;
+    });
+
+    let welcomeTemplate = settings.welcomeMessage || "مرحباً بك {اسم_العميل}، تم استلام طلبك برقم {رقم_الفاتورة} للخدمات: {الخدمات}";
+    const primaryCustomerName = inv.customers[0]?.arabicName || "عميلنا العزيز";
+    
+    let formattedMessage = welcomeTemplate
+      .replace(/{اسم_العميل}/g, primaryCustomerName)
+      .replace(/{رقم_الفاتورة}/g, inv.invoiceId.toString())
+      .replace(/{الخدمات}/g, customersText)
+      .replace(/{السعر}/g, inv.totalAmount.toString())
+      .replace(/{تاريخ_اليوم}/g, inv.date);
+
+    if (settings.footerText) {
+      formattedMessage += `\n\n${settings.footerText}`;
+    }
+
+    const targetCustomer = inv.customers.find(c => c.phone && c.phone.trim().length > 0) || inv.customers[0];
+    const rawPhone = targetCustomer?.phone ? targetCustomer.phone.trim() : "";
+    if (rawPhone) {
+      let cleanPhone = rawPhone.replace(/\D/g, "");
+      if (cleanPhone.startsWith("0")) {
+        cleanPhone = "2" + cleanPhone;
+      } else if (!cleanPhone.startsWith("20") && cleanPhone.length === 10) {
+        cleanPhone = "20" + cleanPhone;
+      }
+      const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(formattedMessage)}`;
+      const opened = window.open(waUrl, "_blank", "noopener,noreferrer");
+      if (!opened) {
+        const link = document.createElement("a");
+        link.href = waUrl;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      }
+    } else {
+      alert("رقم هاتف العميل غير متوفر في هذه الفاتورة.");
+    }
+  };
+
   const handleSendWhatsAppReady = (inv: Invoice) => {
     let servicesText = inv.customers.map(c => c.services.map(s => s.serviceId).join(", ")).join(" - ");
     let readyTemplate = settings.readyMessage || "عزيزنا {اسم_العميل}، طلباتك بالفاتورة {رقم_الفاتورة} جاهزة في الدرج {رقم_الارشيف}.";
@@ -141,8 +195,15 @@ export default function InvoiceQuery({ invoices, services, settings, activeEmplo
       .replace(/{رقم_الارشيف}/g, inv.archiveDrawer || "")
       .replace(/{الخدمات}/g, servicesText);
 
-    const waUrl = `https://wa.me/${primaryCustomer.phone.startsWith('0') ? '2' : ''}${primaryCustomer.phone}?text=${encodeURIComponent(msg)}`;
-    window.open(waUrl, "_blank");
+    const rawPhone = primaryCustomer.phone ? primaryCustomer.phone.trim() : "";
+    if (rawPhone) {
+      let cleanPhone = rawPhone.replace(/\D/g, "");
+      if (cleanPhone.startsWith("0")) cleanPhone = "2" + cleanPhone;
+      const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`;
+      window.open(waUrl, "_blank");
+    } else {
+      alert("رقم هاتف العميل غير متوفر.");
+    }
   };
 
   const handleSendWhatsAppDelivered = (inv: Invoice) => {
@@ -152,8 +213,15 @@ export default function InvoiceQuery({ invoices, services, settings, activeEmplo
       .replace(/{اسم_العميل}/g, primaryCustomer.arabicName)
       .replace(/{رقم_الفاتورة}/g, inv.invoiceId.toString());
 
-    const waUrl = `https://wa.me/${primaryCustomer.phone.startsWith('0') ? '2' : ''}${primaryCustomer.phone}?text=${encodeURIComponent(msg)}`;
-    window.open(waUrl, "_blank");
+    const rawPhone = primaryCustomer.phone ? primaryCustomer.phone.trim() : "";
+    if (rawPhone) {
+      let cleanPhone = rawPhone.replace(/\D/g, "");
+      if (cleanPhone.startsWith("0")) cleanPhone = "2" + cleanPhone;
+      const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`;
+      window.open(waUrl, "_blank");
+    } else {
+      alert("رقم هاتف العميل غير متوفر.");
+    }
   };
 
   // EDIT INVOICE LOGIC
@@ -466,11 +534,16 @@ export default function InvoiceQuery({ invoices, services, settings, activeEmplo
                   {/* Resend buttons for WhatsApp messages */}
                   <button
                     onClick={() => {
-                      if (inv.status === "READY") handleSendWhatsAppReady(inv);
+                      if (inv.status === InvoiceStatus.NEW) handleSendWhatsAppWelcome(inv);
+                      else if (inv.status === InvoiceStatus.READY) handleSendWhatsAppReady(inv);
                       else handleSendWhatsAppDelivered(inv);
                     }}
                     className="border border-slate-200 text-slate-600 hover:bg-slate-100 font-bold font-cairo text-[11px] px-2.5 py-1.5 rounded-lg flex items-center gap-1"
-                    title="إعادة إرسال إشعار واتساب"
+                    title={
+                      inv.status === InvoiceStatus.NEW 
+                        ? "إعادة إرسال رسالة الترحيب بالفاتورة" 
+                        : (inv.status === InvoiceStatus.READY ? "إعادة إرسال إشعار جاهزية الأوراق" : "إعادة إرسال إشعار تسليم الأوراق")
+                    }
                   >
                     <Send className="w-3.5 h-3.5" />
                     إشعار
@@ -565,16 +638,23 @@ export default function InvoiceQuery({ invoices, services, settings, activeEmplo
                     </div>
                   </div>
 
-                  <div className="grid md:grid-cols-3 gap-4">
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-bold text-slate-600">الاسم بالإنجليزي:</label>
-                      <input 
-                        type="text" 
-                        value={cust.englishName} 
-                        onChange={(e) => handleEditCustomerField(cIdx, "englishName", e.target.value.toUpperCase())}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono"
-                      />
-                    </div>
+                  {/* English Name on its own separate full-width row */}
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-slate-700 font-cairo flex items-center justify-between">
+                      <span>الاسم بالإنجليزي (حروف كبيرة):</span>
+                      <span className="text-[10px] text-slate-400 font-mono">CAPITAL</span>
+                    </label>
+                    <input 
+                      type="text" 
+                      value={cust.englishName} 
+                      onChange={(e) => handleEditCustomerField(cIdx, "englishName", e.target.value.toUpperCase())}
+                      dir="ltr"
+                      placeholder="MOHAMED AHMED..."
+                      className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3.5 py-2.5 text-xs font-bold font-mono tracking-wide text-slate-800 focus:outline-hidden focus:border-blue-500 focus:bg-white"
+                    />
+                  </div>
+
+                  <div className="grid md:grid-cols-2 gap-4">
                     <div className="space-y-1">
                       <label className="text-[11px] font-bold text-slate-600">الرقم القومي:</label>
                       <input 
@@ -659,6 +739,7 @@ export default function InvoiceQuery({ invoices, services, settings, activeEmplo
           settings={settings}
           services={services}
           onClose={() => setPrintInvoice(null)}
+          onSendWhatsApp={() => handleSendWhatsAppWelcome(printInvoice)}
         />
       )}
 

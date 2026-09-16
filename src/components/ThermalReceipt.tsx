@@ -1,15 +1,16 @@
 import React, { useRef } from "react";
 import { Invoice, AppSettings, Service } from "../types";
-import { Printer, X } from "lucide-react";
+import { Printer, X, Send } from "lucide-react";
 
 interface ThermalReceiptProps {
   invoice: Invoice;
   settings: AppSettings;
   services: Service[];
   onClose: () => void;
+  onSendWhatsApp?: () => void;
 }
 
-export default function ThermalReceipt({ invoice, settings, services, onClose }: ThermalReceiptProps) {
+export default function ThermalReceipt({ invoice, settings, services, onClose, onSendWhatsApp }: ThermalReceiptProps) {
   const receiptRef = useRef<HTMLDivElement>(null);
 
   const handlePrint = () => {
@@ -20,7 +21,7 @@ export default function ThermalReceipt({ invoice, settings, services, onClose }:
     const printDiv = document.createElement("div");
     printDiv.id = "print-container-dynamic";
     printDiv.innerHTML = `
-      <div style="direction: rtl; text-align: right; width: 72mm; margin: 0 auto; font-family: 'Cairo', sans-serif !important;">
+      <div style="direction: rtl; text-align: right; width: 74mm; margin: 0 auto; font-family: 'Cairo', sans-serif !important; color: #000000 !important; background: #ffffff !important;">
         ${printContent}
       </div>
     `;
@@ -30,21 +31,51 @@ export default function ThermalReceipt({ invoice, settings, services, onClose }:
     style.id = "print-stylesheet-dynamic";
     style.innerHTML = `
       @media print {
+        @page {
+          size: 80mm auto;
+          margin: 0;
+        }
+        body {
+          margin: 0 !important;
+          padding: 0 !important;
+          background: #ffffff !important;
+        }
         body > *:not(#print-container-dynamic) {
           display: none !important;
         }
         #print-container-dynamic {
           display: block !important;
-          width: 80mm !important;
-          margin: 0 !important;
-          padding: 4mm !important;
-          background: white !important;
-          color: black !important;
+          width: 76mm !important;
+          margin: 0 auto !important;
+          padding: 2mm 1mm !important;
+          background: #ffffff !important;
+          color: #000000 !important;
           direction: rtl !important;
           text-align: right !important;
         }
-        * {
+        #print-container-dynamic * {
+          color: #000000 !important;
+          border-color: #000000 !important;
           font-family: 'Cairo', sans-serif !important;
+          background-color: transparent !important;
+          box-shadow: none !important;
+          text-shadow: none !important;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+        #print-container-dynamic table,
+        #print-container-dynamic th,
+        #print-container-dynamic td {
+          border-color: #000000 !important;
+          color: #000000 !important;
+        }
+        #print-container-dynamic .border-dashed {
+          border-style: dashed !important;
+          border-color: #000000 !important;
+        }
+        #print-container-dynamic .border-dotted {
+          border-style: dotted !important;
+          border-color: #000000 !important;
         }
       }
     `;
@@ -91,50 +122,47 @@ export default function ThermalReceipt({ invoice, settings, services, onClose }:
         <div className="flex-1 overflow-y-auto p-6 bg-slate-100 flex justify-center">
           <div 
             ref={receiptRef} 
-            className="w-[80mm] bg-white p-4 shadow-md rounded-xs text-slate-900 font-cairo text-[12px] leading-relaxed direction-rtl text-right"
+            className="w-[80mm] bg-white p-4 shadow-md rounded-xs text-black font-cairo text-[12px] leading-relaxed direction-rtl text-right"
             style={{ direction: 'rtl', textAlign: 'right' }}
           >
             {/* Header Text */}
             <div className="text-center mb-2">
-              <div className="font-bold text-sm leading-tight whitespace-pre-line mb-1">
+              <div className="font-bold text-base leading-tight whitespace-pre-line mb-1 text-black">
                 {settings.headerText || "مكتب مزايا للجوازات"}
               </div>
               {(settings.subHeaderText !== undefined ? settings.subHeaderText : "جوازات طنطا والمعاملات الحكومية") && (
-                <div className="text-[10px] text-slate-500">
+                <div className="text-[11px] text-black font-bold">
                   {settings.subHeaderText !== undefined ? settings.subHeaderText : "جوازات طنطا والمعاملات الحكومية"}
                 </div>
               )}
             </div>
 
-            <div className="border-t border-dashed border-slate-400 my-2"></div>
+            <div className="border-t-2 border-dashed border-black my-2"></div>
 
             {/* Invoice Meta */}
-            <div className="text-[11px] space-y-1 text-slate-700">
+            <div className="text-[11.5px] space-y-1 text-black font-semibold">
               <div className="flex justify-between">
                 <span>رقم الفاتورة:</span>
-                <span className="font-bold font-mono">#{invoice.invoiceId}</span>
+                <span className="font-bold font-mono text-black text-xs">#{invoice.invoiceId}</span>
               </div>
               <div className="flex justify-between">
                 <span>تاريخ الفاتورة:</span>
-                <span className="font-mono">{invoice.date}</span>
+                <span className="font-mono text-black">{invoice.date}</span>
               </div>
               <div className="flex justify-between">
                 <span>الموظف المسؤول:</span>
-                <span className="font-medium">{invoice.employeeName}</span>
+                <span className="font-bold text-black">{invoice.employeeName}</span>
               </div>
               <div className="flex justify-between">
                 <span>حالة الفاتورة:</span>
-                <span className={`font-bold ${
-                  invoice.status === "NEW" ? "text-blue-600" :
-                  invoice.status === "READY" ? "text-emerald-600" : "text-rose-600"
-                }`}>
+                <span className="font-bold text-black">
                   {invoice.status === "NEW" ? "جديدة" :
                    invoice.status === "READY" ? `جاهزة للتسليم (درج: ${invoice.archiveDrawer || 'N/A'})` : "تم التسليم"}
                 </span>
               </div>
             </div>
 
-            <div className="border-t border-dashed border-slate-400 my-2"></div>
+            <div className="border-t-2 border-dashed border-black my-2"></div>
 
             {/* Customers & Services */}
             <div className="space-y-4">
@@ -146,32 +174,32 @@ export default function ThermalReceipt({ invoice, settings, services, onClose }:
                 });
 
                 return (
-                  <div key={cIdx} className="bg-slate-50 p-2 rounded-xs border border-slate-200">
+                  <div key={cIdx} className="bg-white p-2.5 rounded-xs border-2 border-black">
                     {/* Customer Info */}
-                    <div className="font-bold text-[13px] text-slate-900">
+                    <div className="font-bold text-[13px] text-black">
                       {cIdx + 1}. {customer.arabicName}
                     </div>
                     {customer.englishName && (
-                      <div className="text-[11px] text-slate-600 font-mono font-medium mt-0.5">
+                      <div className="text-[11px] text-black font-mono font-bold mt-0.5">
                         EN: {customer.englishName}
                       </div>
                     )}
                     {customer.nationalId && (
-                      <div className="text-[10px] text-slate-500 mt-0.5 flex justify-between font-mono">
+                      <div className="text-[11px] text-black font-bold mt-0.5 flex justify-between font-mono">
                         <span>الرقم القومي: {customer.nationalId}</span>
                         <span>مواليد: {customer.birthDate}</span>
                       </div>
                     )}
                     {customer.profession && (
-                      <div className="text-[10px] text-slate-600 mt-0.5">
-                        المهنة: <span className="font-medium">{customer.profession}</span>
+                      <div className="text-[11px] text-black font-bold mt-0.5">
+                        المهنة: <span className="font-bold">{customer.profession}</span>
                       </div>
                     )}
-                    <div className="text-[10px] text-slate-500 font-mono">
+                    <div className="text-[11px] text-black font-bold font-mono">
                       الهاتف: {customer.phone}
                     </div>
 
-                    <div className="border-t border-dotted border-slate-300 my-1.5"></div>
+                    <div className="border-t-2 border-dashed border-black my-2"></div>
 
                     {/* Services selected */}
                     <div className="space-y-3 mt-2">
@@ -185,31 +213,31 @@ export default function ThermalReceipt({ invoice, settings, services, onClose }:
                         return (
                           <div key={sIdx} className="space-y-1.5">
                             {/* Service header with name on right and quantity on left */}
-                            <div className="flex justify-between items-center text-[12px] font-bold text-slate-900 px-0.5">
-                              <span className="font-mono text-slate-600 font-extrabold">x{item.quantity}</span>
-                              <span className="text-right">{matchedSrv?.name || item.serviceId}</span>
+                            <div className="flex justify-between items-center text-[12px] font-bold text-black px-0.5">
+                              <span className="font-mono text-black font-black text-sm">x{item.quantity}</span>
+                              <span className="text-right text-black font-bold">{matchedSrv?.name || item.serviceId}</span>
                             </div>
 
                             {/* Detailed financial breakdown table */}
-                            <div className="border border-slate-200 rounded-lg overflow-hidden bg-white">
-                              <table className="w-full text-center text-[10px] border-collapse">
+                            <div className="border-2 border-black rounded-xs overflow-hidden bg-white">
+                              <table className="w-full text-center text-[11px] border-collapse text-black">
                                 <thead>
-                                  <tr className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
-                                    <th className="py-1.5 border-l border-slate-200 w-1/3 text-center">المجموع</th>
-                                    <th className="py-1.5 border-l border-slate-200 w-1/3 text-center">رسوم المكتب</th>
-                                    <th className="py-1.5 w-1/3 text-center">السعر الحكومي</th>
+                                  <tr className="bg-white text-black font-bold border-b-2 border-black">
+                                    <th className="py-1.5 border-l-2 border-black w-1/3 text-center text-black font-bold">المجموع</th>
+                                    <th className="py-1.5 border-l-2 border-black w-1/3 text-center text-black font-bold">رسوم المكتب</th>
+                                    <th className="py-1.5 w-1/3 text-center text-black font-bold">السعر الحكومي</th>
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  <tr className="text-slate-700 font-semibold bg-white">
-                                    <td className="py-1.5 border-l border-slate-200 font-mono text-center">
-                                      {item.price.toFixed(2)} <span className="text-[8px] text-slate-500 font-cairo">ج.م</span>
+                                  <tr className="text-black font-bold bg-white">
+                                    <td className="py-1.5 border-l-2 border-black font-mono font-bold text-center text-black">
+                                      {item.price.toFixed(2)} <span className="text-[9px] text-black font-cairo">ج.م</span>
                                     </td>
-                                    <td className="py-1.5 border-l border-slate-200 font-mono text-center">
-                                      {singleOfficeTotal.toFixed(2)} <span className="text-[8px] text-slate-500 font-cairo">ج.م</span>
+                                    <td className="py-1.5 border-l-2 border-black font-mono font-bold text-center text-black">
+                                      {singleOfficeTotal.toFixed(2)} <span className="text-[9px] text-black font-cairo">ج.م</span>
                                     </td>
-                                    <td className="py-1.5 font-mono text-center">
-                                      {singleGovTotal.toFixed(2)} <span className="text-[8px] text-slate-500 font-cairo">ج.م</span>
+                                    <td className="py-1.5 font-mono font-bold text-center text-black">
+                                      {singleGovTotal.toFixed(2)} <span className="text-[9px] text-black font-cairo">ج.م</span>
                                     </td>
                                   </tr>
                                 </tbody>
@@ -217,8 +245,8 @@ export default function ThermalReceipt({ invoice, settings, services, onClose }:
                               
                               {/* Expected delivery date bar */}
                               {item.deliveryDate && (
-                                <div className="bg-amber-50/70 border-t border-amber-100 px-2 py-1 text-center text-[9px] text-amber-800 font-bold">
-                                  تاريخ الاستلام المتوقع: <span className="font-mono">{item.deliveryDate}</span>
+                                <div className="border-t-2 border-black px-2 py-1 text-center text-[10.5px] text-black font-bold bg-white">
+                                  تاريخ الاستلام المتوقع: <span className="font-mono font-bold">{item.deliveryDate}</span>
                                 </div>
                               )}
                             </div>
@@ -231,45 +259,61 @@ export default function ThermalReceipt({ invoice, settings, services, onClose }:
               })}
             </div>
 
-            <div className="border-t border-dashed border-slate-400 my-2"></div>
+            <div className="border-t-2 border-dashed border-black my-2"></div>
 
             {/* Total Summary */}
             <div className="space-y-1">
-              <div className="flex justify-between items-center text-sm font-bold text-slate-900 pt-1">
+              <div className="flex justify-between items-center text-[13px] font-bold text-black pt-1">
                 <span>المبلغ الإجمالي الكلي:</span>
-                <span className="font-mono text-emerald-700 text-base font-extrabold">{invoice.totalAmount.toFixed(2)} ج.م</span>
+                <span className="font-mono text-black text-lg font-black">{invoice.totalAmount.toFixed(2)} ج.م</span>
               </div>
             </div>
 
-            <div className="border-t border-dashed border-slate-400 my-2"></div>
+            <div className="border-t-2 border-dashed border-black my-2"></div>
 
             {/* Footer Text */}
-            <div className="text-center text-[10px] text-slate-600 whitespace-pre-line leading-tight">
+            <div className="text-center text-[10.5px] text-black font-bold whitespace-pre-line leading-tight">
               {settings.footerText || "شكراً لكم على ثقتكم الغالية بـ مكتب مزايا للجوازات."}
             </div>
 
             {/* Print Date */}
-            <div className="text-center text-[8px] text-slate-400 mt-2 font-mono">
+            <div className="text-center text-[9px] text-black mt-2 font-mono font-bold">
               طباعة: {new Date().toLocaleString('ar-EG')}
             </div>
           </div>
         </div>
 
         {/* Footer Actions */}
-        <div className="px-6 py-4 bg-slate-50 flex justify-end gap-3 border-t border-slate-100">
+        <div className="px-6 py-4 bg-slate-50 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100">
           <button 
+            type="button"
             onClick={onClose} 
-            className="px-4 py-2 border border-slate-200 text-slate-600 hover:bg-slate-100 rounded-lg text-sm font-medium font-cairo transition-colors"
+            className="px-4 py-2 border border-slate-200 text-slate-600 hover:bg-slate-100 rounded-lg text-sm font-medium font-cairo transition-colors cursor-pointer"
           >
             إغلاق
           </button>
-          <button 
-            onClick={handlePrint} 
-            className="px-5 py-2 bg-slate-900 text-white hover:bg-slate-800 rounded-lg text-sm font-bold font-cairo flex items-center gap-2 transition-colors"
-          >
-            <Printer className="w-4 h-4" />
-            اطبع الآن
-          </button>
+          
+          <div className="flex items-center gap-2">
+            {onSendWhatsApp && (
+              <button 
+                type="button"
+                onClick={onSendWhatsApp} 
+                className="px-4 py-2 bg-emerald-600 text-white hover:bg-emerald-500 rounded-lg text-sm font-bold font-cairo flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                title="إرسال رسالة ترحيبية وتفاصيل الفاتورة عبر واتساب"
+              >
+                <Send className="w-4 h-4" />
+                رسالة واتساب
+              </button>
+            )}
+            <button 
+              type="button"
+              onClick={handlePrint} 
+              className="px-5 py-2 bg-slate-900 text-white hover:bg-slate-800 rounded-lg text-sm font-bold font-cairo flex items-center gap-2 transition-colors cursor-pointer shadow-xs"
+            >
+              <Printer className="w-4 h-4" />
+              اطبع الآن
+            </button>
+          </div>
         </div>
 
       </div>
