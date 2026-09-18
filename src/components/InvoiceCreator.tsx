@@ -796,9 +796,9 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
                               required
                             >
                               <option value="">-- اختر الخدمة --</option>
-                              {services.map((s) => (
+                              {services.map((s, idx) => (
                                 <option key={s.id} value={s.id}>
-                                  {s.name} (حكومي: {s.govPrice} - مكتب: {s.officeFee})
+                                  {idx + 1}. {s.name} (حكومي: {s.govPrice} - مكتب: {s.officeFee})
                                 </option>
                               ))}
                             </select>

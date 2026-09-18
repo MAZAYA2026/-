@@ -689,8 +689,10 @@ export default function InvoiceQuery({ invoices, services, settings, activeEmplo
                           }}
                           className="flex-1 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs"
                         >
-                          {services.map(srv => (
-                            <option key={srv.id} value={srv.name}>{srv.name}</option>
+                          {services.map((srv, idx) => (
+                            <option key={srv.id} value={srv.name}>
+                              {idx + 1}. {srv.name}
+                            </option>
                           ))}
                         </select>
                         <input

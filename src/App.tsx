@@ -119,6 +119,10 @@ export default function App() {
     setServices((prev) => prev.filter((srv) => srv.id !== id));
   };
 
+  const handleServicesReordered = (newServices: Service[]) => {
+    setServices(newServices);
+  };
+
   const handleSettingsUpdated = (newSettings: AppSettings) => {
     setSettings(newSettings);
   };
@@ -369,6 +373,7 @@ export default function App() {
               onServiceCreated={handleServiceCreated} 
               onServiceUpdated={handleServiceUpdated} 
               onServiceDeleted={handleServiceDeleted} 
+              onServicesReordered={handleServicesReordered}
             />
           )}
 

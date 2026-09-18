@@ -440,6 +440,40 @@ app.delete("/api/db/services/:id", (req, res) => {
   res.json({ status: "success", message: "Service deleted" });
 });
 
+// Reorder services endpoint
+app.post("/api/db/services/reorder", (req, res) => {
+  const { services: reorderedServices, serviceIds } = req.body;
+  const db = readDB();
+
+  if (Array.isArray(reorderedServices) && reorderedServices.length > 0) {
+    db.services = reorderedServices.map((s: any, idx: number) => ({
+      ...s,
+      order: idx + 1
+    }));
+  } else if (Array.isArray(serviceIds) && serviceIds.length > 0) {
+    const serviceMap = new Map<string, any>((db.services || []).map((s: any) => [s.id, s]));
+    const newServices: any[] = [];
+    serviceIds.forEach((id: string, idx: number) => {
+      const s = serviceMap.get(id);
+      if (s) {
+        s.order = idx + 1;
+        newServices.push(s);
+        serviceMap.delete(id);
+      }
+    });
+    // Add any remaining services that weren't in serviceIds
+    serviceMap.forEach((s: any) => {
+      s.order = newServices.length + 1;
+      newServices.push(s);
+    });
+    db.services = newServices;
+  }
+
+  writeDB(db);
+  triggerBackgroundWebhookSync(db);
+  res.json({ status: "success", services: db.services });
+});
+
 // 8. Collection Closings endpoint
 app.post("/api/db/closings", (req, res) => {
   const closing = req.body;
@@ -950,11 +984,11 @@ async function pullFromGoogleWebhook(webhookUrl: string) {
 
 // Background auto sync trigger
 function triggerBackgroundWebhookSync(db: any) {
-  const webhookUrl = db.settings?.googleSheetWebhookUrl;
-  const autoSync = db.settings?.autoSyncWebhook;
-  if (webhookUrl && autoSync) {
+  const webhookUrl = db.settings?.googleSheetWebhookUrl || (db.settings?.googleSheetUrl?.includes("script.google.com") ? db.settings.googleSheetUrl : null);
+  const autoSync = db.settings?.autoSyncWebhook ?? true;
+  if (webhookUrl && webhookUrl.startsWith("http") && autoSync) {
     pushToGoogleWebhook(webhookUrl, db).catch((err) => {
-      console.warn("Background Webhook sync deferred:", err.message);
+      console.warn("Background Google Sheet sync deferred:", err.message);
     });
   }
 }

@@ -1,7 +1,10 @@
 import React, { useState } from "react";
 import { Service, Employee } from "../types";
-import { createServiceOnServer, updateServiceOnServer, deleteServiceOnServer } from "../lib/api";
-import { Plus, Edit3, Trash2, Check, X, ShieldAlert, Sparkles, FolderPlus, DollarSign, Clock, FileText } from "lucide-react";
+import { createServiceOnServer, updateServiceOnServer, deleteServiceOnServer, reorderServicesOnServer } from "../lib/api";
+import { 
+  Plus, Edit3, Trash2, Check, X, ShieldAlert, Sparkles, FolderPlus, DollarSign, Clock, FileText,
+  ArrowUp, ArrowDown, ChevronsUp, ChevronsDown, ArrowUpDown, CheckCircle2, ArrowDownAZ, Hash, Loader2
+} from "lucide-react";
 
 interface ServicesConfigProps {
   services: Service[];
@@ -9,9 +12,17 @@ interface ServicesConfigProps {
   onServiceCreated: (srv: Service) => void;
   onServiceUpdated: (srv: Service) => void;
   onServiceDeleted: (id: string) => void;
+  onServicesReordered?: (services: Service[]) => void;
 }
 
-export default function ServicesConfig({ services, activeEmployee, onServiceCreated, onServiceUpdated, onServiceDeleted }: ServicesConfigProps) {
+export default function ServicesConfig({ 
+  services, 
+  activeEmployee, 
+  onServiceCreated, 
+  onServiceUpdated, 
+  onServiceDeleted,
+  onServicesReordered 
+}: ServicesConfigProps) {
   const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
 
   // Form states for creating/editing
@@ -23,6 +34,100 @@ export default function ServicesConfig({ services, activeEmployee, onServiceCrea
   const [instructions, setInstructions] = useState("");
   const [deliveryDaysOffset, setDeliveryDaysOffset] = useState(1);
   const [notes, setNotes] = useState("");
+
+  // Reordering states
+  const [isSavingOrder, setIsSavingOrder] = useState(false);
+  const [orderFeedback, setOrderFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
+
+  const showFeedback = (message: string, type: "success" | "error" = "success") => {
+    setOrderFeedback({ type, message });
+    setTimeout(() => {
+      setOrderFeedback(null);
+    }, 3000);
+  };
+
+  const handleMoveService = async (index: number, direction: "up" | "down" | "top" | "bottom") => {
+    if (!activeEmployee.permissions.canManageServices) {
+      alert("عذراً، ليست لديك صلاحية لإدارة وتعديل الخدمات.");
+      return;
+    }
+
+    if (direction === "up" && index === 0) return;
+    if (direction === "down" && index === services.length - 1) return;
+
+    const newServices = [...services];
+    if (direction === "up") {
+      const temp = newServices[index];
+      newServices[index] = newServices[index - 1];
+      newServices[index - 1] = temp;
+    } else if (direction === "down") {
+      const temp = newServices[index];
+      newServices[index] = newServices[index + 1];
+      newServices[index + 1] = temp;
+    } else if (direction === "top") {
+      const [item] = newServices.splice(index, 1);
+      newServices.unshift(item);
+    } else if (direction === "bottom") {
+      const [item] = newServices.splice(index, 1);
+      newServices.push(item);
+    }
+
+    const updated = newServices.map((s, idx) => ({ ...s, order: idx + 1 }));
+    if (onServicesReordered) {
+      onServicesReordered(updated);
+    }
+
+    try {
+      setIsSavingOrder(true);
+      await reorderServicesOnServer(updated);
+      showFeedback("تم حفظ الترتيب الجديد للخدمات بنجاح");
+    } catch (err) {
+      console.error(err);
+      showFeedback("تعذر حفظ الترتيب على الخادم، يرجى المحاولة مرة أخرى", "error");
+    } finally {
+      setIsSavingOrder(false);
+    }
+  };
+
+  const handleSortPreset = async (preset: "passportFirst" | "alphabetical" | "priceDesc" | "priceAsc") => {
+    if (!activeEmployee.permissions.canManageServices) {
+      alert("عذراً، ليست لديك صلاحية لإدارة وتعديل الخدمات.");
+      return;
+    }
+
+    const newServices = [...services];
+    if (preset === "passportFirst") {
+      newServices.sort((a, b) => {
+        const aPass = a.name.startsWith("#") || a.name.startsWith("##");
+        const bPass = b.name.startsWith("#") || b.name.startsWith("##");
+        if (aPass && !bPass) return -1;
+        if (!aPass && bPass) return 1;
+        return a.name.localeCompare(b.name, "ar");
+      });
+    } else if (preset === "alphabetical") {
+      newServices.sort((a, b) => a.name.localeCompare(b.name, "ar"));
+    } else if (preset === "priceDesc") {
+      newServices.sort((a, b) => (b.govPrice + b.officeFee) - (a.govPrice + a.officeFee));
+    } else if (preset === "priceAsc") {
+      newServices.sort((a, b) => (a.govPrice + a.officeFee) - (b.govPrice + b.officeFee));
+    }
+
+    const updated = newServices.map((s, idx) => ({ ...s, order: idx + 1 }));
+    if (onServicesReordered) {
+      onServicesReordered(updated);
+    }
+
+    try {
+      setIsSavingOrder(true);
+      await reorderServicesOnServer(updated);
+      showFeedback("تم تطبيق الترتيب الجديد وحفظه بنجاح");
+    } catch (err) {
+      console.error(err);
+      showFeedback("حدث خطأ أثناء حفظ الترتيب السريع", "error");
+    } finally {
+      setIsSavingOrder(false);
+    }
+  };
 
   const resetForm = () => {
     setName("");
@@ -390,12 +495,85 @@ export default function ServicesConfig({ services, activeEmployee, onServiceCrea
         </form>
       )}
 
+      {/* REORDERING TOOLBAR */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <ArrowUpDown className="w-4 h-4 text-blue-600" />
+            <span className="font-bold text-sm text-slate-900">ترتيب ظهور الخدمات المعروضة</span>
+            {isSavingOrder && (
+              <span className="flex items-center gap-1 text-[11px] text-blue-600 font-medium mr-2">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                جاري الحفظ...
+              </span>
+            )}
+            {orderFeedback && (
+              <span className={`flex items-center gap-1 text-[11px] font-bold mr-2 ${
+                orderFeedback.type === "success" ? "text-emerald-600" : "text-rose-600"
+              }`}>
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                {orderFeedback.message}
+              </span>
+            )}
+          </div>
+          <p className="text-[11px] text-slate-500 mt-0.5">
+            استخدم أزرار الأسهم (⬆️ / ⬇️) في الجدول لتقديم أو تأخير أي خدمة، أو اختر أحد خيارات الترتيب التلقائي السريع. الترتيب ينعكس فورياً في شاشات تسجيل الفواتير.
+          </p>
+        </div>
+
+        {/* Quick sort presets */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] font-bold text-slate-500 ml-1">ترتيب سريع:</span>
+          <button
+            type="button"
+            disabled={isSavingOrder}
+            onClick={() => handleSortPreset("passportFirst")}
+            className="px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-bold flex items-center gap-1 border border-blue-200 transition-colors cursor-pointer"
+            title="وضع خدمات الجوازات التي تبدأ بـ # في بداية القائمة"
+          >
+            <Hash className="w-3.5 h-3.5" />
+            الجوازات أولاً (#)
+          </button>
+          <button
+            type="button"
+            disabled={isSavingOrder}
+            onClick={() => handleSortPreset("alphabetical")}
+            className="px-2.5 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-bold flex items-center gap-1 border border-slate-200 transition-colors cursor-pointer"
+            title="ترتيب أبجدي من الألف إلى الياء"
+          >
+            <ArrowDownAZ className="w-3.5 h-3.5" />
+            أبجدياً (أ - ي)
+          </button>
+          <button
+            type="button"
+            disabled={isSavingOrder}
+            onClick={() => handleSortPreset("priceDesc")}
+            className="px-2.5 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-bold flex items-center gap-1 border border-slate-200 transition-colors cursor-pointer"
+            title="الأعلى سعراً أولاً"
+          >
+            <DollarSign className="w-3.5 h-3.5" />
+            الأعلى سعراً
+          </button>
+          <button
+            type="button"
+            disabled={isSavingOrder}
+            onClick={() => handleSortPreset("priceAsc")}
+            className="px-2.5 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-bold flex items-center gap-1 border border-slate-200 transition-colors cursor-pointer"
+            title="الأقل سعراً أولاً"
+          >
+            <DollarSign className="w-3.5 h-3.5" />
+            الأقل سعراً
+          </button>
+        </div>
+      </div>
+
       {/* SERVICES LIST */}
       <div className="bg-white border border-slate-200 rounded-2xl shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-right text-xs">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-100 text-slate-500 font-bold">
+                <th className="p-3 w-28 text-center">الترتيب والتحريك</th>
                 <th className="p-3">اسم الخدمة بالكامل</th>
                 <th className="p-3">الرسوم الحكومية</th>
                 <th className="p-3">رسوم أتعاب المكتب</th>
@@ -406,17 +584,80 @@ export default function ServicesConfig({ services, activeEmployee, onServiceCrea
               </tr>
             </thead>
             <tbody>
-              {services.map((srv) => {
+              {services.map((srv, idx) => {
                 const isPassport = srv.name.startsWith("#") || srv.name.startsWith("##");
                 const total = srv.govPrice + srv.officeFee;
 
                 return (
-                  <tr key={srv.id} className="border-b border-slate-150 hover:bg-slate-50/40">
+                  <tr key={srv.id} className="border-b border-slate-150 hover:bg-slate-50/50 transition-colors">
+                    {/* Reorder controls */}
+                    <td className="p-2.5 text-center">
+                      <div className="flex items-center justify-center gap-1">
+                        <span className="w-6 h-6 rounded-md bg-slate-100 text-slate-700 text-[11px] font-mono font-black flex items-center justify-center border border-slate-200">
+                          {idx + 1}
+                        </span>
+                        <div className="flex items-center gap-0.5">
+                          <button
+                            type="button"
+                            disabled={idx === 0 || isSavingOrder}
+                            onClick={() => handleMoveService(idx, "up")}
+                            className={`p-1.5 rounded-md transition-colors ${
+                              idx === 0 || isSavingOrder
+                                ? "text-slate-300 cursor-not-allowed"
+                                : "text-slate-600 hover:text-blue-700 hover:bg-blue-50 active:bg-blue-100 cursor-pointer"
+                            }`}
+                            title="تقديم للأعلى (خطوة واحدة)"
+                          >
+                            <ArrowUp className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={idx === services.length - 1 || isSavingOrder}
+                            onClick={() => handleMoveService(idx, "down")}
+                            className={`p-1.5 rounded-md transition-colors ${
+                              idx === services.length - 1 || isSavingOrder
+                                ? "text-slate-300 cursor-not-allowed"
+                                : "text-slate-600 hover:text-blue-700 hover:bg-blue-50 active:bg-blue-100 cursor-pointer"
+                            }`}
+                            title="تأخير للأسفل (خطوة واحدة)"
+                          >
+                            <ArrowDown className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={idx === 0 || isSavingOrder}
+                            onClick={() => handleMoveService(idx, "top")}
+                            className={`p-1 rounded transition-colors ${
+                              idx === 0 || isSavingOrder
+                                ? "text-slate-300 cursor-not-allowed"
+                                : "text-slate-400 hover:text-blue-700 hover:bg-blue-50 cursor-pointer"
+                            }`}
+                            title="نقل لأول القائمة تماماً"
+                          >
+                            <ChevronsUp className="w-3 h-3" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={idx === services.length - 1 || isSavingOrder}
+                            onClick={() => handleMoveService(idx, "bottom")}
+                            className={`p-1 rounded transition-colors ${
+                              idx === services.length - 1 || isSavingOrder
+                                ? "text-slate-300 cursor-not-allowed"
+                                : "text-slate-400 hover:text-blue-700 hover:bg-blue-50 cursor-pointer"
+                            }`}
+                            title="نقل لآخر القائمة تماماً"
+                          >
+                            <ChevronsDown className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    </td>
+
                     <td className="p-3">
                       <div className="font-bold text-slate-900 flex items-center gap-1.5">
                         <span>{srv.name}</span>
                         {isPassport && (
-                          <span className="bg-blue-50 border border-blue-100 text-blue-600 text-[8px] px-1.5 py-0.5 rounded-sm">
+                          <span className="bg-blue-50 border border-blue-100 text-blue-600 text-[8px] px-1.5 py-0.5 rounded-sm font-bold">
                             مصلحة الجوازات
                           </span>
                         )}

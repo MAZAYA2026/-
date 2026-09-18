@@ -13,6 +13,7 @@ export interface Service {
   instructions: string; // تعليمات التسليم
   deliveryDaysOffset: number; // For automatic delivery date calculation (optional)
   notes: string; // ملاحظات للعميل
+  order?: number; // ترتيب ظهور الخدمة (1, 2, 3...)
 }
 
 export interface CustomerInput {

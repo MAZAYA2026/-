@@ -110,6 +110,19 @@ export async function deleteServiceOnServer(id: string): Promise<void> {
   }
 }
 
+export async function reorderServicesOnServer(services: Service[]): Promise<Service[]> {
+  const response = await fetch("/api/db/services/reorder", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ services }),
+  });
+  if (!response.ok) {
+    throw new Error("Failed to reorder services");
+  }
+  const result = await response.json();
+  return result.services;
+}
+
 export async function createClosingOnServer(closing: Partial<CollectionClosing>): Promise<CollectionClosing> {
   const response = await fetch("/api/db/closings", {
     method: "POST",
