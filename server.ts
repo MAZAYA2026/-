@@ -949,7 +949,7 @@ async function pushToGoogleWebhook(webhookUrl: string, db: any) {
     const response = await fetch(webhookUrl, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
+        "Content-Type": "text/plain;charset=utf-8",
       },
       body: JSON.stringify({
         action: "push",
@@ -957,7 +957,27 @@ async function pushToGoogleWebhook(webhookUrl: string, db: any) {
       }),
       redirect: "follow",
     });
-    const result = await response.json().catch(() => ({ status: "success", message: "تم إرسال البيانات بنجاح" }));
+
+    const text = await response.text();
+    let result: any;
+    try {
+      result = JSON.parse(text);
+    } catch {
+      if (text.includes("Script function not found")) {
+        throw new Error("دالة الحفظ غير مفعلة بالسكربت (Script function not found: doPost). السبب: يلزم بعد لصق الكود في Apps Script الضغط على نشر (Deploy) > إدارة عمليات النشر (Manage deployments) وتعديل الإصدار إلى New version.");
+      }
+      if (text.includes("Authorization is required") || text.includes("accounts.google.com")) {
+        throw new Error("يتطلب السكربت إذناً أو تسجيل دخول: يرجى ضبط خيار 'Who has access' على 'Anyone' (أي شخص) عند نشر السكربت.");
+      }
+      if (text.includes("<!DOCTYPE") || text.includes("<html")) {
+        throw new Error("استجاب جوجل بصفحة خطأ ويب وليس بتطبيق سكربت نشط. تأكد من نشر السكربت كتطبيق ويب (Web app).");
+      }
+      result = { status: "success", message: text };
+    }
+
+    if (result && result.error) {
+      throw new Error(result.error);
+    }
     return result;
   } catch (err: any) {
     console.error("Webhook push error:", err);
@@ -971,7 +991,21 @@ async function pullFromGoogleWebhook(webhookUrl: string) {
       method: "GET",
       redirect: "follow",
     });
-    const result = await response.json();
+
+    const text = await response.text();
+    let result: any;
+    try {
+      result = JSON.parse(text);
+    } catch {
+      if (text.includes("Script function not found")) {
+        throw new Error("دالة الاستيراد غير مفعلة بالسكربت (Script function not found: doGet). يرجى التأكد من لصق الكود المحدث في Apps Script ثم تحديث النشر Deploy.");
+      }
+      if (text.includes("Authorization is required") || text.includes("accounts.google.com")) {
+        throw new Error("يتطلب السكربت إذن وصول: تأكد من اختيار 'Anyone' (أي شخص) في Who has access عند نشر السكربت.");
+      }
+      throw new Error("استجابة غير صالحة من السكربت: " + text.slice(0, 120));
+    }
+
     if (!result || !result.db) {
       throw new Error("لم يتم العثور على حقل البيانات db في استجابة السكربت.");
     }
@@ -987,8 +1021,10 @@ function triggerBackgroundWebhookSync(db: any) {
   const webhookUrl = db.settings?.googleSheetWebhookUrl || (db.settings?.googleSheetUrl?.includes("script.google.com") ? db.settings.googleSheetUrl : null);
   const autoSync = db.settings?.autoSyncWebhook ?? true;
   if (webhookUrl && webhookUrl.startsWith("http") && autoSync) {
-    pushToGoogleWebhook(webhookUrl, db).catch((err) => {
-      console.warn("Background Google Sheet sync deferred:", err.message);
+    pushToGoogleWebhook(webhookUrl, db).then((res) => {
+      console.log("Background Google Sheet auto-sync completed successfully:", res?.message || "OK");
+    }).catch((err) => {
+      console.warn("Background Google Sheet auto-sync warning:", err.message);
     });
   }
 }
@@ -1003,15 +1039,41 @@ app.post("/api/sheets/webhook/test", async (req, res) => {
   try {
     const testResponse = await fetch(webhookUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify({ action: "test" }),
       redirect: "follow",
     });
 
-    const data = await testResponse.json().catch(() => ({ status: "success" }));
+    const text = await testResponse.text();
+    let data: any;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      if (text.includes("Script function not found")) {
+        return res.status(400).json({ 
+          error: "تم الوصول إلى رابط السكربت ولكن ظهرت رسالة جوجل: (Script function not found: doPost).\nالسبب: كود السكربت لم يُنشر بالإصدار الجديد بعد لصقه. يرجى مسح أي كود قديم في Apps Script، ولصق الكود الجديد، ثم الضغط على زر نشر (Deploy) > إدارة عمليات النشر (Manage deployments) > الضغط على أيقونة القلم (Edit) > واختيار إصدار جديد (New version) ثم الضغط على نشر (Deploy)." 
+        });
+      }
+      if (text.includes("Authorization is required") || text.includes("accounts.google.com")) {
+        return res.status(400).json({ 
+          error: "إذن الوصول للسكربت غير متاح: عند نشر السكربت (Deploy) يجب أن تختار في خانة 'Who has access' (من يمكنه الوصول) الخيار: 'Anyone' (أي شخص) حتى يتمكن البرنامج من الاتصال والتسجيل دون الحاجة لطلب إذن في كل مرة." 
+        });
+      }
+      if (text.includes("<!DOCTYPE") || text.includes("<html")) {
+        return res.status(400).json({ 
+          error: "الرابط المدخل فتح صفحة إنترنت عادية وليس رابط تطبيق سكربت ويب نشط. تأكد من نسخ رابط تطبيق الويب (Web app URL) الناتج عن خيار Deploy." 
+        });
+      }
+      data = { status: "success", message: text };
+    }
+
+    if (data && data.error) {
+      return res.status(400).json({ error: "خطأ من السكربت: " + data.error });
+    }
+
     res.json({
       status: "success",
-      message: data.message || "تم اختبار الاتصال بالسكربت بنجاح والملف يستجيب! 📊",
+      message: data.message || "تم اختبار الاتصال بالسكربت بنجاح وقاعدة البيانات مستعدة للتخزين! 📊",
       data,
     });
   } catch (err: any) {

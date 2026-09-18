@@ -53,29 +53,61 @@ export default function SettingsConfig({ settings, activeEmployee, onSettingsUpd
   const [syncLoading, setSyncLoading] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
 
-  // Comprehensive Google Apps Script code for all data
-  const appsScriptCode = `// سكربت الربط التلقائي لقاعدة بيانات مزايا مع جوجل شيت
+  // Comprehensive Google Apps Script code for all data (Invoices, Services, Closings, Settings, Dictionary)
+  const appsScriptCode = `// سكربت الربط التلقائي وقاعدة البيانات الشاملة لمكتب مزايا مع جوجل شيت
 function doPost(e) {
   try {
-    var contents = JSON.parse(e.postData.contents);
+    var contents = {};
+    if (e && e.postData && e.postData.contents) {
+      try {
+        contents = JSON.parse(e.postData.contents);
+      } catch(parseErr) {
+        contents = { action: "push" };
+      }
+    }
+    
     var action = contents.action || "push";
     var ss = SpreadsheetApp.getActiveSpreadsheet();
 
+    // 0. Test Connection
     if (action === "test") {
-      return ContentService.createTextOutput(JSON.stringify({ status: "success", message: "تم الاتصال بنجاح بملف جوجل شيت! 📊" }))
-        .setMimeType(ContentService.MimeType.JSON);
+      return ContentService.createTextOutput(JSON.stringify({ 
+        status: "success", 
+        message: "تم الاتصال بنجاح بملف جوجل شيت وقاعدة البيانات جاهزة ومستعدة للتخزين! 📊" 
+      })).setMimeType(ContentService.MimeType.JSON);
     }
 
+    // 1. Push / Sync All Data
     if (action === "push" || action === "sync") {
       var db = contents.db || contents;
-      
-      // 1. Invoices Sheet
+
+      // --- Sheet 1: Invoices_الفواتير ---
       if (db.invoices && Array.isArray(db.invoices)) {
-        var invSheet = getOrCreateSheet(ss, "Invoices");
+        var invSheet = getOrCreateSheet(ss, "Invoices_الفواتير");
         invSheet.clearContents();
-        var invRows = [["رقم الفاتورة", "التاريخ", "الحالة", "الموظف", "رقم الدرج", "إجمالي حكومي", "إجمالي مكتب", "المبلغ الكلي", "بيانات العملاء والخدمات"]];
+        var invHeaders = [
+          "رقم الفاتورة", "التاريخ", "الحالة", "الموظف", "مكان الحفظ (رقم الدرج)", 
+          "رسوم حكومية", "رسوم مكتب", "الإجمالي الكلي", "أسماء العملاء", "أرقام الهواتف", 
+          "الخدمات المطلوبة", "تفاصيل العملاء كاملة (JSON)"
+        ];
+        var invRows = [invHeaders];
         for (var i = 0; i < db.invoices.length; i++) {
           var inv = db.invoices[i];
+          var custNames = [];
+          var custPhones = [];
+          var servicesList = [];
+          if (inv.customers && Array.isArray(inv.customers)) {
+            for (var k = 0; k < inv.customers.length; k++) {
+              var c = inv.customers[k];
+              custNames.push(c.arabicName + (c.englishName ? " (" + c.englishName + ")" : ""));
+              if (c.phone) custPhones.push(c.phone);
+              if (c.services && Array.isArray(c.services)) {
+                for (var sIdx = 0; sIdx < c.services.length; sIdx++) {
+                  servicesList.push(c.services[sIdx].serviceId + " x" + (c.services[sIdx].quantity || 1));
+                }
+              }
+            }
+          }
           invRows.push([
             inv.invoiceId || "",
             inv.date || "",
@@ -85,26 +117,33 @@ function doPost(e) {
             inv.totalGov || 0,
             inv.totalOffice || 0,
             inv.totalAmount || 0,
+            custNames.join(" | "),
+            custPhones.join(" | "),
+            servicesList.join(" , "),
             JSON.stringify(inv.customers || [])
           ]);
         }
         if (invRows.length > 0) {
           invSheet.getRange(1, 1, invRows.length, invRows[0].length).setValues(invRows);
+          formatHeader(invSheet, invHeaders.length);
         }
       }
 
-      // 2. Services Sheet
+      // --- Sheet 2: Services_الخدمات_والاسعار ---
       if (db.services && Array.isArray(db.services)) {
-        var srvSheet = getOrCreateSheet(ss, "Services");
+        var srvSheet = getOrCreateSheet(ss, "Services_الخدمات_والاسعار");
         srvSheet.clearContents();
-        var srvRows = [["المعرف", "اسم الخدمة", "السعر الحكومي", "رسوم المكتب", "مدة التنفيذ", "تعليمات التسليم", "إزاحة أيام التسليم", "ملاحظات"]];
+        var srvHeaders = ["الترتيب", "المعرف ID", "اسم الخدمة", "السعر الحكومي", "رسوم المكتب", "إجمالي السعر", "مدة التنفيذ", "تعليمات التسليم", "إزاحة أيام التسليم", "ملاحظات للعميل"];
+        var srvRows = [srvHeaders];
         for (var s = 0; s < db.services.length; s++) {
           var srv = db.services[s];
           srvRows.push([
+            srv.order || (s + 1),
             srv.id || "",
             srv.name || "",
             srv.govPrice || 0,
             srv.officeFee || 0,
+            (Number(srv.govPrice) || 0) + (Number(srv.officeFee) || 0),
             srv.duration || "",
             srv.instructions || "",
             srv.deliveryDaysOffset || 0,
@@ -113,14 +152,16 @@ function doPost(e) {
         }
         if (srvRows.length > 0) {
           srvSheet.getRange(1, 1, srvRows.length, srvRows[0].length).setValues(srvRows);
+          formatHeader(srvSheet, srvHeaders.length);
         }
       }
 
-      // 3. CollectionClosings Sheet
+      // --- Sheet 3: Closings_تقفيل_الخزينة ---
       if (db.collectionClosings && Array.isArray(db.collectionClosings)) {
-        var clsSheet = getOrCreateSheet(ss, "CollectionClosings");
+        var clsSheet = getOrCreateSheet(ss, "Closings_تقفيل_الخزينة");
         clsSheet.clearContents();
-        var clsRows = [["المعرف", "تاريخ الإغلاق", "تم الإغلاق بواسطة", "الإيراد", "الربح", "النقدي", "الآجل", "ملاحظات"]];
+        var clsHeaders = ["المعرف ID", "تاريخ الإغلاق", "تم الإغلاق بواسطة", "الإيراد الكلي", "صافي أرباح المكتب", "المبلغ النقدي المحصل", "المبلغ الآجل", "ملاحظات"];
+        var clsRows = [clsHeaders];
         for (var c = 0; c < db.collectionClosings.length; c++) {
           var cls = db.collectionClosings[c];
           clsRows.push([
@@ -136,14 +177,52 @@ function doPost(e) {
         }
         if (clsRows.length > 0) {
           clsSheet.getRange(1, 1, clsRows.length, clsRows[0].length).setValues(clsRows);
+          formatHeader(clsSheet, clsHeaders.length);
         }
       }
 
-      return ContentService.createTextOutput(JSON.stringify({ status: "success", message: "تم تحديث وحفظ البيانات في جوجل شيت بنجاح! 🚀" }))
-        .setMimeType(ContentService.MimeType.JSON);
+      // --- Sheet 4: Settings_الاعدادات_والرسائل ---
+      if (db.settings) {
+        var stSheet = getOrCreateSheet(ss, "Settings_الاعدادات_والرسائل");
+        stSheet.clearContents();
+        var stHeaders = ["بند الإعداد", "القيمة المحفوظة"];
+        var stRows = [
+          stHeaders,
+          ["اسم المكتب بالترويسة", db.settings.headerText || ""],
+          ["الترويسة الفرعية", db.settings.subHeaderText || ""],
+          ["هاتف التواصل والشكاوى", db.settings.welcomeMessage || ""],
+          ["قالب رسالة الفاتورة (واتساب)", db.settings.whatsappTemplate || ""],
+          ["قالب رسالة جاهزية الأوراق للاستلام", db.settings.readyMessage || ""],
+          ["قالب رسالة تم التسليم بنجاح", db.settings.deliveryMessage || ""],
+          ["تذييل الفاتورة المطبوعة", db.settings.footerText || ""],
+          ["إعدادات النظام كاملة (JSON)", JSON.stringify(db.settings || {})]
+        ];
+        stSheet.getRange(1, 1, stRows.length, stRows[0].length).setValues(stRows);
+        formatHeader(stSheet, stHeaders.length);
+      }
+
+      // --- Sheet 5: Dictionary_قاموس_الاسماء ---
+      if (db.dictionary && Array.isArray(db.dictionary)) {
+        var dictSheet = getOrCreateSheet(ss, "Dictionary_قاموس_الاسماء");
+        dictSheet.clearContents();
+        var dictHeaders = ["الاسم بالعربي", "الاسم بالإنجليزي"];
+        var dictRows = [dictHeaders];
+        for (var d = 0; d < db.dictionary.length; d++) {
+          dictRows.push([db.dictionary[d].arabic || "", db.dictionary[d].english || ""]);
+        }
+        if (dictRows.length > 0) {
+          dictSheet.getRange(1, 1, dictRows.length, dictRows[0].length).setValues(dictRows);
+          formatHeader(dictSheet, dictHeaders.length);
+        }
+      }
+
+      return ContentService.createTextOutput(JSON.stringify({ 
+        status: "success", 
+        message: "تم تحديث وحفظ كافة البيانات في ملف جوجل شيت بنجاح! 🚀" 
+      })).setMimeType(ContentService.MimeType.JSON);
     }
 
-    return ContentService.createTextOutput(JSON.stringify({ error: "Unknown action" }))
+    return ContentService.createTextOutput(JSON.stringify({ error: "إجراء غير معروف" }))
       .setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
     return ContentService.createTextOutput(JSON.stringify({ error: err.toString() }))
@@ -153,6 +232,13 @@ function doPost(e) {
 
 function doGet(e) {
   try {
+    if (e && e.parameter && e.parameter.action === "test") {
+      return ContentService.createTextOutput(JSON.stringify({ 
+        status: "success", 
+        message: "تم الاتصال بنجاح بملف جوجل شيت! 📊" 
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var db = {
       settings: {},
@@ -162,37 +248,43 @@ function doGet(e) {
       dictionary: []
     };
 
-    // Read Services
-    var srvSheet = ss.getSheetByName("Services");
+    // 1. Read Services
+    var srvSheet = ss.getSheetByName("Services_الخدمات_والاسعار") || ss.getSheetByName("Services");
     if (srvSheet) {
       var srvValues = srvSheet.getDataRange().getValues();
       for (var s = 1; s < srvValues.length; s++) {
         var row = srvValues[s];
-        if (row[0] && row[1]) {
+        if (row[1] || row[2]) {
+          var idVal = String(row[1] || row[0]);
+          var nameVal = String(row[2] || row[1]);
+          var govVal = Number(row[3] || row[2]) || 0;
+          var offVal = Number(row[4] || row[3]) || 0;
           db.services.push({
-            id: String(row[0]),
-            name: String(row[1]),
-            govPrice: Number(row[2]) || 0,
-            officeFee: Number(row[3]) || 0,
-            duration: String(row[4] || ""),
-            instructions: String(row[5] || ""),
-            deliveryDaysOffset: Number(row[6]) || 0,
-            notes: String(row[7] || "")
+            order: Number(row[0]) || s,
+            id: idVal,
+            name: nameVal,
+            govPrice: govVal,
+            officeFee: offVal,
+            duration: String(row[6] || row[4] || ""),
+            instructions: String(row[7] || row[5] || ""),
+            deliveryDaysOffset: Number(row[8] || row[6]) || 0,
+            notes: String(row[9] || row[7] || "")
           });
         }
       }
     }
 
-    // Read Invoices
-    var invSheet = ss.getSheetByName("Invoices");
+    // 2. Read Invoices
+    var invSheet = ss.getSheetByName("Invoices_الفواتير") || ss.getSheetByName("Invoices");
     if (invSheet) {
       var invValues = invSheet.getDataRange().getValues();
       for (var v = 1; v < invValues.length; v++) {
         var iRow = invValues[v];
         if (iRow[0]) {
           var custData = [];
+          var rawJson = iRow[11] || iRow[8];
           try {
-            custData = iRow[8] ? JSON.parse(iRow[8]) : [];
+            custData = rawJson ? JSON.parse(rawJson) : [];
           } catch(e){}
           db.invoices.push({
             invoiceId: Number(iRow[0]),
@@ -209,8 +301,8 @@ function doGet(e) {
       }
     }
 
-    // Read CollectionClosings
-    var clsSheet = ss.getSheetByName("CollectionClosings");
+    // 3. Read Closings
+    var clsSheet = ss.getSheetByName("Closings_تقفيل_الخزينة") || ss.getSheetByName("CollectionClosings");
     if (clsSheet) {
       var clsValues = clsSheet.getDataRange().getValues();
       for (var c = 1; c < clsValues.length; c++) {
@@ -230,6 +322,35 @@ function doGet(e) {
       }
     }
 
+    // 4. Read Settings
+    var stSheet = ss.getSheetByName("Settings_الاعدادات_والرسائل") || ss.getSheetByName("Settings");
+    if (stSheet) {
+      var stValues = stSheet.getDataRange().getValues();
+      for (var st = 1; st < stValues.length; st++) {
+        var key = String(stValues[st][0] || "");
+        var val = String(stValues[st][1] || "");
+        if (key.indexOf("JSON") !== -1) {
+          try {
+            db.settings = JSON.parse(val);
+          } catch(e){}
+        }
+      }
+    }
+
+    // 5. Read Dictionary
+    var dictSheet = ss.getSheetByName("Dictionary_قاموس_الاسماء") || ss.getSheetByName("Dictionary");
+    if (dictSheet) {
+      var dictValues = dictSheet.getDataRange().getValues();
+      for (var d = 1; d < dictValues.length; d++) {
+        if (dictValues[d][0] && dictValues[d][1]) {
+          db.dictionary.push({
+            arabic: String(dictValues[d][0]),
+            english: String(dictValues[d][1])
+          });
+        }
+      }
+    }
+
     return ContentService.createTextOutput(JSON.stringify({ status: "success", db: db }))
       .setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
@@ -244,6 +365,18 @@ function getOrCreateSheet(ss, name) {
     sheet = ss.insertSheet(name);
   }
   return sheet;
+}
+
+function formatHeader(sheet, numCols) {
+  try {
+    sheet.setRightToLeft(true);
+    sheet.setFrozenRows(1);
+    var range = sheet.getRange(1, 1, 1, numCols);
+    range.setBackground("#1e293b");
+    range.setFontColor("#ffffff");
+    range.setFontWeight("bold");
+    range.setHorizontalAlignment("center");
+  } catch(e) {}
 }`;
 
   const handleCopyScript = () => {
@@ -724,13 +857,18 @@ function getOrCreateSheet(ss, name) {
                   </button>
                 </div>
 
-                <ol className="text-[11px] space-y-1.5 text-slate-300 list-decimal list-inside leading-relaxed font-cairo">
+                <ol className="text-[11px] space-y-2 text-slate-300 list-decimal list-inside leading-relaxed font-cairo">
                   <li>افتح ملف Google Sheets الذي ترغب باستخدامه (جديد أو موجود).</li>
                   <li>من القائمة العلوية اضغط على <strong>امتدادات (Extensions)</strong> ثم اختر <strong>Apps Script</strong>.</li>
-                  <li>امسح أي محتوى هناك والصق الكود بالكامل، ثم اضغط <strong>حفظ (Save / Ctrl+S)</strong>.</li>
-                  <li>اضغط زر <strong>نشر (Deploy)</strong> الأزرق في أعلى الصفحة &gt; <strong>نشر جديد (New deployment)</strong>.</li>
-                  <li>اختر النوع <strong>تطبيق ويب (Web app)</strong>، وفي خيار <strong>من يمكنه الوصول (Who has access)</strong> اختر: <span className="text-amber-400 font-bold">أي شخص (Anyone)</span> ثم Deploy.</li>
-                  <li>انسخ رابط الويب وضع الرابط في الخانة بالأعلى واضغط <strong>"ربط وتفعيل قاعدة البيانات"</strong>. سيقوم السكربت تلقائياً بإنشاء أوراق العمل الأربعة وتنسيقها وحفظ كافة بيانات النظام بها.</li>
+                  <li>امسح أي كود موجود هناك والصق الكود المنسوخ بالكامل، ثم اضغط <strong>حفظ (Save / Ctrl+S)</strong>.</li>
+                  <li>
+                    اضغط زر <strong>نشر (Deploy)</strong> الأزرق في أعلى الصفحة:
+                    <ul className="list-disc list-inside mr-4 mt-1 space-y-1 text-slate-300">
+                      <li><strong>إذا كانت أول مرة:</strong> اختر <strong>نشر جديد (New deployment)</strong> &gt; اختر النوع <strong>تطبيق ويب (Web app)</strong> &gt; وفي خيار <strong>من يمكنه الوصول (Who has access)</strong> اختر: <span className="text-amber-400 font-bold">أي شخص (Anyone)</span> ثم اضغط <strong>Deploy</strong>.</li>
+                      <li><strong className="text-amber-300">إذا كنت قد نشرت مسبقاً وتظهر رسالة (Script function not found):</strong> اختر <strong>إدارة عمليات النشر (Manage deployments)</strong> &gt; اضغط على <strong>أيقونة القلم (تعديل - Edit)</strong> &gt; في خانة <strong>الإصدار (Version)</strong> اختر <span className="text-emerald-400 font-bold">إصدار جديد (New version)</span> &gt; ثم اضغط <strong>نشر (Deploy)</strong>.</li>
+                    </ul>
+                  </li>
+                  <li>انسخ رابط الويب (Web app URL) وضعه في الخانة بالأعلى واضغط <strong>"ربط وحفظ وتفعيل قاعدة البيانات 🚀"</strong>. سيقوم السكربت تلقائياً بإنشاء أوراق العمل الخمسة وتنسيقها وحفظ كافة بيانات النظام بها وتفعيل الحفظ التلقائي الفوري!</li>
                 </ol>
 
                 <div className="relative mt-2">
