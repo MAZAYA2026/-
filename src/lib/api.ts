@@ -28,7 +28,7 @@ export async function saveDB(data: DBPayload): Promise<void> {
   }
 }
 
-export async function translateWithGemini(text: string): Promise<{ arabic: string; english: string }> {
+export async function translateWithGemini(text: string): Promise<{ arabic: string; english: string; dictionary?: DictionaryItem[]; fromDictionary?: boolean }> {
   const response = await fetch("/api/gemini/translate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -136,7 +136,7 @@ export async function createClosingOnServer(closing: Partial<CollectionClosing>)
   return result.closing;
 }
 
-export async function saveDictionaryWord(arabic: string, english: string): Promise<void> {
+export async function saveDictionaryWord(arabic: string, english: string): Promise<DictionaryItem[]> {
   const response = await fetch("/api/db/dictionary", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -145,6 +145,34 @@ export async function saveDictionaryWord(arabic: string, english: string): Promi
   if (!response.ok) {
     throw new Error("Failed to save dictionary word");
   }
+  const result = await response.json();
+  return result.dictionary;
+}
+
+export async function saveDictionaryBatch(items: { arabic: string; english: string }[]): Promise<DictionaryItem[]> {
+  const response = await fetch("/api/db/dictionary", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ items }),
+  });
+  if (!response.ok) {
+    throw new Error("Failed to save dictionary batch");
+  }
+  const result = await response.json();
+  return result.dictionary;
+}
+
+export async function deleteDictionaryWord(arabic: string): Promise<DictionaryItem[]> {
+  const response = await fetch("/api/db/dictionary", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ arabic }),
+  });
+  if (!response.ok) {
+    throw new Error("Failed to delete dictionary word");
+  }
+  const result = await response.json();
+  return result.dictionary;
 }
 
 export async function updateSettingsOnServer(settings: AppSettings): Promise<AppSettings> {

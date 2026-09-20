@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from "react";
-import { AppSettings, Employee } from "../types";
+import { AppSettings, Employee, DictionaryItem } from "../types";
 import { 
   updateSettingsOnServer, 
   testGoogleWebhook,
   pushDataToGoogleWebhook,
-  pullDataFromGoogleWebhook
+  pullDataFromGoogleWebhook,
+  saveDictionaryWord,
+  deleteDictionaryWord
 } from "../lib/api";
 import { 
   Save, 
@@ -25,7 +27,11 @@ import {
   Code,
   Copy,
   Download,
-  Check
+  Check,
+  BookOpen,
+  Search,
+  Plus,
+  Trash2
 } from "lucide-react";
 
 interface SettingsConfigProps {
@@ -34,9 +40,19 @@ interface SettingsConfigProps {
   onSettingsUpdated: (settings: AppSettings) => void;
   employees: Employee[];
   onEmployeesUpdated: (employees: Employee[]) => void;
+  dictionary?: DictionaryItem[];
+  onDictionaryUpdated?: (newDict: DictionaryItem[]) => void;
 }
 
-export default function SettingsConfig({ settings, activeEmployee, onSettingsUpdated, employees, onEmployeesUpdated }: SettingsConfigProps) {
+export default function SettingsConfig({ 
+  settings, 
+  activeEmployee, 
+  onSettingsUpdated, 
+  employees, 
+  onEmployeesUpdated,
+  dictionary = [],
+  onDictionaryUpdated
+}: SettingsConfigProps) {
   const [headerText, setHeaderText] = useState(settings.headerText || "مكتب مزايا للجوازات والمعاملات");
   const [subHeaderText, setSubHeaderText] = useState(settings.subHeaderText ?? "جوازات طنطا والمعاملات الحكومية");
   const [welcomeMessage, setWelcomeMessage] = useState(settings.welcomeMessage || "");
@@ -52,6 +68,56 @@ export default function SettingsConfig({ settings, activeEmployee, onSettingsUpd
   const [copiedScript, setCopiedScript] = useState(false);
   const [syncLoading, setSyncLoading] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
+
+  // Dictionary management states
+  const [dictSearch, setDictSearch] = useState("");
+  const [newArWord, setNewArWord] = useState("");
+  const [newEnWord, setNewEnWord] = useState("");
+  const [dictLoading, setDictLoading] = useState(false);
+  const [dictFeedback, setDictFeedback] = useState("");
+
+  const handleAddDictionaryWord = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newArWord.trim() || !newEnWord.trim()) return;
+
+    setDictLoading(true);
+    try {
+      const updatedDict = await saveDictionaryWord(newArWord.trim(), newEnWord.trim().toUpperCase());
+      if (onDictionaryUpdated) {
+        onDictionaryUpdated(updatedDict);
+      }
+      setNewArWord("");
+      setNewEnWord("");
+      setDictFeedback("تم حفظ الاسم الجديد في القاموس وقاعدة البيانات وملف جوجل شيت بنجاح! 📖");
+      setTimeout(() => setDictFeedback(""), 4000);
+    } catch (err) {
+      console.error(err);
+      alert("حدث خطأ أثناء حفظ الاسم في القاموس.");
+    } finally {
+      setDictLoading(false);
+    }
+  };
+
+  const handleDeleteDictionaryWord = async (arabic: string, english: string) => {
+    if (!confirm(`⚠️ تأكيد الحذف:\nهل أنت متأكد من حذف الاسم "${arabic}" (${english}) نهائياً من قاموس الترجمة وقاعدة البيانات وملف جوجل شيت؟`)) {
+      return;
+    }
+
+    setDictLoading(true);
+    try {
+      const updatedDict = await deleteDictionaryWord(arabic);
+      if (onDictionaryUpdated) {
+        onDictionaryUpdated(updatedDict);
+      }
+      setDictFeedback(`تم حذف "${arabic}" من القاموس وقاعدة البيانات.`);
+      setTimeout(() => setDictFeedback(""), 4000);
+    } catch (err) {
+      console.error(err);
+      alert("حدث خطأ أثناء حذف الكلمة من القاموس.");
+    } finally {
+      setDictLoading(false);
+    }
+  };
 
   // Comprehensive Google Apps Script code for all data (Invoices, Services, Closings, Settings, Dictionary)
   const appsScriptCode = `// سكربت الربط التلقائي وقاعدة البيانات الشاملة لمكتب مزايا مع جوجل شيت
@@ -986,6 +1052,143 @@ function formatHeader(sheet, numCols) {
                 )}
               </div>
             </div>
+          </div>
+        </div>
+
+        {/* Card 5: Dedicated Customer Name Dictionary Management */}
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-xs overflow-hidden">
+          <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <BookOpen className="w-5 h-5 text-blue-600" />
+              <div>
+                <h3 className="font-bold text-sm text-slate-800 font-cairo">قاموس الترجمة المعتمد وأسماء الجوازات (Google Sheet Dictionary)</h3>
+                <p className="text-[11px] text-slate-500 font-cairo">تسجيل الأسماء المترجمة وحفظها في قاعدة البيانات وجوجل شيت لترجمتها فورياً بمجرد كتابة الاسم العربي</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="px-3 py-1 bg-blue-50 text-blue-700 font-bold rounded-lg text-xs font-mono border border-blue-200/60">
+                {dictionary.length} اسم محفوظ بالقاموس
+              </span>
+            </div>
+          </div>
+
+          <div className="p-6 space-y-6">
+            
+            {/* Feedback alert */}
+            {dictFeedback && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs font-bold flex items-center gap-2 animate-fade-in font-cairo">
+                <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{dictFeedback}</span>
+              </div>
+            )}
+
+            {/* Sub-form: Add new dictionary translation pair */}
+            <div className="bg-slate-50/80 p-4 rounded-xl border border-slate-200/80 space-y-3">
+              <span className="text-xs font-bold text-slate-700 font-cairo block">
+                ➕ إضافة اسم جديد إلى القاموس المعتمد وقاعدة بيانات جوجل شيت:
+              </span>
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
+                <div className="sm:col-span-5">
+                  <input
+                    type="text"
+                    value={newArWord}
+                    onChange={(e) => setNewArWord(e.target.value)}
+                    placeholder="الاسم بالعربي (مثال: عبد الرحمن)"
+                    className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-hidden focus:border-blue-500 font-cairo"
+                  />
+                </div>
+                <div className="sm:col-span-5">
+                  <input
+                    type="text"
+                    value={newEnWord}
+                    onChange={(e) => setNewEnWord(e.target.value.toUpperCase())}
+                    placeholder="الترجمة بالإنجليزية (مثال: ABDELRAHMAN)"
+                    dir="ltr"
+                    className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold uppercase text-slate-800 placeholder-slate-400 focus:outline-hidden focus:border-blue-500"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <button
+                    type="button"
+                    onClick={handleAddDictionaryWord}
+                    disabled={dictLoading || !newArWord.trim() || !newEnWord.trim()}
+                    className="w-full h-full py-2.5 px-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-40 shadow-xs font-cairo"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>حفظ 💾</span>
+                  </button>
+                </div>
+              </div>
+              <p className="text-[10px] text-slate-500 font-cairo">
+                💡 النظام يقوم أيضاً بالحفظ التلقائي للأسماء الجديدة فور إصدار أي فاتورة جوازات، ليتم سحبها فورياً في أي فاتورة لاحقة بنفس الاسم.
+              </p>
+            </div>
+
+            {/* Search and Table of registered names */}
+            <div className="space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="relative flex-1 max-w-sm">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={dictSearch}
+                    onChange={(e) => setDictSearch(e.target.value)}
+                    placeholder="بحث في القاموس بالاسم العربي أو الإنجليزي..."
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl pr-9 pl-3 py-2 text-xs text-slate-800 focus:outline-hidden focus:border-blue-500 font-cairo"
+                  />
+                </div>
+                <span className="text-[11px] text-slate-500 font-cairo">
+                  عرض {dictionary.filter(i => !dictSearch.trim() || i.arabic.toLowerCase().includes(dictSearch.trim().toLowerCase()) || i.english.toLowerCase().includes(dictSearch.trim().toLowerCase())).length} من أصل {dictionary.length} اسم
+                </span>
+              </div>
+
+              {/* Words List Container */}
+              <div className="border border-slate-200 rounded-xl overflow-hidden max-h-72 overflow-y-auto">
+                {dictionary.length === 0 ? (
+                  <div className="p-8 text-center text-slate-400 font-cairo text-xs">
+                    القاموس فارغ حالياً. قم بإضافة أسماء بالأعلى أو أنشئ فواتير جديدة وسيتعلم النظام الأسماء ويحفظها تلقائياً.
+                  </div>
+                ) : (
+                  <table className="w-full text-right text-xs">
+                    <thead className="bg-slate-100/80 text-slate-600 font-cairo border-b border-slate-200 sticky top-0">
+                      <tr>
+                        <th className="px-4 py-2.5 w-12 text-center">#</th>
+                        <th className="px-4 py-2.5">الاسم بالعربي</th>
+                        <th className="px-4 py-2.5">الترجمة المعتمدة بالإنجليزية</th>
+                        <th className="px-4 py-2.5 w-20 text-center">إجراءات</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {dictionary
+                        .filter(i => {
+                          if (!dictSearch.trim()) return true;
+                          const q = dictSearch.trim().toLowerCase();
+                          return i.arabic.toLowerCase().includes(q) || i.english.toLowerCase().includes(q);
+                        })
+                        .map((item, idx) => (
+                          <tr key={idx} className="hover:bg-slate-50/80 transition-colors">
+                            <td className="px-4 py-2.5 text-center text-slate-400 font-mono text-[11px]">{idx + 1}</td>
+                            <td className="px-4 py-2.5 font-bold text-slate-800 font-cairo">{item.arabic}</td>
+                            <td className="px-4 py-2.5 font-mono font-bold text-blue-700 tracking-wide dir-ltr text-right">{item.english}</td>
+                            <td className="px-4 py-2.5 text-center">
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteDictionaryWord(item.arabic, item.english)}
+                                disabled={dictLoading}
+                                title="حذف هذا الاسم من القاموس"
+                                className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+
           </div>
         </div>
 

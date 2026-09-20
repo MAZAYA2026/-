@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Invoice, Service, AppSettings, Employee, CollectionClosing } from "./types";
+import { Invoice, Service, AppSettings, Employee, CollectionClosing, DictionaryItem } from "./types";
 import { fetchDB, saveDB } from "./lib/api";
 import EmployeeLogin from "./components/EmployeeLogin";
 import InvoiceCreator from "./components/InvoiceCreator";
@@ -34,6 +34,7 @@ export default function App() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [closings, setClosings] = useState<CollectionClosing[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [dictionary, setDictionary] = useState<DictionaryItem[]>([]);
   
   const [activeTab, setActiveTab] = useState<"create" | "query" | "aman" | "reminders" | "collection" | "services" | "settings">("create");
   const [loading, setLoading] = useState(true);
@@ -49,6 +50,7 @@ export default function App() {
       setSettings(data.settings || null);
       setClosings(data.collectionClosings || []);
       setEmployees(data.employees || []);
+      setDictionary(data.dictionary || []);
     } catch (err) {
       console.error("Error syncing database:", err);
     } finally {
@@ -326,6 +328,8 @@ export default function App() {
               settings={settings || { officeName: "مكتب مزايا للجوازات", phone: "", deliveryTerms: "" }} 
               activeEmployee={activeEmployee} 
               onInvoiceCreated={handleInvoiceCreated} 
+              dictionary={dictionary}
+              onDictionaryUpdated={(newDict) => setDictionary(newDict)}
             />
           )}
 
@@ -384,6 +388,8 @@ export default function App() {
               onSettingsUpdated={handleSettingsUpdated} 
               employees={employees}
               onEmployeesUpdated={handleUpdateEmployees}
+              dictionary={dictionary}
+              onDictionaryUpdated={(newDict) => setDictionary(newDict)}
             />
           )}
         </main>

@@ -160,6 +160,33 @@ export default function ThermalReceipt({ invoice, settings, services, onClose, o
                    invoice.status === "READY" ? `جاهزة للتسليم (درج: ${invoice.archiveDrawer || 'N/A'})` : "تم التسليم"}
                 </span>
               </div>
+
+              {/* Overall Latest Delivery Date */}
+              {(() => {
+                const allDeliveryDates: string[] = [];
+                invoice.customers.forEach((c) => {
+                  c.services.forEach((s) => {
+                    if (s.deliveryDate && s.deliveryDate.trim()) {
+                      allDeliveryDates.push(s.deliveryDate.trim());
+                    } else {
+                      const matched = services.find((srv) => srv.id === s.serviceId || srv.name === s.serviceId);
+                      if (matched && typeof matched.deliveryDaysOffset === "number" && invoice.date) {
+                        const d = new Date(invoice.date);
+                        d.setDate(d.getDate() + (matched.deliveryDaysOffset || 0));
+                        allDeliveryDates.push(d.toISOString().split("T")[0]);
+                      }
+                    }
+                  });
+                });
+                const maxDeliveryDate = allDeliveryDates.length > 0 ? allDeliveryDates.sort().reverse()[0] : "";
+                if (!maxDeliveryDate) return null;
+                return (
+                  <div className="bg-white border-2 border-black p-1.5 rounded-xs mt-1.5 text-center text-black">
+                    <div className="text-[11px] font-bold text-black">موعد استلام المعاملة النهائي:</div>
+                    <div className="text-xs font-black font-mono mt-0.5 text-black tracking-wider">{maxDeliveryDate}</div>
+                  </div>
+                );
+              })()}
             </div>
 
             <div className="border-t-2 border-dashed border-black my-2"></div>
@@ -210,6 +237,14 @@ export default function ThermalReceipt({ invoice, settings, services, onClose, o
                         const singleGovTotal = govPrice * item.quantity;
                         const singleOfficeTotal = officeFee * item.quantity;
 
+                        // Calculate delivery date if not explicitly set
+                        let srvDeliveryDate = item.deliveryDate && item.deliveryDate.trim() ? item.deliveryDate.trim() : "";
+                        if (!srvDeliveryDate && matchedSrv && typeof matchedSrv.deliveryDaysOffset === "number" && invoice.date) {
+                          const d = new Date(invoice.date);
+                          d.setDate(d.getDate() + (matchedSrv.deliveryDaysOffset || 0));
+                          srvDeliveryDate = d.toISOString().split("T")[0];
+                        }
+
                         return (
                           <div key={sIdx} className="space-y-1.5">
                             {/* Service header with name on right and quantity on left */}
@@ -243,12 +278,13 @@ export default function ThermalReceipt({ invoice, settings, services, onClose, o
                                 </tbody>
                               </table>
                               
-                              {/* Expected delivery date bar */}
-                              {item.deliveryDate && (
-                                <div className="border-t-2 border-black px-2 py-1 text-center text-[10.5px] text-black font-bold bg-white">
-                                  تاريخ الاستلام المتوقع: <span className="font-mono font-bold">{item.deliveryDate}</span>
-                                </div>
-                              )}
+                              {/* Expected delivery date bar - prominent */}
+                              <div className="border-t-2 border-black px-2 py-1.5 text-center text-[11px] text-black font-bold bg-white flex items-center justify-between">
+                                <span>موعد تسليم الخدمة:</span>
+                                <span className="font-mono font-black text-xs text-black border border-black px-1.5 py-0.5 rounded-xs">
+                                  {srvDeliveryDate || (matchedSrv?.duration ? matchedSrv.duration : "حسب جهة الإصدار")}
+                                </span>
+                              </div>
                             </div>
                           </div>
                         );

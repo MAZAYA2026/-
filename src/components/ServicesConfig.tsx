@@ -217,7 +217,9 @@ export default function ServicesConfig({
       return;
     }
 
-    if (!confirm("هل أنت متأكد من حذف هذه الخدمة نهائياً من الكتالوج؟ الفواتير الحالية التي تستخدمها لن تتأثر.")) return;
+    const srv = services.find(s => s.id === id);
+    const srvName = srv ? srv.name : "هذه الخدمة";
+    if (!confirm(`⚠️ تأكيد الحذف:\nهل أنت متأكد تماماً من حذف خدمة "${srvName}" نهائياً من الكتالوج وقاعدة البيانات وملف جوجل شيت؟`)) return;
 
     try {
       await deleteServiceOnServer(id);

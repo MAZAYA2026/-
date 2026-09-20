@@ -227,6 +227,65 @@ function writeDB(data: any) {
 // Ensure database is populated
 readDB();
 
+// Helper to automatically learn and register Arabic to English name translations
+function autoLearnCustomerNames(customers: any[], db: any): boolean {
+  if (!Array.isArray(customers) || !db) return false;
+  let changed = false;
+  db.dictionary = db.dictionary || [];
+
+  const normalizeArabic = (str: string) => {
+    return (str || "")
+      .replace(/[أإآ]/g, "ا")
+      .replace(/ة/g, "ه")
+      .replace(/[\u064B-\u065F]/g, "")
+      .trim();
+  };
+
+  customers.forEach((cust: any) => {
+    if (!cust.arabicName || !cust.englishName) return;
+    const arName = cust.arabicName.trim();
+    const enName = cust.englishName.trim().toUpperCase();
+
+    // Skip special placeholders
+    if (enName === "نفس ترجمة الجواز السابق" || enName.includes("N/A") || enName.length < 2) return;
+
+    const arWords = arName.split(/\s+/).filter(Boolean);
+    const enWords = enName.split(/\s+/).filter(Boolean);
+
+    // If word counts match exactly, learn word-by-word
+    if (arWords.length === enWords.length && arWords.length > 0) {
+      for (let i = 0; i < arWords.length; i++) {
+        const arW = arWords[i];
+        const enW = enWords[i].toUpperCase().replace(/[^A-Z]/g, "");
+        if (!enW || arW.length < 2) continue;
+
+        const normAr = normalizeArabic(arW);
+        const exists = db.dictionary.find((d: any) => normalizeArabic(d.arabic) === normAr);
+        if (!exists) {
+          db.dictionary.push({ arabic: arW, english: enW });
+          changed = true;
+        } else if (exists.english !== enW) {
+          exists.english = enW;
+          changed = true;
+        }
+      }
+    }
+
+    // Also learn the full name combination if multiple words
+    if (arWords.length >= 2) {
+      const normFullAr = normalizeArabic(arName);
+      const cleanFullEn = enWords.join(" ");
+      const existsFull = db.dictionary.find((d: any) => normalizeArabic(d.arabic) === normFullAr);
+      if (!existsFull) {
+        db.dictionary.push({ arabic: arName, english: cleanFullEn });
+        changed = true;
+      }
+    }
+  });
+
+  return changed;
+}
+
 // API Endpoints
 
 // 1. Gemini Word/Sentence translation using local dictionary and Gemini fallback
@@ -243,11 +302,26 @@ app.post("/api/gemini/translate", async (req, res) => {
   // Function to clean Arabic word from common diacritics and letters for search
   const normalizeArabic = (str: string) => {
     return str
-      .replace(/[أإآأ]/g, "ا")
-      .replace(/ى/g, "ي")
+      .replace(/[أإآ]/g, "ا")
       .replace(/ة/g, "ه")
-      .replace(/[\u064B-\u065F]/g, ""); // strip diacritics
+      .replace(/[\u064B-\u065F]/g, "") // strip diacritics
+      .trim();
   };
+
+  const normCleanText = normalizeArabic(cleanText);
+
+  // Quick check: If the exact full phrase exists in dictionary, return instantly!
+  const exactFullMatch = dictionary.find((item: any) => 
+    normalizeArabic(item.arabic) === normCleanText || item.arabic.trim() === cleanText
+  );
+  if (exactFullMatch) {
+    return res.json({ 
+      arabic: cleanText, 
+      english: exactFullMatch.english.toUpperCase(), 
+      fromDictionary: true, 
+      dictionary: db.dictionary 
+    });
+  }
 
   // Split sentence into words
   const words = cleanText.split(/\s+/).filter(Boolean);
@@ -259,7 +333,7 @@ app.post("/api/gemini/translate", async (req, res) => {
     
     // Check dictionary
     const dictMatch = dictionary.find(
-      (item: any) => normalizeArabic(item.arabic) === normWord || item.arabic === word
+      (item: any) => normalizeArabic(item.arabic) === normWord || item.arabic.trim() === word
     );
 
     if (dictMatch) {
@@ -275,7 +349,7 @@ Use CAPITAL letters. Return ONLY the translated English word itself, with no ext
 Arabic Word: "${word}"`;
 
           const response = await ai.models.generateContent({
-            model: "gemini-3.5-flash",
+            model: "gemini-2.5-flash",
             contents: prompt,
             config: {
               temperature: 0.1,
@@ -291,8 +365,6 @@ Arabic Word: "${word}"`;
       // Simple algorithmic fallback if Gemini failed or is not available
       if (!translated) {
         // Simple phonetic dictionary proxy or basic English translit
-        translated = word.toUpperCase(); // Fallback to original word or dummy
-        // Let's do a tiny phonetic translation dictionary proxy
         const charMap: { [key: string]: string } = {
           "ا": "A", "أ": "A", "إ": "I", "آ": "A", "ب": "B", "ت": "T", "ث": "TH", "ج": "G", "ح": "H", "خ": "KH",
           "د": "D", "ذ": "ZH", "ر": "R", "ز": "Z", "س": "S", "ش": "SH", "ص": "S", "ض": "D", "ط": "T", "ظ": "Z",
@@ -309,7 +381,8 @@ Arabic Word: "${word}"`;
 
       // Save new translation to dictionary
       if (translated && translated !== word.toUpperCase()) {
-        dictionary.push({ arabic: word, english: translated });
+        db.dictionary = (db.dictionary || []).filter((item: any) => normalizeArabic(item.arabic) !== normWord);
+        db.dictionary.push({ arabic: word, english: translated });
         dictionaryUpdated = true;
         translatedWords.push(translated);
       } else {
@@ -318,13 +391,24 @@ Arabic Word: "${word}"`;
     }
   }
 
+  // Also if full phrase had multiple words, store it to accelerate next time
+  if (words.length >= 2 && translatedWords.length === words.length) {
+    const fullEn = translatedWords.join(" ");
+    const existsFull = (db.dictionary || []).find((item: any) => normalizeArabic(item.arabic) === normCleanText);
+    if (!existsFull) {
+      db.dictionary.push({ arabic: cleanText, english: fullEn });
+      dictionaryUpdated = true;
+    }
+  }
+
   if (dictionaryUpdated) {
-    db.dictionary = dictionary;
     writeDB(db);
+    // Crucial: sync the newly learned words to Google Sheets Excel immediately!
+    triggerBackgroundWebhookSync(db);
   }
 
   const finalEnglish = translatedWords.join(" ");
-  res.json({ arabic: cleanText, english: finalEnglish });
+  res.json({ arabic: cleanText, english: finalEnglish, dictionary: db.dictionary });
 });
 
 // 2. Fetch all DB data
@@ -360,6 +444,10 @@ app.post("/api/db/invoices", (req, res) => {
   };
 
   db.invoices.push(newInvoice);
+
+  // Automatically learn customer names into the dictionary
+  autoLearnCustomerNames(newInvoice.customers, db);
+
   writeDB(db);
   triggerBackgroundWebhookSync(db);
 
@@ -383,6 +471,9 @@ app.put("/api/db/invoices/:id", (req, res) => {
     invoiceId // maintain the same ID
   };
   
+  // Automatically learn customer names into the dictionary
+  autoLearnCustomerNames(db.invoices[index].customers, db);
+
   writeDB(db);
   triggerBackgroundWebhookSync(db);
   res.json({ status: "success", invoice: db.invoices[index] });
@@ -488,15 +579,62 @@ app.post("/api/db/closings", (req, res) => {
 
 // 9. Dictionary updates
 app.post("/api/db/dictionary", (req, res) => {
-  const dictItem = req.body;
+  const { arabic, english, items } = req.body;
   const db = readDB();
-  
-  // Prevent duplicate arabic
-  db.dictionary = db.dictionary.filter(
-    (item: any) => item.arabic.trim() !== dictItem.arabic.trim()
-  );
-  db.dictionary.push(dictItem);
+  db.dictionary = db.dictionary || [];
+
+  const normalizeArabic = (str: string) => {
+    return (str || "")
+      .replace(/[أإآ]/g, "ا")
+      .replace(/ة/g, "ه")
+      .replace(/[\u064B-\u065F]/g, "")
+      .trim();
+  };
+
+  const toAdd: { arabic: string; english: string }[] = [];
+  if (Array.isArray(items)) {
+    toAdd.push(...items);
+  } else if (arabic && english) {
+    toAdd.push({ arabic, english });
+  }
+
+  let updated = false;
+  for (const item of toAdd) {
+    if (!item.arabic || !item.english) continue;
+    const cleanAr = item.arabic.trim();
+    const cleanEn = item.english.trim().toUpperCase();
+    const norm = normalizeArabic(cleanAr);
+
+    db.dictionary = db.dictionary.filter((d: any) => normalizeArabic(d.arabic) !== norm);
+    db.dictionary.push({ arabic: cleanAr, english: cleanEn });
+    updated = true;
+  }
+
+  if (updated) {
+    writeDB(db);
+    // Sync dictionary changes to Google Sheets Excel immediately
+    triggerBackgroundWebhookSync(db);
+  }
+  res.json({ status: "success", dictionary: db.dictionary });
+});
+
+app.delete("/api/db/dictionary", (req, res) => {
+  const { arabic } = req.body;
+  if (!arabic) {
+    return res.status(400).json({ error: "Arabic word is required" });
+  }
+  const db = readDB();
+  const normalizeArabic = (str: string) => {
+    return (str || "")
+      .replace(/[أإآ]/g, "ا")
+      .replace(/ة/g, "ه")
+      .replace(/[\u064B-\u065F]/g, "")
+      .trim();
+  };
+  const targetNorm = normalizeArabic(arabic);
+  db.dictionary = (db.dictionary || []).filter((item: any) => normalizeArabic(item.arabic) !== targetNorm);
   writeDB(db);
+  triggerBackgroundWebhookSync(db);
   res.json({ status: "success", dictionary: db.dictionary });
 });
 

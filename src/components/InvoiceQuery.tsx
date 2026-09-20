@@ -118,7 +118,7 @@ export default function InvoiceQuery({ invoices, services, settings, activeEmplo
       return;
     }
 
-    if (!confirm(`هل أنت متأكد من حذف الفاتورة رقم #${invoiceId} نهائياً؟`)) return;
+    if (!confirm(`⚠️ تأكيد الحذف:\nهل أنت متأكد تماماً من حذف الفاتورة رقم #${invoiceId} بشكل نهائي؟\nسيتم حذفها نهائياً من قاعدة البيانات وملف جوجل شيت ولا يمكن استرجاعها.`)) return;
 
     try {
       await deleteInvoiceOnServer(invoiceId);
@@ -131,10 +131,27 @@ export default function InvoiceQuery({ invoices, services, settings, activeEmplo
 
   // WhatsApp triggers
   const handleSendWhatsAppWelcome = (inv: Invoice) => {
+    const allDeliveryDates: string[] = [];
+
     let customersText = "";
     inv.customers.forEach((cust, idx) => {
       const isPass = cust.englishName || cust.profession;
-      let servicesLines = cust.services.map(s => `• ${s.serviceId} (عدد: ${s.quantity}) - السعر: ${s.price} ج.م`).join("\n");
+      let servicesLines = cust.services.map(s => {
+        const matched = services.find(srv => srv.name === s.serviceId || srv.id === s.serviceId);
+        let srvDeliveryDate = s.deliveryDate && s.deliveryDate.trim() ? s.deliveryDate.trim() : "";
+        if (!srvDeliveryDate && matched && typeof matched.deliveryDaysOffset === "number" && inv.date) {
+          const d = new Date(inv.date);
+          d.setDate(d.getDate() + (matched.deliveryDaysOffset || 0));
+          srvDeliveryDate = d.toISOString().split("T")[0];
+        }
+        if (srvDeliveryDate) allDeliveryDates.push(srvDeliveryDate);
+
+        const deliveryInfo = srvDeliveryDate 
+          ? `\n    📅 موعد التسليم: ${srvDeliveryDate}` 
+          : (matched?.duration ? `\n    ⏱️ مدة التنفيذ: ${matched.duration}` : "");
+
+        return `• ${matched?.name || s.serviceId} (عدد: ${s.quantity}) - السعر: ${s.price} ج.م${deliveryInfo}`;
+      }).join("\n");
       
       let passDetails = "";
       if (isPass) {
@@ -145,7 +162,13 @@ export default function InvoiceQuery({ invoices, services, settings, activeEmplo
       customersText += `------------------------------------\n`;
     });
 
+    const maxDeliveryDate = allDeliveryDates.length > 0 ? allDeliveryDates.sort().reverse()[0] : "";
+
     let welcomeTemplate = settings.welcomeMessage || "مرحباً بك {اسم_العميل}، تم استلام طلبك برقم {رقم_الفاتورة} للخدمات: {الخدمات}";
+    if (maxDeliveryDate && !welcomeTemplate.includes("{موعد_التسليم}") && !welcomeTemplate.includes("{تاريخ_الاستلام}")) {
+      welcomeTemplate += `\n📅 موعد استلام المعاملة: {موعد_التسليم}`;
+    }
+
     const primaryCustomerName = inv.customers[0]?.arabicName || "عميلنا العزيز";
     
     let formattedMessage = welcomeTemplate
@@ -153,7 +176,9 @@ export default function InvoiceQuery({ invoices, services, settings, activeEmplo
       .replace(/{رقم_الفاتورة}/g, inv.invoiceId.toString())
       .replace(/{الخدمات}/g, customersText)
       .replace(/{السعر}/g, inv.totalAmount.toString())
-      .replace(/{تاريخ_اليوم}/g, inv.date);
+      .replace(/{تاريخ_اليوم}/g, inv.date)
+      .replace(/{موعد_التسليم}/g, maxDeliveryDate || "حسب موعد كل خدمة")
+      .replace(/{تاريخ_الاستلام}/g, maxDeliveryDate || "حسب موعد كل خدمة");
 
     if (settings.footerText) {
       formattedMessage += `\n\n${settings.footerText}`;

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { Service, CustomerInput, Invoice, InvoiceStatus, AppSettings, Employee } from "../types";
+import { Service, CustomerInput, Invoice, InvoiceStatus, AppSettings, Employee, DictionaryItem } from "../types";
 import { translateWithGemini, createInvoiceOnServer, saveDictionaryWord } from "../lib/api";
-import { Plus, Trash2, FileText, UserPlus, Sparkles, Printer, Send, Check, AlertCircle, Info, Calendar } from "lucide-react";
+import { Plus, Trash2, FileText, UserPlus, Sparkles, Printer, Send, Check, AlertCircle, Info, Calendar, BookOpen } from "lucide-react";
 import ThermalReceipt from "./ThermalReceipt";
 
 interface InvoiceCreatorProps {
@@ -9,9 +9,35 @@ interface InvoiceCreatorProps {
   settings: AppSettings;
   activeEmployee: Employee;
   onInvoiceCreated: (invoice: Invoice) => void;
+  dictionary?: DictionaryItem[];
+  onDictionaryUpdated?: (newDict: DictionaryItem[]) => void;
 }
 
-export default function InvoiceCreator({ services, settings, activeEmployee, onInvoiceCreated }: InvoiceCreatorProps) {
+// Helper to look up name in the local dictionary immediately
+function lookupInstantDictionary(arabicName: string, dict?: DictionaryItem[]): string | null {
+  if (!arabicName || !arabicName.trim() || !dict || dict.length === 0) return null;
+  const normalize = (s: string) => (s || "").replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/[\u064B-\u065F]/g, "").trim();
+  const clean = arabicName.trim();
+  const normClean = normalize(clean);
+
+  // 1. Exact match
+  const matchFull = dict.find(d => normalize(d.arabic) === normClean || d.arabic.trim() === clean);
+  if (matchFull) return matchFull.english.toUpperCase();
+
+  // 2. Word-by-word
+  const words = clean.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return null;
+  const translatedWords: string[] = [];
+  for (const w of words) {
+    const normW = normalize(w);
+    const m = dict.find(d => normalize(d.arabic) === normW || d.arabic.trim() === w);
+    if (!m) return null;
+    translatedWords.push(m.english.toUpperCase());
+  }
+  return translatedWords.join(" ");
+}
+
+export default function InvoiceCreator({ services, settings, activeEmployee, onInvoiceCreated, dictionary = [], onDictionaryUpdated }: InvoiceCreatorProps) {
   // Master form state: list of customers on this invoice
   const [customers, setCustomers] = useState<CustomerInput[]>([createEmptyCustomer()]);
   const [loading, setLoading] = useState(false);
@@ -156,12 +182,24 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
       return;
     }
 
+    // Check instant local dictionary first
+    const instant = lookupInstantDictionary(customer.arabicName, dictionary);
+    if (instant) {
+      const updated = [...customers];
+      updated[cIdx].englishName = instant;
+      setCustomers(updated);
+      return;
+    }
+
     setLoading(true);
     try {
       const result = await translateWithGemini(customer.arabicName);
       const updated = [...customers];
       updated[cIdx].englishName = result.english;
       setCustomers(updated);
+      if (result.dictionary && onDictionaryUpdated) {
+        onDictionaryUpdated(result.dictionary);
+      }
     } catch (err) {
       console.error(err);
       alert("حدث خطأ أثناء الترجمة باستخدام الذكاء الاصطناعي. تم استخدام ترجمة مبدئية.");
@@ -176,6 +214,10 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
 
   const removeCustomer = (cIdx: number) => {
     if (customers.length === 1) return;
+    const custName = customers[cIdx]?.arabicName?.trim() || `العميل رقم (${cIdx + 1})`;
+    const confirmed = window.confirm(`⚠️ تأكيد الحذف:\nهل أنت متأكد من حذف بيانات ${custName} من الفاتورة؟`);
+    if (!confirmed) return;
+
     const updated = customers.filter((_, idx) => idx !== cIdx);
     setCustomers(updated);
   };
@@ -194,6 +236,12 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
   const removeServiceFromCustomer = (cIdx: number, sIdx: number) => {
     const updated = [...customers];
     if (updated[cIdx].services.length === 1) return;
+    const srvId = updated[cIdx].services[sIdx]?.serviceId;
+    const matched = services.find(s => s.id === srvId || s.name === srvId);
+    const srvTitle = matched?.name || srvId || "هذه الخدمة";
+    const confirmed = window.confirm(`⚠️ تأكيد الحذف:\nهل أنت متأكد من إزالة خدمة "${srvTitle}" من طلبات هذا العميل؟`);
+    if (!confirmed) return;
+
     updated[cIdx].services = updated[cIdx].services.filter((_, idx) => idx !== sIdx);
     setCustomers(updated);
   };
@@ -338,12 +386,33 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
     }
   };
 
-  // Automatically trigger translation on Arabic Name blur if Passport related
+  // Automatically trigger translation on Arabic Name change or blur if Passport related
+  const handleArabicNameChange = (cIdx: number, val: string) => {
+    const updated = [...customers];
+    updated[cIdx].arabicName = val;
+    
+    // Auto instant lookup if name matches dictionary and translation option is active
+    if (updated[cIdx].englishNameOption === "gemini" && val.trim().length >= 2) {
+      const match = lookupInstantDictionary(val, dictionary);
+      if (match) {
+        updated[cIdx].englishName = match;
+      }
+    }
+    setCustomers(updated);
+  };
+
   const handleArabicNameBlur = (cIdx: number) => {
     const cust = customers[cIdx];
     const isPass = isPassportRelated(cust);
-    if (isPass && cust.arabicName.trim() && !cust.englishName.trim() && cust.englishNameOption === "gemini") {
-      handleTranslateName(cIdx);
+    if (isPass && cust.arabicName.trim() && cust.englishNameOption === "gemini") {
+      const match = lookupInstantDictionary(cust.arabicName, dictionary);
+      if (match) {
+        const updated = [...customers];
+        updated[cIdx].englishName = match;
+        setCustomers(updated);
+      } else if (!cust.englishName.trim()) {
+        handleTranslateName(cIdx);
+      }
     }
   };
 
@@ -352,13 +421,29 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
     if (!inv) return;
     
     // We compose the message following the exact variable substitution guidelines
-    // {اسم_العميل} {رقم_الفاتورة} {الخدمات} {تاريخ_اليوم}
-    // "إذا احتوت الفاتورة على أكثر من عميل، يتم فصل بيانات كل عميل بقسم مستقل داخل نفس الرسالة."
+    // {اسم_العميل} {رقم_الفاتورة} {الخدمات} {تاريخ_اليوم} {موعد_التسليم}
     
+    const allDeliveryDates: string[] = [];
+
     let customersText = "";
     inv.customers.forEach((cust, idx) => {
       const isPass = cust.englishName || cust.profession;
-      let servicesLines = cust.services.map(s => `• ${s.serviceId} (عدد: ${s.quantity}) - السعر: ${s.price} ج.م`).join("\n");
+      let servicesLines = cust.services.map(s => {
+        const matched = services.find(srv => srv.name === s.serviceId || srv.id === s.serviceId);
+        let srvDeliveryDate = s.deliveryDate && s.deliveryDate.trim() ? s.deliveryDate.trim() : "";
+        if (!srvDeliveryDate && matched && typeof matched.deliveryDaysOffset === "number" && inv.date) {
+          const d = new Date(inv.date);
+          d.setDate(d.getDate() + (matched.deliveryDaysOffset || 0));
+          srvDeliveryDate = d.toISOString().split("T")[0];
+        }
+        if (srvDeliveryDate) allDeliveryDates.push(srvDeliveryDate);
+
+        const deliveryInfo = srvDeliveryDate 
+          ? `\n    📅 موعد التسليم: ${srvDeliveryDate}` 
+          : (matched?.duration ? `\n    ⏱️ مدة التنفيذ: ${matched.duration}` : "");
+
+        return `• ${matched?.name || s.serviceId} (عدد: ${s.quantity}) - السعر: ${s.price} ج.م${deliveryInfo}`;
+      }).join("\n");
       
       let passDetails = "";
       if (isPass) {
@@ -377,7 +462,12 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
       customersText += `------------------------------------\n`;
     });
 
+    const maxDeliveryDate = allDeliveryDates.length > 0 ? allDeliveryDates.sort().reverse()[0] : "";
+
     let welcomeTemplate = settings.welcomeMessage || "مرحباً بك {اسم_العميل}، تم استلام طلبك برقم {رقم_الفاتورة} للخدمات: {الخدمات}";
+    if (maxDeliveryDate && !welcomeTemplate.includes("{موعد_التسليم}") && !welcomeTemplate.includes("{تاريخ_الاستلام}")) {
+      welcomeTemplate += `\n📅 موعد استلام المعاملة: {موعد_التسليم}`;
+    }
     
     // Replace variables in templates
     const primaryCustomerName = inv.customers[0]?.arabicName || "عميلنا العزيز";
@@ -387,7 +477,9 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
       .replace(/{رقم_الفاتورة}/g, inv.invoiceId.toString())
       .replace(/{الخدمات}/g, customersText)
       .replace(/{السعر}/g, inv.totalAmount.toString())
-      .replace(/{تاريخ_اليوم}/g, inv.date);
+      .replace(/{تاريخ_اليوم}/g, inv.date)
+      .replace(/{موعد_التسليم}/g, maxDeliveryDate || "حسب موعد كل خدمة")
+      .replace(/{تاريخ_الاستلام}/g, maxDeliveryDate || "حسب موعد كل خدمة");
 
     // Append generic footer settings
     formattedMessage += `\n\n${settings.footerText || ""}`;
@@ -534,11 +626,7 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
                     <input
                       type="text"
                       value={customer.arabicName}
-                      onChange={(e) => {
-                        const updated = [...customers];
-                        updated[cIdx].arabicName = e.target.value;
-                        setCustomers(updated);
-                      }}
+                      onChange={(e) => handleArabicNameChange(cIdx, e.target.value)}
                       onBlur={() => handleArabicNameBlur(cIdx)}
                       placeholder="مثال: أحمد محمد علي"
                       className={`w-full bg-slate-50 border rounded-xl px-4 py-3 text-sm focus:outline-hidden focus:ring-2 transition-all ${
@@ -668,6 +756,13 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
                           </button>
                         )}
                       </div>
+
+                      {lookupInstantDictionary(customer.arabicName, dictionary) && customer.englishNameOption === "gemini" && (
+                        <div className="flex items-center gap-1.5 text-[11px] text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200/80 font-medium">
+                          <BookOpen className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span>تم جلب الترجمة تلقائياً وبسرعة من قاموس الأسماء المعتمد</span>
+                        </div>
+                      )}
 
                       {errors[`c-${cIdx}-englishName`] && (
                         <p className="text-[11px] text-rose-600 flex items-center gap-1 mt-1">
