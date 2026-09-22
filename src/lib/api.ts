@@ -285,3 +285,16 @@ export async function pullDataFromGoogleWebhook(webhookUrl?: string): Promise<an
   return response.json();
 }
 
+export async function syncDictionaryToGoogleWebhook(webhookUrl?: string): Promise<any> {
+  const response = await fetch("/api/sheets/webhook/sync-dictionary", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ webhookUrl }),
+  });
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || "فشل تسجيل ومزامنة القاموس إلى جوجل شيت");
+  }
+  return response.json();
+}
+

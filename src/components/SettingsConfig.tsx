@@ -5,6 +5,7 @@ import {
   testGoogleWebhook,
   pushDataToGoogleWebhook,
   pullDataFromGoogleWebhook,
+  syncDictionaryToGoogleWebhook,
   saveDictionaryWord,
   deleteDictionaryWord
 } from "../lib/api";
@@ -75,6 +76,35 @@ export default function SettingsConfig({
   const [newEnWord, setNewEnWord] = useState("");
   const [dictLoading, setDictLoading] = useState(false);
   const [dictFeedback, setDictFeedback] = useState("");
+  const [dictSyncLoading, setDictSyncLoading] = useState(false);
+  const [dictSyncResult, setDictSyncResult] = useState<{ type: "success" | "warning" | "error"; message: string } | null>(null);
+  const [showDictScriptGuide, setShowDictScriptGuide] = useState(false);
+
+  const handleSyncDictionaryToSheets = async () => {
+    setDictSyncLoading(true);
+    setDictSyncResult(null);
+    try {
+      const res = await syncDictionaryToGoogleWebhook(settings.googleSheetWebhookUrl);
+      if (res.savedInSheet) {
+        setDictSyncResult({
+          type: "success",
+          message: res.message || "تم تسجيل القاموس في ملف جوجل شيت بنجاح! 📖✅"
+        });
+      } else {
+        setDictSyncResult({
+          type: "warning",
+          message: res.message || "تم إرسال القاموس بنجاح، ولكن يلزم تحديث كود السكربت في ملف جوجل شيت لإنشاء ورقة القاموس."
+        });
+      }
+    } catch (err: any) {
+      setDictSyncResult({
+        type: "error",
+        message: err.message || "فشلت المزامنة مع جوجل شيت."
+      });
+    } finally {
+      setDictSyncLoading(false);
+    }
+  };
 
   const handleAddDictionaryWord = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -268,17 +298,30 @@ function doPost(e) {
       }
 
       // --- Sheet 5: Dictionary_قاموس_الاسماء ---
-      if (db.dictionary && Array.isArray(db.dictionary)) {
-        var dictSheet = getOrCreateSheet(ss, "Dictionary_قاموس_الاسماء");
+      var dictData = db.dictionary || contents.dictionary;
+      if (dictData && Array.isArray(dictData)) {
+        var dictSheet = ss.getSheetByName("Dictionary_قاموس_الاسماء") || 
+                        ss.getSheetByName("Dictionary") || 
+                        ss.getSheetByName("قاموس_الاسماء") || 
+                        ss.insertSheet("Dictionary_قاموس_الاسماء");
         dictSheet.clearContents();
-        var dictHeaders = ["الاسم بالعربي", "الاسم بالإنجليزي"];
+        var dictHeaders = ["م", "الاسم بالعربي", "الاسم بالإنجليزي (معايير الجوازات)"];
         var dictRows = [dictHeaders];
-        for (var d = 0; d < db.dictionary.length; d++) {
-          dictRows.push([db.dictionary[d].arabic || "", db.dictionary[d].english || ""]);
+        for (var d = 0; d < dictData.length; d++) {
+          dictRows.push([
+            d + 1,
+            dictData[d].arabic || "", 
+            dictData[d].english || ""
+          ]);
         }
         if (dictRows.length > 0) {
           dictSheet.getRange(1, 1, dictRows.length, dictRows[0].length).setValues(dictRows);
           formatHeader(dictSheet, dictHeaders.length);
+          try {
+            dictSheet.setColumnWidth(1, 60);
+            dictSheet.setColumnWidth(2, 220);
+            dictSheet.setColumnWidth(3, 260);
+          } catch(cwErr) {}
         }
       }
 
@@ -286,6 +329,40 @@ function doPost(e) {
         status: "success", 
         message: "تم تحديث وحفظ كافة البيانات في ملف جوجل شيت بنجاح! 🚀" 
       })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // 2. Direct Specific Dictionary Push
+    if (action === "push_dictionary") {
+      var dictList = contents.dictionary || (contents.db && contents.db.dictionary) || [];
+      if (Array.isArray(dictList)) {
+        var dSheet = ss.getSheetByName("Dictionary_قاموس_الاسماء") || 
+                     ss.getSheetByName("Dictionary") || 
+                     ss.getSheetByName("قاموس_الاسماء") || 
+                     ss.insertSheet("Dictionary_قاموس_الاسماء");
+        dSheet.clearContents();
+        var dHeaders = ["م", "الاسم بالعربي", "الاسم بالإنجليزي (معايير الجوازات)"];
+        var dRows = [dHeaders];
+        for (var k = 0; k < dictList.length; k++) {
+          dRows.push([
+            k + 1,
+            dictList[k].arabic || "", 
+            dictList[k].english || ""
+          ]);
+        }
+        if (dRows.length > 0) {
+          dSheet.getRange(1, 1, dRows.length, dRows[0].length).setValues(dRows);
+          formatHeader(dSheet, dHeaders.length);
+          try {
+            dSheet.setColumnWidth(1, 60);
+            dSheet.setColumnWidth(2, 220);
+            dSheet.setColumnWidth(3, 260);
+          } catch(cwErr) {}
+        }
+        return ContentService.createTextOutput(JSON.stringify({ 
+          status: "success", 
+          message: "تم تسجيل وتحديث ورقة قاموس الأسماء (" + dictList.length + " اسم) بملف جوجل شيت بنجاح! 📖✅" 
+        })).setMimeType(ContentService.MimeType.JSON);
+      }
     }
 
     return ContentService.createTextOutput(JSON.stringify({ error: "إجراء غير معروف" }))
@@ -404,15 +481,29 @@ function doGet(e) {
     }
 
     // 5. Read Dictionary
-    var dictSheet = ss.getSheetByName("Dictionary_قاموس_الاسماء") || ss.getSheetByName("Dictionary");
+    var dictSheet = ss.getSheetByName("Dictionary_قاموس_الاسماء") || 
+                    ss.getSheetByName("Dictionary") || 
+                    ss.getSheetByName("قاموس_الاسماء");
     if (dictSheet) {
       var dictValues = dictSheet.getDataRange().getValues();
-      for (var d = 1; d < dictValues.length; d++) {
-        if (dictValues[d][0] && dictValues[d][1]) {
-          db.dictionary.push({
-            arabic: String(dictValues[d][0]),
-            english: String(dictValues[d][1])
-          });
+      if (dictValues && dictValues.length > 1) {
+        for (var d = 1; d < dictValues.length; d++) {
+          var dRow = dictValues[d];
+          var ar = "";
+          var en = "";
+          if (dRow.length >= 3 && dRow[1]) {
+            ar = dRow[1];
+            en = dRow[2];
+          } else if (dRow.length >= 2 && dRow[0]) {
+            ar = dRow[0];
+            en = dRow[1];
+          }
+          if (ar && en) {
+            db.dictionary.push({
+              arabic: String(ar).trim(),
+              english: String(en).trim().toUpperCase()
+            });
+          }
         }
       }
     }
@@ -1066,14 +1157,95 @@ function formatHeader(sheet, numCols) {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <span className="px-3 py-1 bg-blue-50 text-blue-700 font-bold rounded-lg text-xs font-mono border border-blue-200/60">
-                {dictionary.length} اسم محفوظ بالقاموس
+              <button
+                type="button"
+                onClick={handleSyncDictionaryToSheets}
+                disabled={dictSyncLoading}
+                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold rounded-lg text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs disabled:opacity-50 font-cairo"
+                title="تسجيل القاموس بالكامل إلى ملف جوجل شيت فوراً"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${dictSyncLoading ? "animate-spin" : ""}`} />
+                <span>{dictSyncLoading ? "جارِ التسجيل في الشيت..." : "⚡ تسجيل القاموس في جوجل شيت"}</span>
+              </button>
+              <span className="px-3 py-1.5 bg-blue-50 text-blue-700 font-bold rounded-lg text-xs font-mono border border-blue-200/60">
+                {dictionary.length} اسم محفوظ
               </span>
             </div>
           </div>
 
           <div className="p-6 space-y-6">
             
+            {/* Sync to Sheet Result Notice */}
+            {dictSyncResult && (
+              <div className={`p-4 rounded-xl border text-xs font-cairo ${
+                dictSyncResult.type === "success" 
+                  ? "bg-emerald-50 border-emerald-200 text-emerald-900" 
+                  : dictSyncResult.type === "warning"
+                  ? "bg-amber-50 border-amber-200 text-amber-900"
+                  : "bg-red-50 border-red-200 text-red-900"
+              }`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-2.5">
+                    {dictSyncResult.type === "success" ? (
+                      <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                    ) : (
+                      <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                    )}
+                    <div>
+                      <p className="font-bold text-sm whitespace-pre-line">{dictSyncResult.message}</p>
+                      {dictSyncResult.type === "warning" && (
+                        <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(appsScriptCode);
+                              alert("تم نسخ كود السكربت المحدث بنجاح! 📋\nالآن افتح ملف جوجل شيت > ملحقات (Extensions) > Apps Script > الصق الكود واضغط Deploy > Manage deployments > تعديل القلم > New version > نشر.");
+                            }}
+                            className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                          >
+                            <Copy className="w-3.5 h-3.5" />
+                            <span>نسخ كود السكربت المحدث الآن 📋</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setShowDictScriptGuide(!showDictScriptGuide)}
+                            className="px-3 py-1.5 bg-white border border-amber-300 text-amber-800 hover:bg-amber-100 font-bold rounded-lg text-xs transition-colors cursor-pointer"
+                          >
+                            {showDictScriptGuide ? "إخفاء الخطوات" : "عرض خطوات تحديث السكربت (دقيقة واحدة)"}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setDictSyncResult(null)}
+                    className="text-slate-400 hover:text-slate-600 text-xs px-1"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {/* Collapsible Step-by-step Guide */}
+                {showDictScriptGuide && dictSyncResult.type === "warning" && (
+                  <div className="mt-3 pt-3 border-t border-amber-200 text-amber-950 space-y-2 text-xs">
+                    <p className="font-bold">خطوات تفعيل ورقة القاموس في ملف جوجل شيت لديك:</p>
+                    <ol className="list-decimal list-inside space-y-1 pr-1 text-slate-700">
+                      <li>افتح ملف جوجل شيت الخاص بك.</li>
+                      <li>من القائمة العلوية اضغط على <strong>ملحقات (Extensions)</strong> ثم <strong>Apps Script</strong>.</li>
+                      <li>امسح الكود القديم الموجود في المحرر، ثم الصق الكود الذي نسخته بالأعلى.</li>
+                      <li>اضغط على زر <strong>حفظ (Save 💾)</strong>.</li>
+                      <li>اضغط على <strong>نشر (Deploy)</strong> باللون الأزرق أعلى اليمين &gt; ثم <strong>إدارة عمليات النشر (Manage deployments)</strong>.</li>
+                      <li>اضغط على <strong>أيقونة القلم ✏️ (تعديل)</strong> بجانب النشر الحالي.</li>
+                      <li>في خانة <strong>الإصدار (Version)</strong> اختر <strong>New version (إصدار جديد)</strong>.</li>
+                      <li>اضغط <strong>نشر (Deploy)</strong> ثم <strong>تم (Done)</strong>.</li>
+                      <li>ارجع هنا واضغط على زر <strong>⚡ تسجيل القاموس في جوجل شيت</strong> وستظهر الورقة فوراً في ملفك!</li>
+                    </ol>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Feedback alert */}
             {dictFeedback && (
               <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs font-bold flex items-center gap-2 animate-fade-in font-cairo">

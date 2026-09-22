@@ -15,6 +15,22 @@ export default function AmanReport({ invoices, services, activeEmployee }: AmanR
 
   const reportPrintRef = useRef<HTMLDivElement>(null);
 
+  const extractBirthDate = (birthDate?: string, nationalId?: string): string => {
+    if (birthDate && birthDate.trim() && birthDate !== "N/A") return birthDate.trim();
+    if (nationalId && nationalId.length >= 7) {
+      const cleanId = nationalId.replace(/\D/g, "");
+      if (cleanId.length >= 7) {
+        const centuryDigit = parseInt(cleanId[0]);
+        const yy = cleanId.substring(1, 3);
+        const mm = cleanId.substring(3, 5);
+        const dd = cleanId.substring(5, 7);
+        const year = (centuryDigit === 3 ? 2000 : 1900) + parseInt(yy);
+        return `${year}/${mm}/${dd}`;
+      }
+    }
+    return "";
+  };
+
   // We filter customers whose services start with single '#' ONLY.
   // Single '#' means: starts with '#' but NOT starting with '##' (e.g. ## is regular, # is single-hash مستعجل).
   // "كشف أمان للخدمات وتحديدا للخدمات التى تبدأ بعلامة # فقط"
@@ -22,7 +38,6 @@ export default function AmanReport({ invoices, services, activeEmployee }: AmanR
     const list: {
       arabicName: string;
       birthDate: string;
-      serviceName: string;
       date: string;
       invoiceId: number;
     }[] = [];
@@ -32,20 +47,19 @@ export default function AmanReport({ invoices, services, activeEmployee }: AmanR
       if (inv.date < dateFrom || inv.date > dateTo) return;
 
       inv.customers.forEach((cust) => {
-        cust.services.forEach((s) => {
+        const hasAmanService = cust.services.some((s) => {
           const serviceName = s.serviceId;
-          const startsWithSingleHash = serviceName.startsWith("#") && !serviceName.startsWith("##");
-          
-          if (startsWithSingleHash) {
-            list.push({
-              arabicName: cust.arabicName,
-              birthDate: cust.birthDate || "N/A",
-              serviceName: serviceName,
-              date: inv.date,
-              invoiceId: inv.invoiceId
-            });
-          }
+          return serviceName.startsWith("#") && !serviceName.startsWith("##");
         });
+
+        if (hasAmanService) {
+          list.push({
+            arabicName: cust.arabicName,
+            birthDate: extractBirthDate(cust.birthDate, cust.nationalId),
+            date: inv.date,
+            invoiceId: inv.invoiceId,
+          });
+        }
       });
     });
 
@@ -54,32 +68,33 @@ export default function AmanReport({ invoices, services, activeEmployee }: AmanR
 
   const amanCustomers = getAmanCustomers();
 
-  // Excel Export to CSV with exact format
+  // Excel Export to CSV with exact requested format
   const handleExportToExcel = () => {
     if (amanCustomers.length === 0) {
       alert("لا توجد بيانات لتصديرها للفترة المحددة.");
       return;
     }
 
+    const todayDisplay = dateFrom === dateTo ? dateFrom : `${dateFrom} إلى ${dateTo}`;
+
     // Prepare CSV content with Arabic UTF-8 BOM
     let csvContent = "\ufeff";
-    csvContent += "قسم جوازات طنطا - كشف حركة للخدمات الجماهيرية\r\n";
-    csvContent += `الفترة: من ${dateFrom} إلى ${dateTo}\r\n\r\n`;
-    csvContent += "مسلسل,الاسم الكامل,تاريخ الميلاد,الملاحظات\r\n";
+    csvContent += "قسم جوازات طنطا - كشف حركة التابع للخدمات الجماهيرية\r\n";
+    csvContent += `التاريخ: ${todayDisplay}\r\n\r\n`;
+    csvContent += "م,الاسم,تاريخ الميلاد,الملاحظات\r\n";
 
     amanCustomers.forEach((cust, idx) => {
-      // Clean commas from names
       const cleanName = cust.arabicName.replace(/,/g, " ");
-      csvContent += `${idx + 1},${cleanName},${cust.birthDate},\r\n`;
+      csvContent += `${idx + 1},${cleanName},${cust.birthDate || ""},\r\n`;
     });
 
-    csvContent += "\r\nرئيس قسم جوازات طنطا والتوقيع\r\n";
+    csvContent += "\r\n,,,توقيع رئيس القسم\r\n";
 
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", `كشف_أمان_طنطا_${dateFrom}_إلى_${dateTo}.csv`);
+    link.setAttribute("download", `كشف_حركة_الخدمات_الجماهيرية_${dateFrom}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -94,7 +109,7 @@ export default function AmanReport({ invoices, services, activeEmployee }: AmanR
     const printDiv = document.createElement("div");
     printDiv.id = "print-container-dynamic";
     printDiv.innerHTML = `
-      <div style="direction: rtl; text-align: right; width: 210mm; font-family: 'Cairo', sans-serif !important; background: white !important;">
+      <div style="direction: rtl; text-align: right; width: 100%; font-family: 'Cairo', sans-serif !important; background: white !important;">
         ${printContent}
       </div>
     `;
@@ -103,32 +118,84 @@ export default function AmanReport({ invoices, services, activeEmployee }: AmanR
     const style = document.createElement("style");
     style.id = "print-stylesheet-dynamic";
     style.innerHTML = `
+      @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@700;800&display=swap');
+      @page {
+        size: A4 portrait;
+        margin: 5mm 8mm;
+      }
       @media print {
+        html, body {
+          margin: 0 !important;
+          padding: 0 !important;
+          background: white !important;
+          font-family: 'Cairo', sans-serif !important;
+        }
         body > *:not(#print-container-dynamic) {
           display: none !important;
         }
         #print-container-dynamic {
           display: block !important;
-          width: 210mm !important;
-          height: auto !important;
+          width: 100% !important;
           margin: 0 !important;
           padding: 0 !important;
           background: white !important;
           color: black !important;
           direction: rtl !important;
           text-align: right !important;
+          font-family: 'Cairo', sans-serif !important;
         }
-        /* Keep each nested card on its own A4 page */
-        #print-container-dynamic > div > div {
+        .a4-print-page {
           page-break-after: always !important;
           break-after: page !important;
           box-shadow: none !important;
           border: none !important;
           background: white !important;
+          width: 100% !important;
+          max-height: 285mm !important;
+          height: 285mm !important;
+          display: flex !important;
+          flex-direction: column !important;
+          justify-content: space-between !important;
+          box-sizing: border-box !important;
+          margin: 0 !important;
+          padding: 2mm 0 !important;
+          overflow: hidden !important;
+          font-family: 'Cairo', sans-serif !important;
         }
-        #print-container-dynamic > div > div:last-child {
+        .a4-print-page:last-child {
           page-break-after: avoid !important;
           break-after: avoid !important;
+        }
+        table {
+          border-collapse: collapse !important;
+          width: 100% !important;
+          border: 2px solid black !important;
+          font-family: 'Cairo', sans-serif !important;
+        }
+        tr {
+          height: 7.1mm !important;
+          max-height: 7.1mm !important;
+          box-sizing: border-box !important;
+        }
+        th {
+          border: 1px solid black !important;
+          padding: 0 4px !important;
+          font-family: 'Cairo', sans-serif !important;
+          font-size: 20px !important;
+          font-weight: 700 !important;
+          line-height: 1.1 !important;
+          background-color: #f8fafc !important;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+        td {
+          border: 1px solid black !important;
+          padding: 0 4px !important;
+          font-family: 'Cairo', sans-serif !important;
+          font-size: 20px !important;
+          font-weight: 700 !important;
+          line-height: 1.1 !important;
+          vertical-align: middle !important;
         }
         * {
           font-family: 'Cairo', sans-serif !important;
@@ -155,164 +222,194 @@ export default function AmanReport({ invoices, services, activeEmployee }: AmanR
     }, 1000);
   };
 
-  // Grouping customers for paginated A4 layout (approx 6 rows per sheet for size 22 text)
-  const ROWS_PER_PAGE = 6;
+  // The user explicitly requested: the page accommodates exactly 35 rows
+  const ROWS_PER_PAGE = 35;
   const totalPages = Math.max(1, Math.ceil(amanCustomers.length / ROWS_PER_PAGE));
 
-  // Arabic Page numbers array
-  const arabicPageNames = ["الورقة الأولى", "الورقة الثانية", "الورقة الثالثة", "الورقة الرابعة", "الورقة الخامسة", "الورقة السادسة", "الورقة السابعة", "الورقة الثامنة", "الورقة التاسعة", "الورقة العاشرة"];
+  // Arabic Page numbers array (used if multiple sheets are needed)
+  const arabicPageNames = ["الورقة الأولى", "الورقة الثانية", "الورقة الثالثة", "الورقة الرابعة", "الورقة الخامسة"];
+
+  // Format today's date
+  const today = new Date();
+  const todayFormatted = `${today.getFullYear()}/${String(today.getMonth() + 1).padStart(2, "0")}/${String(today.getDate()).padStart(2, "0")}`;
 
   return (
     <div className="space-y-6 font-cairo">
       
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-5">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-4">
         <div>
-          <h2 className="text-xl font-extrabold text-slate-900">شاشة كشف أمان الجماهيري (#)</h2>
-          <p className="text-sm text-slate-500 mt-1">تصدير وطباعة كشوف الحركة الموثقة لخدمات الجوازات المستعجلة</p>
+          <h2 className="text-xl font-extrabold text-slate-900">كشف حركة التابع للخدمات الجماهيرية (قسم جوازات طنطا)</h2>
+          <p className="text-xs text-slate-500 mt-1">كشف رسمي معتمد يستوعب 35 صفاً لكل ورقة A4 ومجهز للطباعة المباشرة والتوقيع اليدوي</p>
         </div>
       </div>
 
       {/* Date Filter Bar */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-4">
         <div className="flex items-center gap-3 w-full sm:w-auto">
-          <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
+          <div className="p-2 bg-blue-50 text-blue-600 rounded-lg shrink-0">
             <Filter className="w-5 h-5" />
           </div>
-          <div className="grid grid-cols-2 gap-3 w-full sm:w-auto">
-            <div className="space-y-1">
-              <label className="text-[10px] text-slate-500 block">البحث من تاريخ:</label>
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="space-y-0.5">
+              <label className="text-[10px] text-slate-500 block">التاريخ:</label>
               <input 
                 type="date" 
                 value={dateFrom} 
-                onChange={(e) => setDateFrom(e.target.value)} 
+                onChange={(e) => {
+                  setDateFrom(e.target.value);
+                  setDateTo(e.target.value);
+                }} 
                 className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono"
               />
             </div>
-            <div className="space-y-1">
-              <label className="text-[10px] text-slate-500 block">البحث إلى تاريخ:</label>
-              <input 
-                type="date" 
-                value={dateTo} 
-                onChange={(e) => setDateTo(e.target.value)} 
-                className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono"
-              />
-            </div>
+            <button
+              type="button"
+              onClick={() => {
+                const now = new Date().toISOString().split("T")[0];
+                setDateFrom(now);
+                setDateTo(now);
+              }}
+              className="mt-3.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-colors cursor-pointer"
+            >
+              اليوم الحالي
+            </button>
           </div>
         </div>
 
         <div className="flex gap-2 w-full sm:w-auto">
           <button
             onClick={handleExportToExcel}
-            className="flex-1 sm:flex-initial px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-xs"
+            className="flex-1 sm:flex-initial px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-xs cursor-pointer"
           >
             <FileSpreadsheet className="w-4 h-4" />
             تصدير للإكسيل (CSV)
           </button>
           <button
             onClick={handlePrintA4}
-            className="flex-1 sm:flex-initial px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-xs"
+            className="flex-1 sm:flex-initial px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-xs cursor-pointer"
           >
             <Printer className="w-4 h-4" />
-            طباعة مباشرة A4
+            طباعة الكشف A4 (35 صف)
           </button>
         </div>
       </div>
 
       {/* Screen Preview */}
-      <div className="bg-slate-50 rounded-2xl border border-slate-200 p-6 overflow-x-auto">
-        <div className="text-xs text-slate-500 mb-4 flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-          <span>معاينة المستند المجهز للطباعة (A4) - عدد المسجلين: <strong>{amanCustomers.length} عميل</strong></span>
+      <div className="bg-slate-100/70 rounded-2xl border border-slate-200 p-4 sm:p-6 overflow-x-auto">
+        <div className="text-xs text-slate-600 mb-4 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+            <span>معاينة كشف الحركة للطباعة (A4) - المسجلين: <strong>{amanCustomers.length} عميل</strong> (35 صف لكل ورقة)</span>
+          </div>
+          {totalPages > 1 && (
+            <span className="text-xs font-bold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200">
+              إجمالي الصفحات: {totalPages} صفحات
+            </span>
+          )}
         </div>
 
         {amanCustomers.length === 0 ? (
           <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-5 flex items-center gap-3">
             <AlertCircle className="w-5 h-5 text-amber-500 shrink-0" />
             <div className="text-xs">
-              لا توجد أي معاملات لخدمات تبدأ بـ (#) فقط في التاريخ المختار. تأكد من إدراج خدمات صحيحة تبدأ برمز الهاش الواحد.
+              لا توجد أي معاملات لخدمات تبدأ بـ (#) فقط في التاريخ المختار ({dateFrom}).
             </div>
           </div>
         ) : (
-          /* Report Print Canvas for Iframe */
-          <div ref={reportPrintRef} className="mx-auto bg-white border border-slate-300 shadow-xl max-w-[210mm] text-black">
+          /* Report Print Canvas for Iframe / Print */
+          <div ref={reportPrintRef} className="mx-auto text-black">
             {Array.from({ length: totalPages }).map((_, pageIdx) => {
               const startIdx = pageIdx * ROWS_PER_PAGE;
               const pageCustomers = amanCustomers.slice(startIdx, startIdx + ROWS_PER_PAGE);
-              const pageName = arabicPageNames[pageIdx] || `الورقة رقم ${pageIdx + 1}`;
 
               return (
                 <div 
                   key={pageIdx} 
-                  className="p-10 border-b border-dashed border-slate-200 last:border-0 relative min-h-[297mm] flex flex-col justify-between"
-                  style={{ width: "210mm", height: "297mm", boxSizing: "border-box" }}
+                  className="a4-print-page bg-white border border-slate-300 shadow-md mx-auto mb-8 last:mb-0 text-black flex flex-col justify-between"
+                  style={{ 
+                    width: "210mm", 
+                    height: "297mm", 
+                    maxHeight: "297mm",
+                    padding: "5mm 8mm",
+                    boxSizing: "border-box",
+                    fontFamily: "'Cairo', sans-serif" 
+                  }}
                 >
                   <div>
-                    {/* Header Banner */}
-                    <div className="flex justify-between items-center border-b-2 border-black pb-4 mb-6">
-                      <div className="text-right space-y-1 font-bold" style={{ fontSize: "20px" }}>
-                        <div>قسم جوازات طنطا</div>
-                        <div style={{ fontSize: "14px", fontWeight: "normal", color: "#666" }}>حركة المعاملات الرسمية</div>
+                    {/* Header Banner - Exact Requested Format: Cairo 20 Bold */}
+                    <div className="flex justify-between items-center border-b-2 border-black pb-1 mb-1 text-black font-cairo">
+                      <div className="text-right" style={{ fontFamily: "'Cairo', sans-serif", fontSize: "20px", fontWeight: "bold" }}>
+                        قسم جوازات طنطا
                       </div>
-                      <div className="text-center font-bold" style={{ fontSize: "24px" }}>
-                        كشف حركة للخدمات الجماهيرية
+                      <div className="text-center" style={{ fontFamily: "'Cairo', sans-serif", fontSize: "20px", fontWeight: "bold" }}>
+                        كشف حركة التابع للخدمات الجماهيرية
                       </div>
-                      <div className="text-left font-bold" style={{ fontSize: "16px" }}>
-                        التاريخ: {new Date().toLocaleDateString("ar-EG")}
+                      <div className="text-left" style={{ fontFamily: "'Cairo', sans-serif", fontSize: "20px", fontWeight: "bold" }}>
+                        التاريخ: {todayFormatted}
                       </div>
                     </div>
 
-                    {/* Styled Table */}
-                    <table className="w-full border-2 border-black text-right" style={{ borderCollapse: "collapse" }}>
+                    {/* Table - 4 Columns: م (1cm), الاسم (9.5cm), تاريخ الميلاد (3.5cm), الملاحظات (باقي المساحة) */}
+                    <table 
+                      className="w-full border-2 border-black text-right" 
+                      style={{ 
+                        borderCollapse: "collapse", 
+                        width: "100%", 
+                        tableLayout: "fixed",
+                        fontFamily: "'Cairo', sans-serif", 
+                        direction: "rtl" 
+                      }}
+                    >
+                      <colgroup>
+                        <col style={{ width: "1cm" }} />
+                        <col style={{ width: "9.5cm" }} />
+                        <col style={{ width: "3.5cm" }} />
+                        <col />
+                      </colgroup>
                       <thead>
-                        <tr className="bg-slate-100">
-                          <th className="border border-black p-3 font-bold text-center" style={{ width: "12mm", fontSize: "18px" }}>م</th>
-                          <th className="border border-black p-3 font-bold text-right" style={{ width: "80mm", fontSize: "18px" }}>الاسم الكامل (رباعي)</th>
-                          <th className="border border-black p-3 font-bold text-center" style={{ width: "45mm", fontSize: "18px" }}>تاريخ الميلاد</th>
-                          <th className="border border-black p-3 font-bold text-right" style={{ width: "65mm", fontSize: "18px" }}>ملاحظات ومراجعات أمان</th>
+                        <tr className="bg-slate-50 border-b-2 border-black" style={{ height: "7.2mm" }}>
+                          <th className="border border-black text-center font-bold" style={{ width: "1cm", fontFamily: "'Cairo', sans-serif", fontSize: "20px", fontWeight: "bold", padding: "0 1px" }}>م</th>
+                          <th className="border border-black text-right font-bold" style={{ width: "9.5cm", fontFamily: "'Cairo', sans-serif", fontSize: "20px", fontWeight: "bold", padding: "0 4px" }}>الاسم</th>
+                          <th className="border border-black text-center font-bold" style={{ width: "3.5cm", fontFamily: "'Cairo', sans-serif", fontSize: "20px", fontWeight: "bold", padding: "0 2px", whiteSpace: "nowrap" }}>تاريخ الميلاد</th>
+                          <th className="border border-black text-center font-bold" style={{ fontFamily: "'Cairo', sans-serif", fontSize: "20px", fontWeight: "bold", padding: "0 2px" }}>الملاحظات</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {pageCustomers.map((cust, itemIdx) => {
-                          const absoluteIdx = startIdx + itemIdx + 1;
+                        {Array.from({ length: ROWS_PER_PAGE }).map((_, rIdx) => {
+                          const cust = pageCustomers[rIdx];
+                          const absoluteIdx = startIdx + rIdx + 1;
+
                           return (
-                            <tr key={itemIdx} className="h-20 hover:bg-slate-50/50">
-                              <td className="border-2 border-black p-3 font-bold text-center" style={{ fontSize: "18px" }}>{absoluteIdx}</td>
-                              <td className="border-2 border-black p-3 font-bold" style={{ fontSize: "18px" }}>{cust.arabicName}</td>
-                              <td className="border-2 border-black p-3 font-bold text-center" style={{ fontSize: "18px" }}>{cust.birthDate}</td>
-                              <td className="border-2 border-black p-3 font-medium text-slate-500" style={{ fontSize: "18px" }}></td>
+                            <tr key={rIdx} className="border border-black" style={{ height: "7.1mm", maxHeight: "7.1mm" }}>
+                              <td className="border border-black text-center font-bold p-0" style={{ width: "1cm", fontFamily: "'Cairo', sans-serif", fontSize: "20px", fontWeight: "bold", lineHeight: 1.1 }}>
+                                {absoluteIdx}
+                              </td>
+                              <td className="border border-black text-right font-bold" style={{ width: "9.5cm", fontFamily: "'Cairo', sans-serif", fontSize: "20px", fontWeight: "bold", lineHeight: 1.1, padding: "0 4px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {cust ? cust.arabicName : ""}
+                              </td>
+                              <td className="border border-black text-center font-bold" style={{ width: "3.5cm", fontFamily: "'Cairo', sans-serif", fontSize: "20px", fontWeight: "bold", lineHeight: 1.1, padding: "0 2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {cust ? cust.birthDate : ""}
+                              </td>
+                              <td className="border border-black text-right" style={{ fontFamily: "'Cairo', sans-serif", fontSize: "20px", fontWeight: "bold", lineHeight: 1.1, padding: "0 4px" }}>
+                                {/* عامود الملاحظات للكتابة اليدوية به كملاحظات */}
+                              </td>
                             </tr>
                           );
                         })}
-                        {/* Filler empty rows to maintain A4 aesthetic if last page has fewer rows */}
-                        {pageCustomers.length < ROWS_PER_PAGE && 
-                          Array.from({ length: ROWS_PER_PAGE - pageCustomers.length }).map((_, fillerIdx) => (
-                            <tr key={`filler-${fillerIdx}`} className="h-20">
-                              <td className="border border-slate-300 p-3 text-center text-slate-300"></td>
-                              <td className="border border-slate-300 p-3"></td>
-                              <td className="border border-slate-300 p-3"></td>
-                              <td className="border border-slate-300 p-3"></td>
-                            </tr>
-                          ))
-                        }
                       </tbody>
                     </table>
                   </div>
 
-                  {/* Signoff details */}
-                  <div className="flex justify-between items-end mt-12 mb-8 px-4 font-bold" style={{ fontSize: "18px" }}>
-                    <div className="text-right">
-                      <div>المسؤول عن الحركة:</div>
-                      <div className="text-slate-500 text-sm mt-1">{activeEmployee.name}</div>
+                  {/* Signoff Section - Compact space not exceeding 10mm to preserve single A4 page */}
+                  <div 
+                    className="flex justify-end items-center px-4 pt-1 mt-1 border-t border-black text-black font-cairo"
+                    style={{ height: "10mm", maxHeight: "10mm", boxSizing: "border-box" }}
+                  >
+                    <div className="flex items-center gap-3" style={{ fontFamily: "'Cairo', sans-serif", fontSize: "20px", fontWeight: "bold" }}>
+                      <span>توقيع رئيس القسم :</span>
+                      <span className="inline-block border-b border-dotted border-black w-56 h-4 mb-1"></span>
                     </div>
-                    <div className="text-left font-bold text-lg border-t border-black pt-4 px-10">
-                      رئيس قسم جوازات طنطا والتوقيع
-                    </div>
-                  </div>
-
-                  {/* Page Footer */}
-                  <div className="text-center font-bold text-sm border-t border-slate-200 pt-2 text-slate-500">
-                    {pageName} - كشف أمان خدمات مزايا
                   </div>
 
                 </div>

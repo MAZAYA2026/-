@@ -1092,6 +1092,7 @@ async function pushToGoogleWebhook(webhookUrl: string, db: any) {
       body: JSON.stringify({
         action: "push",
         db: db,
+        dictionary: db.dictionary || [],
       }),
       redirect: "follow",
     });
@@ -1239,6 +1240,53 @@ app.post("/api/sheets/webhook/push", async (req, res) => {
     });
   } catch (err: any) {
     res.status(500).json({ error: "فشل تصدير البيانات إلى السكربت: " + err.message });
+  }
+});
+
+// Dedicated Webhook Sync Dictionary Endpoint
+app.post("/api/sheets/webhook/sync-dictionary", async (req, res) => {
+  const { webhookUrl } = req.body;
+  const db = readDB();
+  const targetUrl = webhookUrl || db.settings.googleSheetWebhookUrl;
+
+  if (!targetUrl || !targetUrl.startsWith("http")) {
+    return res.status(400).json({ error: "الرجاء إدخال رابط سكربت Webhook صالح أولاً في قسم إعدادات جوجل شيت." });
+  }
+
+  try {
+    // 1. Send push containing dictionary and db
+    const pushResult = await pushToGoogleWebhook(targetUrl, db);
+
+    // 2. Test pulling back to check if the dictionary was actually saved in the Google Sheet tab
+    let savedInSheet = false;
+    let sheetDictCount = 0;
+    try {
+      const pulledDB = await pullFromGoogleWebhook(targetUrl);
+      sheetDictCount = Array.isArray(pulledDB?.dictionary) ? pulledDB.dictionary.length : 0;
+      if (sheetDictCount > 0) {
+        savedInSheet = true;
+      }
+    } catch (e) {
+      console.log("Could not pull to verify sheet dictionary:", e);
+    }
+
+    if (savedInSheet) {
+      return res.json({
+        status: "success",
+        savedInSheet: true,
+        count: sheetDictCount,
+        message: `تم تسجيل وتأكيد حفظ ${sheetDictCount} اسماً في ورقة (Dictionary_قاموس_الاسماء) بملف جوجل شيت بنجاح! 📖✅`
+      });
+    } else {
+      return res.json({
+        status: "warning",
+        savedInSheet: false,
+        count: db.dictionary?.length || 0,
+        message: `تم إرسال القاموس بنجاح (${db.dictionary?.length || 0} اسماً)، ولكن ملف جوجل شيت لديك لا يزال يعمل بالنسخة القديمة من كود السكربت التي تفتقر لكود ورقة القاموس.\nلتسجيل القاموس: يرجى فتح ملف جوجل شيت > Apps Script > ولصق الكود البرمجي المحدث من الأسفل، ثم الضغط على (Deploy > New version) ليتم إنشاء وحفظ الأسماء فوراً في ورقة Dictionary_قاموس_الاسماء.`
+      });
+    }
+  } catch (err: any) {
+    res.status(500).json({ error: "فشل إرسال القاموس إلى السكربت: " + err.message });
   }
 });
 
