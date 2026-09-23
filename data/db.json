@@ -1,5 +1,29 @@
 {
+  "settings": {
+    "headerText": "مكتب مزايا لخدمات الجوازات وتسهيل المعاملات\nطنطا - شارع المديرية - برج المعز - الدور الثاني\nتليفون: 01011223344",
+    "subHeaderText": "جوازات طنطا والمعاملات الحكومية",
+    "footerText": "شكراً لتعاملكم مع مكتب مزايا للجوازات.\nالرجاء الاحتفاظ بالفاتورة لتقديمها عند الاستلام.\nالاستلام شخصياً أو بتوكيل رسمي.",
+    "welcomeMessage": "عزيزنا {اسم_العميل}، تم استلام طلباتك بمكتب مزايا للجوازات بنجاح.\nرقم الفاتورة: {رقم_الفاتورة}\nالخدمات المطلوبة:\n{الخدمات}\nإجمالي الفاتورة: {السعر} جنيه.\nتاريخ اليوم: {تاريخ_اليوم}\nنسعد دائماً بخدمتكم.",
+    "readyMessage": "عزيزنا {اسم_العميل}، نفيدكم علماً بأن أوراقكم الخاصة بالفاتورة رقم {رقم_الفاتورة} جاهزة للتسليم الآن.\nالخدمات: {الخدمات}\nمكان الحفظ: درج رقم ({رقم_الارشيف})\nبرجاء التوجه للمكتب للاستلام مع إحضار الفاتورة الحرارية.",
+    "deliveryMessage": "تم تسليم جواز السفر والأوراق الخاصة بك بنجاح يا {اسم_العميل}.\nرقم الفاتورة: {رقم_الفاتورة}\nنسعد بتقييمكم لخدمات مكتب مزايا للجوازات ونراكم قريباً في معاملات أخرى.",
+    "whatsappTemplate": "مكتب مزايا للجوازات\n\nالعميل: {اسم_العميل}\n{الاسم_الانجليزي}\n{المهنة}\nالخدمات:\n{الخدمات}\n\nالإجمالي: {السعر} جنيه.\n\n{رسالة_الشكر}",
+    "googleSheetWebhookUrl": "https://script.google.com/macros/s/AKfycbxDfspdF16AKDKj2sD2L4AIKxq8TQFaYBxuThfEf24FB_zFHZLOwSyDiExD7ffZ_Sx4/exec",
+    "autoSyncWebhook": false,
+    "googleSheetId": "",
+    "googleSheetUrl": "",
+    "googleSheetsConnected": true
+  },
   "services": [
+    {
+      "id": "srv-102",
+      "name": "## استخراج جواز سفر عادي",
+      "govPrice": 1200,
+      "officeFee": 200,
+      "duration": "8 أيام عمل من تاريخ تقديم المستندات",
+      "instructions": "يسلم الجواز الجديد لصاحب الشأن او مقدم الطلب من جوازات طنطا طبقا لتعليمات الامن العام وذلك من الساعه 8ص الى 2ظهرا بالجوازات",
+      "deliveryDaysOffset": 9,
+      "notes": "يتم تسليم المستندات بمقر المكتب والفرع المخصص."
+    },
     {
       "id": "srv-101",
       "name": "# استخراج جواز سفر مستعجل",
@@ -9,16 +33,6 @@
       "instructions": "يرجى إحضار أصل وصورة بطاقة الرقم القومي سارية، و3 صور شخصية خلفية بيضاء حديثة 4*6، وأصل جواز السفر القديم إن وجد.",
       "deliveryDaysOffset": 3,
       "notes": "يرجى الحضور للاستلام شخصياً أو توكيل رسمي بمقر مكتب مزايا لخدمات الجوازات بطنطا."
-    },
-    {
-      "id": "srv-102",
-      "name": "## استخراج جواز سفر عادي",
-      "govPrice": 1100,
-      "officeFee": 400,
-      "duration": "7 أيام عمل من تاريخ تقديم المستندات",
-      "instructions": "يرجى إحضار أصل بطاقة الرقم القومي سارية، الموقف من التجنيد للذكور، المؤهل الدراسي إن لم يكن مسجلاً بالبطاقة، و3 صور شخصية خلفية بيضاء.",
-      "deliveryDaysOffset": 7,
-      "notes": "يتم تسليم المستندات بمقر المكتب والفرع المخصص."
     },
     {
       "id": "srv-103",
@@ -41,140 +55,16 @@
       "notes": "سيتم الحفظ والأرشفة الفورية للأوراق في أدراج المكتب بمجرد التجهيز."
     }
   ],
-  "dictionary": [
-    {
-      "arabic": "محمد",
-      "english": "MOHAMED"
-    },
-    {
-      "arabic": "احمد",
-      "english": "AHMED"
-    },
-    {
-      "arabic": "أحمد",
-      "english": "AHMED"
-    },
-    {
-      "arabic": "شريف",
-      "english": "SHERIF"
-    },
-    {
-      "arabic": "علي",
-      "english": "ALI"
-    },
-    {
-      "arabic": "على",
-      "english": "ALI"
-    },
-    {
-      "arabic": "رندا",
-      "english": "RANDA"
-    },
-    {
-      "arabic": "منار",
-      "english": "MANAR"
-    },
-    {
-      "arabic": "امنية",
-      "english": "OMNIA"
-    },
-    {
-      "arabic": "أمنية",
-      "english": "OMNIA"
-    },
-    {
-      "arabic": "عبد",
-      "english": "ABD"
-    },
-    {
-      "arabic": "الله",
-      "english": "ALLAH"
-    },
-    {
-      "arabic": "عبدالله",
-      "english": "ABDALLAH"
-    },
-    {
-      "arabic": "حسين",
-      "english": "HUSSEIN"
-    },
-    {
-      "arabic": "حسن",
-      "english": "HASSAN"
-    },
-    {
-      "arabic": "محمود",
-      "english": "MAHMOUD"
-    },
-    {
-      "arabic": "ابراهيم",
-      "english": "IBRAHIM"
-    },
-    {
-      "arabic": "إبراهيم",
-      "english": "IBRAHIM"
-    },
-    {
-      "arabic": "سيد",
-      "english": "SAYED"
-    },
-    {
-      "arabic": "مصطفى",
-      "english": "MOSTAFA"
-    },
-    {
-      "arabic": "سعيد",
-      "english": "SAEED"
-    },
-    {
-      "arabic": "سليمان",
-      "english": "SOLIMAN"
-    },
-    {
-      "arabic": "يوسف",
-      "english": "YOUSEF"
-    },
-    {
-      "arabic": "خالد",
-      "english": "KHALED"
-    },
-    {
-      "arabic": "طارق",
-      "english": "TAREK"
-    },
-    {
-      "arabic": "كمال",
-      "english": "KAMAL"
-    },
-    {
-      "arabic": "جمال",
-      "english": "GAMAL"
-    },
-    {
-      "arabic": "سماح",
-      "english": "SAMAH"
-    },
-    {
-      "arabic": "منى",
-      "english": "MONA"
-    },
-    {
-      "arabic": "فاطمة",
-      "english": "FATMA"
-    },
-    {
-      "arabic": "زينب",
-      "english": "ZEINAB"
-    },
-    {
-      "arabic": "هدى",
-      "english": "HODA"
-    }
-  ],
   "invoices": [
     {
+      "invoiceId": 100,
+      "date": "Wed Aug 26 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
       "status": "NEW",
       "employeeName": "شريف (المدير)",
+      "archiveDrawer": "",
+      "totalGov": 1500,
+      "totalOffice": 500,
+      "totalAmount": 2000,
       "customers": [
         {
           "arabicName": "احمد",
@@ -193,16 +83,40 @@
             }
           ]
         }
-      ],
+      ]
+    },
+    {
+      "invoiceId": 101,
+      "date": "Mon Sep 21 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "NEW",
+      "employeeName": "شريف (المدير)",
+      "archiveDrawer": "",
       "totalGov": 1500,
       "totalOffice": 500,
       "totalAmount": 2000,
-      "date": "2026-08-26",
-      "invoiceId": 100,
-      "notificationSent": false
+      "customers": [
+        {
+          "arabicName": "السيد على",
+          "englishName": "ALSAYED ALI",
+          "englishNameOption": "gemini",
+          "nationalId": "28208151600218",
+          "birthDate": "15-08-1982",
+          "phone": "01112506394",
+          "profession": "عامل",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر مستعجل",
+              "quantity": 1,
+              "price": 2000,
+              "deliveryDate": "2026-09-24"
+            }
+          ]
+        }
+      ]
     }
   ],
   "collectionClosings": [],
+  "dictionary": [],
   "employees": [
     {
       "username": "SHERIF",
@@ -264,19 +178,5 @@
         "canViewAmanReport": true
       }
     }
-  ],
-  "settings": {
-    "headerText": "مكتب مزايا لخدمات الجوازات وتسهيل المعاملات\nطنطا - شارع المديرية - برج المعز - الدور الثاني\nتليفون: 01011223344",
-    "subHeaderText": "جوازات طنطا والمعاملات الحكومية",
-    "footerText": "شكراً لتعاملكم مع مكتب مزايا للجوازات.\nالرجاء الاحتفاظ بالفاتورة لتقديمها عند الاستلام.\nالاستلام شخصياً أو بتوكيل رسمي.",
-    "welcomeMessage": "عزيزنا {اسم_العميل}، تم استلام طلباتك بمكتب مزايا للجوازات بنجاح.\nرقم الفاتورة: {رقم_الفاتورة}\nالخدمات المطلوبة:\n{الخدمات}\nإجمالي الفاتورة: {السعر} جنيه.\nتاريخ اليوم: {تاريخ_اليوم}\nنسعد دائماً بخدمتكم.",
-    "readyMessage": "عزيزنا {اسم_العميل}، نفيدكم علماً بأن أوراقكم الخاصة بالفاتورة رقم {رقم_الفاتورة} جاهزة للتسليم الآن.\nالخدمات: {الخدمات}\nمكان الحفظ: درج رقم ({رقم_الارشيف})\nبرجاء التوجه للمكتب للاستلام مع إحضار الفاتورة الحرارية.",
-    "deliveryMessage": "تم تسليم جواز السفر والأوراق الخاصة بك بنجاح يا {اسم_العميل}.\nرقم الفاتورة: {رقم_الفاتورة}\nنسعد بتقييمكم لخدمات مكتب مزايا للجوازات ونراكم قريباً في معاملات أخرى.",
-    "whatsappTemplate": "مكتب مزايا للجوازات\n\nالعميل: {اسم_العميل}\n{الاسم_الانجليزي}\n{المهنة}\nالخدمات:\n{الخدمات}\n\nالإجمالي: {السعر} جنيه.\n\n{رسالة_الشكر}",
-    "googleSheetWebhookUrl": "https://script.google.com/macros/s/AKfycbz6j-7b_lwkN7wy2nkeIFcbx2rRw19yjTTAxtWVmt6CoualXSXno0UvIuDfpxcrJ15j/exec",
-    "autoSyncWebhook": true,
-    "googleSheetId": "",
-    "googleSheetUrl": "",
-    "googleSheetsConnected": true
-  }
+  ]
 }

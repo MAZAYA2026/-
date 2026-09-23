@@ -63,6 +63,7 @@ export default function SettingsConfig({
   const [googleSheetUrl, setGoogleSheetUrl] = useState(settings.googleSheetUrl || "");
   const [googleSheetWebhookUrl, setGoogleSheetWebhookUrl] = useState(settings.googleSheetWebhookUrl || settings.googleSheetUrl || "");
   const [footerText, setFooterText] = useState(settings.footerText || "يسعدنا دائماً خدمتكم وثقتكم بنا");
+  const [autoSyncWebhook, setAutoSyncWebhook] = useState(settings.autoSyncWebhook || false);
 
   const [saving, setSaving] = useState(false);
   const [showScriptGuide, setShowScriptGuide] = useState(false);
@@ -593,7 +594,7 @@ function formatHeader(sheet, numCols) {
       // Test Apps Script Webhook
       const testRes = await testGoogleWebhook(rawUrl);
 
-      // Save settings
+      // Save settings in strict manual mode to protect services & prices
       const payload: AppSettings = {
         headerText: headerText.trim(),
         subHeaderText: subHeaderText.trim(),
@@ -603,19 +604,16 @@ function formatHeader(sheet, numCols) {
         deliveryMessage: deliveryMessage.trim(),
         googleSheetWebhookUrl: rawUrl,
         googleSheetUrl: googleSheetUrl || "",
-        autoSyncWebhook: true,
+        autoSyncWebhook: false, // Strict manual mode
         footerText: footerText.trim(),
         googleSheetsConnected: true,
       };
       const result = await updateSettingsOnServer(payload);
       onSettingsUpdated(result);
+      setAutoSyncWebhook(false);
 
-      // Automatic initial push to create all 4 sheets with existing data immediately!
-      setSyncMessage("جاري تصدير وحفظ كامل البيانات الحالية في أوراق جوجل شيت...");
-      await pushDataToGoogleWebhook(rawUrl);
-
-      setSyncMessage(testRes.message || "تم الاتصال بنجاح وتفعيل قاعدة بيانات جوجل شيت وتحديث كافة البيانات! 🚀");
-      alert("تم الاتصال بنجاح! تم اعتماد ملف جوجل شيت كقاعدة بيانات رئيسية وتم رفع وحفظ كافة بيانات النظام (فواتير، خدمات، أسعار، خزينة، رسائل، إعدادات) في أوراق العمل بنجاح! 🚀");
+      setSyncMessage(testRes.message || "تم الاتصال بنجاح وتفعيل ملف جوجل شيت! 📊 تم تفعيل النمط اليدوي للحفاظ على الخدمات والأسعار من التعديل التلقائي.");
+      alert("تم الاتصال بنجاح بملف جوجل شيت! 📊\n\n🛡️ تم ضبط النظام على (التعامل اليدوي فقط) ولن يتم تصدير أو استيراد البيانات تلقائياً عند فتح البرنامج أو تعديل البرمجة، وذلك لحماية مسميات الخدمات والأسعار من المسح أو التغيير.\n\n📥 اضغط على زر (استيراد وسحب البيانات من جوجل شيت) لجلب خدماتك وبياناتك فوراً.\n📤 اضغط على زر (تصدير وتحديث كافة البيانات في جوجل شيت) لرفع البيانات الحالية.");
     } catch (err: any) {
       console.error(err);
       setSyncMessage(`فشل الاتصال: ${err.message}`);
@@ -752,7 +750,7 @@ function formatHeader(sheet, numCols) {
         googleSheetId: settings.googleSheetId || "",
         googleSheetUrl: googleSheetUrl.trim(),
         googleSheetWebhookUrl: googleSheetWebhookUrl.trim(),
-        autoSyncWebhook: true,
+        autoSyncWebhook: autoSyncWebhook,
         footerText: footerText.trim(),
         googleSheetsConnected: !!(googleSheetWebhookUrl.trim() || googleSheetUrl.trim() || settings.googleSheetsConnected)
       };
@@ -974,25 +972,46 @@ function formatHeader(sheet, numCols) {
               )}
             </div>
 
+            {/* Protection Notice: Manual Sync Mode */}
+            <div className="bg-emerald-50/90 border border-emerald-200 rounded-xl p-3.5 text-xs text-emerald-950 flex items-start gap-3">
+              <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <div className="font-bold flex items-center gap-2">
+                  <span>نمط المزامنة: تعامل يدوي فقط (حماية تامة لمسميات الخدمات والأسعار) 🛡️</span>
+                  <span className="px-2 py-0.5 bg-emerald-200/80 text-emerald-900 rounded-md text-[10px] font-bold">نشط</span>
+                </div>
+                <p className="text-[11px] text-emerald-800 leading-relaxed">
+                  تم إيقاف التصدير والاستيراد التلقائي عند بداية فتح البرنامج أو عند تعديل البرمجة، لضمان عدم مسح مسميات الخدمات وأسعارها التي قمت بتخصيصها. يتم النقل والتبادل يدوياً بالكامل فقط عند ضغطك على أزرار الاستيراد أو التصدير أدناه.
+                </p>
+              </div>
+            </div>
+
             {/* Sync Action Buttons */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-              <button
-                type="button"
-                disabled={syncLoading || !googleSheetWebhookUrl.trim()}
-                onClick={handlePushWebhook}
-                className="py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-40 shadow-xs"
-              >
-                <Download className="w-4 h-4 rotate-180 text-emerald-400" />
-                تصدير وتحديث كافة البيانات في جوجل شيت الآن 📤
-              </button>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
               <button
                 type="button"
                 disabled={syncLoading || !googleSheetWebhookUrl.trim()}
                 onClick={handlePullWebhook}
-                className="py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-40 shadow-xs"
+                className="py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs flex flex-col items-center justify-center gap-1 transition-colors cursor-pointer disabled:opacity-40 shadow-xs"
               >
-                <Download className="w-4 h-4 text-blue-200" />
-                استيراد وسحب البيانات من جوجل شيت 📥
+                <div className="flex items-center gap-2 text-sm">
+                  <Download className="w-4 h-4 text-blue-200" />
+                  <span>استيراد وسحب البيانات من جوجل شيت 📥</span>
+                </div>
+                <span className="text-[10px] text-blue-100 font-normal">سحب أحدث مسميات الخدمات والأسعار والفواتير والقاموس من الشيت</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={syncLoading || !googleSheetWebhookUrl.trim()}
+                onClick={handlePushWebhook}
+                className="py-3 px-4 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs flex flex-col items-center justify-center gap-1 transition-colors cursor-pointer disabled:opacity-40 shadow-xs"
+              >
+                <div className="flex items-center gap-2 text-sm">
+                  <Download className="w-4 h-4 rotate-180 text-emerald-400" />
+                  <span>تصدير وتحديث كافة البيانات في جوجل شيت 📤</span>
+                </div>
+                <span className="text-[10px] text-slate-300 font-normal">رفع وتحديث كافة البيانات الحالية في أوراق العمل بملف جوجل شيت</span>
               </button>
             </div>
 

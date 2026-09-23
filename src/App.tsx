@@ -378,6 +378,8 @@ export default function App() {
               onServiceUpdated={handleServiceUpdated} 
               onServiceDeleted={handleServiceDeleted} 
               onServicesReordered={handleServicesReordered}
+              googleSheetWebhookUrl={settings?.googleSheetWebhookUrl}
+              onReloadDatabase={syncDatabase}
             />
           )}
 

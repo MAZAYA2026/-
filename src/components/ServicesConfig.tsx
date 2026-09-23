@@ -1,9 +1,17 @@
 import React, { useState } from "react";
 import { Service, Employee } from "../types";
-import { createServiceOnServer, updateServiceOnServer, deleteServiceOnServer, reorderServicesOnServer } from "../lib/api";
+import { 
+  createServiceOnServer, 
+  updateServiceOnServer, 
+  deleteServiceOnServer, 
+  reorderServicesOnServer,
+  pullDataFromGoogleWebhook,
+  pushDataToGoogleWebhook
+} from "../lib/api";
 import { 
   Plus, Edit3, Trash2, Check, X, ShieldAlert, Sparkles, FolderPlus, DollarSign, Clock, FileText,
-  ArrowUp, ArrowDown, ChevronsUp, ChevronsDown, ArrowUpDown, CheckCircle2, ArrowDownAZ, Hash, Loader2
+  ArrowUp, ArrowDown, ChevronsUp, ChevronsDown, ArrowUpDown, CheckCircle2, ArrowDownAZ, Hash, Loader2,
+  Download
 } from "lucide-react";
 
 interface ServicesConfigProps {
@@ -13,6 +21,8 @@ interface ServicesConfigProps {
   onServiceUpdated: (srv: Service) => void;
   onServiceDeleted: (id: string) => void;
   onServicesReordered?: (services: Service[]) => void;
+  googleSheetWebhookUrl?: string;
+  onReloadDatabase?: () => Promise<void>;
 }
 
 export default function ServicesConfig({ 
@@ -21,9 +31,64 @@ export default function ServicesConfig({
   onServiceCreated, 
   onServiceUpdated, 
   onServiceDeleted,
-  onServicesReordered 
+  onServicesReordered,
+  googleSheetWebhookUrl,
+  onReloadDatabase
 }: ServicesConfigProps) {
   const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
+
+  // Sheet sync states
+  const [sheetLoading, setSheetLoading] = useState(false);
+  const [sheetFeedback, setSheetFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
+
+  const handlePullFromSheets = async () => {
+    const confirmPull = window.confirm("هل تريد استيراد وسحب أحدث الخدمات والأسعار من ملف جوجل شيت؟");
+    if (!confirmPull) return;
+
+    setSheetLoading(true);
+    setSheetFeedback(null);
+    try {
+      const res = await pullDataFromGoogleWebhook(googleSheetWebhookUrl);
+      if (onReloadDatabase) {
+        await onReloadDatabase();
+      }
+      setSheetFeedback({
+        type: "success",
+        message: `تم استيراد ${res.db?.services?.length || 0} خدمة بنجاح من ملف جوجل شيت! 📥`
+      });
+      setTimeout(() => setSheetFeedback(null), 4000);
+    } catch (err: any) {
+      setSheetFeedback({
+        type: "error",
+        message: `فشل الاستيراد: ${err.message}`
+      });
+    } finally {
+      setSheetLoading(false);
+    }
+  };
+
+  const handlePushToSheets = async () => {
+    const confirmPush = window.confirm("هل تريد رفع وحفظ مسميات الخدمات والأسعار الحالية إلى ملف جوجل شيت الآن؟");
+    if (!confirmPush) return;
+
+    setSheetLoading(true);
+    setSheetFeedback(null);
+    try {
+      const res = await pushDataToGoogleWebhook(googleSheetWebhookUrl);
+      setSheetFeedback({
+        type: "success",
+        message: res.message || "تم حفظ وتصدير الخدمات إلى جوجل شيت بنجاح! 📤"
+      });
+      setTimeout(() => setSheetFeedback(null), 4000);
+    } catch (err: any) {
+      setSheetFeedback({
+        type: "error",
+        message: `فشل التصدير: ${err.message}`
+      });
+    } finally {
+      setSheetLoading(false);
+    }
+  };
 
   // Form states for creating/editing
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -239,19 +304,66 @@ export default function ServicesConfig({
           <h2 className="text-xl font-extrabold text-slate-900">شاشة كتالوج وإعدادات الخدمات</h2>
           <p className="text-sm text-slate-500 mt-1">تحديد الرسوم والمدد الزمنية والتعليمات وتوليد الهاشات الفردية (#)</p>
         </div>
-        {!showCreateForm && (
-          <button
-            onClick={() => {
-              resetForm();
-              setShowCreateForm(true);
-            }}
-            className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5 transition-colors shadow-xs"
-          >
-            <Plus className="w-4.5 h-4.5" />
-            إضافة خدمة جديدة
-          </button>
-        )}
+        
+        <div className="flex flex-wrap items-center gap-2">
+          {googleSheetWebhookUrl && (
+            <>
+              <button
+                type="button"
+                onClick={handlePullFromSheets}
+                disabled={sheetLoading}
+                className="px-3.5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer disabled:opacity-50"
+                title="سحب واستيراد أحدث مسميات الخدمات والأسعار من ملف جوجل شيت"
+              >
+                <Download className={`w-4 h-4 ${sheetLoading ? "animate-spin" : ""}`} />
+                <span>استيراد الخدمات من جوجل شيت 📥</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handlePushToSheets}
+                disabled={sheetLoading}
+                className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-bold text-xs rounded-xl flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer disabled:opacity-50"
+                title="تصدير وحفظ قائمة الخدمات الحالية في ملف جوجل شيت"
+              >
+                <Download className="w-4 h-4 rotate-180 text-emerald-400" />
+                <span>تصدير للشيت 📤</span>
+              </button>
+            </>
+          )}
+
+          {!showCreateForm && (
+            <button
+              onClick={() => {
+                resetForm();
+                setShowCreateForm(true);
+              }}
+              className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
+            >
+              <Plus className="w-4.5 h-4.5" />
+              إضافة خدمة جديدة
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* Sheet Feedback Alert */}
+      {sheetFeedback && (
+        <div className={`p-3.5 rounded-xl text-xs font-bold flex items-center justify-between shadow-xs ${
+          sheetFeedback.type === "success" 
+            ? "bg-emerald-50 text-emerald-900 border border-emerald-200" 
+            : "bg-rose-50 text-rose-900 border border-rose-200"
+        }`}>
+          <span>{sheetFeedback.message}</span>
+          <button 
+            type="button" 
+            onClick={() => setSheetFeedback(null)} 
+            className="text-slate-400 hover:text-slate-700 font-bold p-1 cursor-pointer"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Permission guard info */}
       {!activeEmployee.permissions.canManageServices && (

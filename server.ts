@@ -44,6 +44,16 @@ const DB_FILE = path.join(DATA_DIR, "db.json");
 const initialData = {
   services: [
     {
+      id: "srv-102",
+      name: "## استخراج جواز سفر عادي",
+      govPrice: 1200,
+      officeFee: 200,
+      duration: "8 أيام عمل من تاريخ تقديم المستندات",
+      instructions: "يسلم الجواز الجديد لصاحب الشأن او مقدم الطلب من جوازات طنطا طبقا لتعليمات الامن العام وذلك من الساعه 8ص الى 2ظهرا بالجوازات",
+      deliveryDaysOffset: 9,
+      notes: "يتم تسليم المستندات بمقر المكتب والفرع المخصص."
+    },
+    {
       id: "srv-101",
       name: "# استخراج جواز سفر مستعجل",
       govPrice: 1500,
@@ -52,16 +62,6 @@ const initialData = {
       instructions: "يرجى إحضار أصل وصورة بطاقة الرقم القومي سارية، و3 صور شخصية خلفية بيضاء حديثة 4*6، وأصل جواز السفر القديم إن وجد.",
       deliveryDaysOffset: 3,
       notes: "يرجى الحضور للاستلام شخصياً أو توكيل رسمي بمقر مكتب مزايا لخدمات الجوازات بطنطا."
-    },
-    {
-      id: "srv-102",
-      name: "## استخراج جواز سفر عادي",
-      govPrice: 1100,
-      officeFee: 400,
-      duration: "7 أيام عمل من تاريخ تقديم المستندات",
-      instructions: "يرجى إحضار أصل بطاقة الرقم القومي سارية، الموقف من التجنيد للذكور، المؤهل الدراسي إن لم يكن مسجلاً بالبطاقة، و3 صور شخصية خلفية بيضاء.",
-      deliveryDaysOffset: 7,
-      notes: "يتم تسليم المستندات بمقر المكتب والفرع المخصص."
     },
     {
       id: "srv-103",
@@ -190,8 +190,8 @@ const initialData = {
     readyMessage: "عزيزنا {اسم_العميل}، نفيدكم علماً بأن أوراقكم الخاصة بالفاتورة رقم {رقم_الفاتورة} جاهزة للتسليم الآن.\nالخدمات: {الخدمات}\nمكان الحفظ: درج رقم ({رقم_الارشيف})\nبرجاء التوجه للمكتب للاستلام مع إحضار الفاتورة الحرارية.",
     deliveryMessage: "تم تسليم جواز السفر والأوراق الخاصة بك بنجاح يا {اسم_العميل}.\nرقم الفاتورة: {رقم_الفاتورة}\nنسعد بتقييمكم لخدمات مكتب مزايا للجوازات ونراكم قريباً في معاملات أخرى.",
     whatsappTemplate: "مكتب مزايا للجوازات\n\nالعميل: {اسم_العميل}\n{الاسم_الانجليزي}\n{المهنة}\nالخدمات:\n{الخدمات}\n\nالإجمالي: {السعر} جنيه.\n\n{رسالة_الشكر}",
-    googleSheetWebhookUrl: "https://script.google.com/macros/s/AKfycbz6j-7b_lwkN7wy2nkeIFcbx2rRw19yjTTAxtWVmt6CoualXSXno0UvIuDfpxcrJ15j/exec",
-    autoSyncWebhook: true,
+    googleSheetWebhookUrl: "https://script.google.com/macros/s/AKfycbxDfspdF16AKDKj2sD2L4AIKxq8TQFaYBxuThfEf24FB_zFHZLOwSyDiExD7ffZ_Sx4/exec",
+    autoSyncWebhook: false,
     googleSheetId: "",
     googleSheetUrl: "",
     googleSheetsConnected: true
@@ -1155,10 +1155,10 @@ async function pullFromGoogleWebhook(webhookUrl: string) {
   }
 }
 
-// Background auto sync trigger
+// Background auto sync trigger - strictly manual unless explicitly enabled
 function triggerBackgroundWebhookSync(db: any) {
   const webhookUrl = db.settings?.googleSheetWebhookUrl || (db.settings?.googleSheetUrl?.includes("script.google.com") ? db.settings.googleSheetUrl : null);
-  const autoSync = db.settings?.autoSyncWebhook ?? true;
+  const autoSync = db.settings?.autoSyncWebhook === true;
   if (webhookUrl && webhookUrl.startsWith("http") && autoSync) {
     pushToGoogleWebhook(webhookUrl, db).then((res) => {
       console.log("Background Google Sheet auto-sync completed successfully:", res?.message || "OK");
@@ -1254,8 +1254,16 @@ app.post("/api/sheets/webhook/sync-dictionary", async (req, res) => {
   }
 
   try {
-    // 1. Send push containing dictionary and db
-    const pushResult = await pushToGoogleWebhook(targetUrl, db);
+    // 1. Send push containing ONLY dictionary to avoid touching services or other sheets
+    await fetch(targetUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        action: "push_dictionary",
+        dictionary: db.dictionary || [],
+      }),
+      redirect: "follow",
+    });
 
     // 2. Test pulling back to check if the dictionary was actually saved in the Google Sheet tab
     let savedInSheet = false;
@@ -1303,22 +1311,33 @@ app.post("/api/sheets/webhook/pull", async (req, res) => {
   try {
     const pulledDB = await pullFromGoogleWebhook(targetUrl);
     
-    // Retain webhook configuration
+    // Retain webhook configuration and enforce manual mode (autoSync: false)
     pulledDB.settings = {
-      ...pulledDB.settings,
+      ...db.settings,
+      ...(pulledDB.settings || {}),
       googleSheetWebhookUrl: targetUrl,
-      autoSyncWebhook: db.settings.autoSyncWebhook ?? true,
-      googleSheetId: db.settings.googleSheetId,
-      googleSheetUrl: db.settings.googleSheetUrl,
+      autoSyncWebhook: false, // Strict manual mode
+      googleSheetId: db.settings.googleSheetId || "",
+      googleSheetUrl: db.settings.googleSheetUrl || "",
       googleSheetsConnected: true,
     };
+
+    // If pulledDB has services, keep them; if empty, retain db.services
+    if (!pulledDB.services || pulledDB.services.length === 0) {
+      pulledDB.services = db.services || [];
+    }
+
+    // Retain local employees
+    if (!pulledDB.employees || pulledDB.employees.length === 0) {
+      pulledDB.employees = db.employees || [];
+    }
 
     // Save to local file
     writeDB(pulledDB);
 
     res.json({
       status: "success",
-      message: "تم استيراد كافة البيانات بنجاح من جوجل شيت واعتمادها كقاعدة بيانات نشطة! 📥",
+      message: `تم استيراد كافة البيانات بنجاح من جوجل شيت واعتمادها كقاعدة بيانات نشطة! 📥 (${pulledDB.services?.length || 0} خدمة، ${pulledDB.invoices?.length || 0} فاتورة)`,
       db: pulledDB,
     });
   } catch (err: any) {
