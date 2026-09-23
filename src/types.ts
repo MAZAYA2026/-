@@ -75,6 +75,11 @@ export interface Employee {
   };
 }
 
+export interface HolidayItem {
+  date: string; // YYYY-MM-DD
+  name: string; // اسم العطلة الرسمية
+}
+
 export interface AppSettings {
   headerText: string; // نص مقدمة الفاتورة
   subHeaderText?: string; // السطر الفرعي أسفل ترويسة الفاتورة المطبوعة (مثل: جوازات طنطا والمعاملات الحكومية)
@@ -88,4 +93,6 @@ export interface AppSettings {
   googleSheetId?: string; // Spreadsheet ID for database integration
   googleSheetUrl?: string; // URL for direct access
   googleSheetsConnected?: boolean; // Integration toggle
+  customHolidays?: HolidayItem[]; // العطلات الرسمية المخصصة والمضافة
+  includeSaturdayAsWeekend?: boolean; // اعتبار يوم السبت عطلة أسبوعية للمصالح الحكومية (افتراضياً: نعم)
 }

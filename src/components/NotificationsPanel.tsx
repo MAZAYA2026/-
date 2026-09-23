@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Invoice, AppSettings } from "../types";
 import { updateInvoiceOnServer } from "../lib/api";
+import { getArabicDayName } from "../lib/businessDays";
 import { Bell, Send, CheckCircle, Clock, Calendar, Search, Filter, AlertTriangle, MessageSquare, RefreshCw } from "lucide-react";
 
 interface NotificationsPanelProps {
@@ -273,7 +274,7 @@ export default function NotificationsPanel({ invoices, settings, onInvoiceUpdate
                       <span className="text-slate-300">•</span>
                       <span className={`font-bold flex items-center gap-1 ${isOverdue ? "text-rose-600" : "text-amber-700"}`}>
                         <Calendar className="w-3.5 h-3.5" />
-                        موعد التسليم: {record.deliveryDate}
+                        موعد التسليم: {getArabicDayName(record.deliveryDate) ? `${getArabicDayName(record.deliveryDate)} ` : ""}{record.deliveryDate}
                       </span>
                     </div>
                   </div>

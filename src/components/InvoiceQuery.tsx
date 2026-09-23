@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Invoice, InvoiceStatus, AppSettings, Service, Employee, CustomerInput } from "../types";
 import { updateInvoiceOnServer, deleteInvoiceOnServer } from "../lib/api";
+import { calculateWorkingDaysDeliveryDate, getArabicDayName } from "../lib/businessDays";
 import { Search, Edit3, Trash2, Printer, Send, CheckCircle, PackageOpen, X, MapPin, Calendar, Info, RefreshCw, AlertCircle, Save } from "lucide-react";
 import ThermalReceipt from "./ThermalReceipt";
 
@@ -140,14 +141,21 @@ export default function InvoiceQuery({ invoices, services, settings, activeEmplo
         const matched = services.find(srv => srv.name === s.serviceId || srv.id === s.serviceId);
         let srvDeliveryDate = s.deliveryDate && s.deliveryDate.trim() ? s.deliveryDate.trim() : "";
         if (!srvDeliveryDate && matched && typeof matched.deliveryDaysOffset === "number" && inv.date) {
-          const d = new Date(inv.date);
-          d.setDate(d.getDate() + (matched.deliveryDaysOffset || 0));
-          srvDeliveryDate = d.toISOString().split("T")[0];
+          const customHolidays = settings.customHolidays || [];
+          const calcResult = calculateWorkingDaysDeliveryDate(
+            inv.date, 
+            matched.deliveryDaysOffset || 0, 
+            customHolidays, 
+            matched.name,
+            settings.includeSaturdayAsWeekend !== false
+          );
+          srvDeliveryDate = calcResult.deliveryDate;
         }
         if (srvDeliveryDate) allDeliveryDates.push(srvDeliveryDate);
 
+        const deliveryDayName = srvDeliveryDate ? getArabicDayName(srvDeliveryDate) : "";
         const deliveryInfo = srvDeliveryDate 
-          ? `\n    📅 موعد التسليم: ${srvDeliveryDate}` 
+          ? `\n    📅 موعد التسليم: ${deliveryDayName ? deliveryDayName + " " : ""}${srvDeliveryDate} (أيام عمل)` 
           : (matched?.duration ? `\n    ⏱️ مدة التنفيذ: ${matched.duration}` : "");
 
         return `• ${matched?.name || s.serviceId} (عدد: ${s.quantity}) - السعر: ${s.price} ج.م${deliveryInfo}`;
@@ -277,6 +285,17 @@ export default function InvoiceQuery({ invoices, services, settings, activeEmplo
             totalOffice += matched.officeFee * s.quantity;
             totalAmount += (matched.govPrice + matched.officeFee) * s.quantity;
             s.price = (matched.govPrice + matched.officeFee) * s.quantity;
+
+            // Recalculate delivery date according to official working days and Saturday rule for #
+            const customHolidays = settings.customHolidays || [];
+            const calcResult = calculateWorkingDaysDeliveryDate(
+              editingInvoice.date || new Date(),
+              matched.deliveryDaysOffset || 0,
+              customHolidays,
+              matched.name,
+              settings.includeSaturdayAsWeekend !== false
+            );
+            s.deliveryDate = calcResult.deliveryDate;
           }
         });
       });

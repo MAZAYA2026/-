@@ -408,11 +408,13 @@ export default function ServicesConfig({
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs"
                 required
               />
-              <span className="text-[9px] text-slate-400 leading-none">تنبيه: خدمات الجوازات الفردية تبدأ برمز الهاش الواحد (#) والمزدوجة (##) لتفعيل حقول الترجمة والرقم القومي.</span>
+              <span className="text-[9px] text-slate-400 leading-none">
+                تنبيه: الخدمات التي تبدأ بـ (#) يُحتسب يوم السبت يوم عمل لها. أما باقي الخدمات فيُعتبر السبت عطلة.
+              </span>
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-700 block">عدد أيام التنفيذ التلقائي للاستلام:</label>
+              <label className="text-xs font-bold text-slate-700 block">عدد أيام العمل للتنفيذ:</label>
               <input
                 type="number"
                 min="0"
@@ -421,6 +423,9 @@ export default function ServicesConfig({
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono"
                 required
               />
+              <span className="text-[9px] font-bold block text-indigo-700">
+                {name.trim().startsWith("#") ? "⚡ تبدأ بـ (#): يوم السبت يُحسب يوم عمل رسمي (تجاوز الجمعة والعطلات الرسمية فقط)." : "💤 لا تبدأ بـ (#): يوم السبت عطلة رسمية (تجاوز الجمعة والسبت والعطلات الرسمية)."}
+              </span>
             </div>
           </div>
 
@@ -530,7 +535,7 @@ export default function ServicesConfig({
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-700 block">أيام التنفيذ التلقائي للاستلام:</label>
+              <label className="text-xs font-bold text-slate-700 block">أيام العمل للتنفيذ:</label>
               <input
                 type="number"
                 min="0"
@@ -539,6 +544,9 @@ export default function ServicesConfig({
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono"
                 required
               />
+              <span className="text-[9px] font-bold block text-indigo-700">
+                {name.trim().startsWith("#") ? "⚡ تبدأ بـ (#): يوم السبت يُحسب يوم عمل رسمي لهذه الخدمة." : "💤 لا تبدأ بـ (#): يوم السبت عطلة رسمية لهذه الخدمة."}
+              </span>
             </div>
           </div>
 

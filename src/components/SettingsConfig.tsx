@@ -33,8 +33,11 @@ import {
   BookOpen,
   Search,
   Plus,
-  Trash2
+  Trash2,
+  Calendar,
+  CalendarCheck
 } from "lucide-react";
+import { DEFAULT_OFFICIAL_HOLIDAYS, HolidayItem } from "../lib/businessDays";
 
 interface SettingsConfigProps {
   settings: AppSettings;
@@ -65,6 +68,12 @@ export default function SettingsConfig({
   const [googleSheetWebhookUrl, setGoogleSheetWebhookUrl] = useState(settings.googleSheetWebhookUrl || settings.googleSheetUrl || "");
   const [footerText, setFooterText] = useState(settings.footerText || "يسعدنا دائماً خدمتكم وثقتكم بنا");
   const [autoSyncWebhook, setAutoSyncWebhook] = useState(settings.autoSyncWebhook || false);
+
+  // Business days & Holidays config
+  const [includeSaturdayAsWeekend, setIncludeSaturdayAsWeekend] = useState(settings.includeSaturdayAsWeekend !== false);
+  const [customHolidays, setCustomHolidays] = useState<HolidayItem[]>(settings.customHolidays || []);
+  const [newHolidayDate, setNewHolidayDate] = useState("");
+  const [newHolidayName, setNewHolidayName] = useState("");
 
   const [saving, setSaving] = useState(false);
   const [showScriptGuide, setShowScriptGuide] = useState(false);
@@ -110,6 +119,8 @@ export default function SettingsConfig({
         autoSyncWebhook: autoSyncWebhook,
         footerText: footerText.trim(),
         googleSheetsConnected: true,
+        includeSaturdayAsWeekend: includeSaturdayAsWeekend,
+        customHolidays: customHolidays
       };
       const result = await updateSettingsOnServer(payload);
       onSettingsUpdated(result);
@@ -912,7 +923,9 @@ function formatHeader(sheet, numCols) {
         googleSheetWebhookUrl: googleSheetWebhookUrl.trim(),
         autoSyncWebhook: autoSyncWebhook,
         footerText: footerText.trim(),
-        googleSheetsConnected: !!(googleSheetWebhookUrl.trim() || googleSheetUrl.trim() || settings.googleSheetsConnected)
+        googleSheetsConnected: !!(googleSheetWebhookUrl.trim() || googleSheetUrl.trim() || settings.googleSheetsConnected),
+        includeSaturdayAsWeekend: includeSaturdayAsWeekend,
+        customHolidays: customHolidays
       };
 
       const result = await updateSettingsOnServer(payload);
@@ -1576,6 +1589,150 @@ function formatHeader(sheet, numCols) {
                   </table>
                 )}
               </div>
+            </div>
+
+          </div>
+        </div>
+
+        {/* Card 6: Official Egyptian Holidays & Business Working Days Settings */}
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-xs overflow-hidden">
+          <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <CalendarCheck className="w-5 h-5 text-indigo-600" />
+              <div>
+                <h3 className="font-bold text-sm text-slate-800 font-cairo">احتساب أيام العمل والعطلات الرسمية لمواعيد الاستلام</h3>
+                <p className="text-[11px] text-slate-500 font-cairo">تجاوز أيام الجمعة والسبت والعطلات الحكومية والرسمية للدولة تلقائياً عند تحديد موعد تسليم المعاملات</p>
+              </div>
+            </div>
+            <span className="px-3 py-1.5 bg-indigo-50 text-indigo-700 font-bold rounded-lg text-xs font-mono border border-indigo-200/60">
+              {DEFAULT_OFFICIAL_HOLIDAYS.length + customHolidays.length} عطلة معتمدة
+            </span>
+          </div>
+
+          <div className="p-6 space-y-6">
+            {/* Weekend Configuration */}
+            <div className="bg-indigo-50/50 border border-indigo-100 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h4 className="font-bold text-xs text-indigo-950 flex items-center gap-1.5">
+                  <Calendar className="w-4 h-4 text-indigo-600" />
+                  قاعدة احتساب يوم السبت كعطلة أو يوم عمل
+                </h4>
+                <p className="text-[11px] text-indigo-700/80 mt-1">
+                  • <strong>الخدمات التي تبدأ بـ (#)</strong>: يُحتسب يوم السبت <strong>يوم عمل رسمي</strong> دائماً (لا يُعتبر عطلة).<br />
+                  • <strong>باقي الخدمات</strong>: يُعتبر يوم السبت <strong>عطلة رسمية</strong> بالإضافة ليوم الجمعة والعطلات الرسمية للدولة.
+                </p>
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-2 rounded-lg border border-indigo-200 shadow-2xs shrink-0">
+                <input
+                  type="checkbox"
+                  checked={includeSaturdayAsWeekend}
+                  onChange={(e) => setIncludeSaturdayAsWeekend(e.target.checked)}
+                  className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4"
+                />
+                <span className="text-xs font-bold text-slate-800">تجاوز السبت لباقي الخدمات (عطلة)</span>
+              </label>
+            </div>
+
+            {/* Add Custom Holiday */}
+            <div className="space-y-3">
+              <h4 className="font-bold text-xs text-slate-800 flex items-center gap-1.5">
+                <Plus className="w-4 h-4 text-indigo-600" />
+                إضافة عطلة استثنائية أو قرار حكومي جديد بإجازة:
+              </h4>
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+                <div className="sm:col-span-4 space-y-1">
+                  <label className="text-[11px] font-bold text-slate-600">تاريخ العطلة (يوم-شهر-سنة):</label>
+                  <input
+                    type="date"
+                    value={newHolidayDate}
+                    onChange={(e) => setNewHolidayDate(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono"
+                  />
+                </div>
+                <div className="sm:col-span-6 space-y-1">
+                  <label className="text-[11px] font-bold text-slate-600">اسم العطلة أو سبب الإغلاق الحكومي:</label>
+                  <input
+                    type="text"
+                    value={newHolidayName}
+                    onChange={(e) => setNewHolidayName(e.target.value)}
+                    placeholder="مثال: إجازة طارئة بقرار رئيس الوزراء..."
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!newHolidayDate || !newHolidayName.trim()) {
+                        alert("يرجى تحديد التاريخ واسم العطلة أولاً.");
+                        return;
+                      }
+                      if (customHolidays.some(h => h.date === newHolidayDate)) {
+                        alert("هذا التاريخ مضاف بالفعل كعطلة.");
+                        return;
+                      }
+                      setCustomHolidays([...customHolidays, { date: newHolidayDate, name: newHolidayName.trim() }]);
+                      setNewHolidayDate("");
+                      setNewHolidayName("");
+                    }}
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-3 rounded-lg text-xs flex items-center justify-center gap-1 transition-colors shadow-xs cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>إضافة العطلة</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Custom Holidays Table */}
+            {customHolidays.length > 0 && (
+              <div className="space-y-2">
+                <h5 className="font-bold text-xs text-slate-700">العطلات الإضافية المخصصة المسجلة:</h5>
+                <div className="border border-slate-200 rounded-xl overflow-hidden">
+                  <table className="w-full text-right text-xs">
+                    <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
+                      <tr>
+                        <th className="px-4 py-2">التاريخ</th>
+                        <th className="px-4 py-2">المناسبة</th>
+                        <th className="px-4 py-2 text-center w-20">حذف</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {customHolidays.map((item, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="px-4 py-2 font-mono font-bold text-slate-900">{item.date}</td>
+                          <td className="px-4 py-2 font-bold text-indigo-900">{item.name}</td>
+                          <td className="px-4 py-2 text-center">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCustomHolidays(customHolidays.filter((_, i) => i !== idx));
+                              }}
+                              className="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Built-in National Holidays Reference Collapsible */}
+            <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/50 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-xs text-slate-800 flex items-center gap-1.5">
+                  <CheckCircle className="w-4 h-4 text-emerald-600" />
+                  قائمة العطلات الرسمية المدمجة لجمهورية مصر العربية (2025 - 2027)
+                </span>
+                <span className="text-[11px] text-slate-500 font-mono">مفعلة تلقائياً ({DEFAULT_OFFICIAL_HOLIDAYS.length} مناسبة)</span>
+              </div>
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                تشمل: أعياد الفطر، الأضحى، وقفة عرفات، 6 أكتوبر، 25 يناير، 30 يونيو، 23 يوليو، المولد النبوي الشريف، رأس السنة الهجرية، شم النسيم، عيد العمال، تحرير سيناء، وعيد الميلاد المجيد. النظام يتجاوز هذه الأيام تلقائياً في حساب تاريخ التسليم.
+              </p>
             </div>
 
           </div>

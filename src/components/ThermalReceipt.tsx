@@ -1,5 +1,6 @@
 import React, { useRef } from "react";
 import { Invoice, AppSettings, Service } from "../types";
+import { calculateWorkingDaysDeliveryDate, getArabicDayName } from "../lib/businessDays";
 import { Printer, X, Send } from "lucide-react";
 
 interface ThermalReceiptProps {
@@ -164,6 +165,9 @@ export default function ThermalReceipt({ invoice, settings, services, onClose, o
               {/* Overall Latest Delivery Date */}
               {(() => {
                 const allDeliveryDates: string[] = [];
+                const customHolidays = settings.customHolidays || [];
+                const includeSaturday = settings.includeSaturdayAsWeekend !== false;
+
                 invoice.customers.forEach((c) => {
                   c.services.forEach((s) => {
                     if (s.deliveryDate && s.deliveryDate.trim()) {
@@ -171,19 +175,27 @@ export default function ThermalReceipt({ invoice, settings, services, onClose, o
                     } else {
                       const matched = services.find((srv) => srv.id === s.serviceId || srv.name === s.serviceId);
                       if (matched && typeof matched.deliveryDaysOffset === "number" && invoice.date) {
-                        const d = new Date(invoice.date);
-                        d.setDate(d.getDate() + (matched.deliveryDaysOffset || 0));
-                        allDeliveryDates.push(d.toISOString().split("T")[0]);
+                        const calcResult = calculateWorkingDaysDeliveryDate(
+                          invoice.date, 
+                          matched.deliveryDaysOffset || 0, 
+                          customHolidays, 
+                          matched.name,
+                          settings.includeSaturdayAsWeekend !== false
+                        );
+                        allDeliveryDates.push(calcResult.deliveryDate);
                       }
                     }
                   });
                 });
                 const maxDeliveryDate = allDeliveryDates.length > 0 ? allDeliveryDates.sort().reverse()[0] : "";
                 if (!maxDeliveryDate) return null;
+                const dayName = getArabicDayName(maxDeliveryDate);
                 return (
                   <div className="bg-white border-2 border-black p-1.5 rounded-xs mt-1.5 text-center text-black">
-                    <div className="text-[11px] font-bold text-black">موعد استلام المعاملة النهائي:</div>
-                    <div className="text-xs font-black font-mono mt-0.5 text-black tracking-wider">{maxDeliveryDate}</div>
+                    <div className="text-[11px] font-bold text-black">موعد استلام المعاملة النهائي (أيام عمل):</div>
+                    <div className="text-xs font-black font-mono mt-0.5 text-black tracking-wider">
+                      {dayName ? `${dayName} ` : ""}{maxDeliveryDate}
+                    </div>
                   </div>
                 );
               })()}
@@ -240,10 +252,17 @@ export default function ThermalReceipt({ invoice, settings, services, onClose, o
                         // Calculate delivery date if not explicitly set
                         let srvDeliveryDate = item.deliveryDate && item.deliveryDate.trim() ? item.deliveryDate.trim() : "";
                         if (!srvDeliveryDate && matchedSrv && typeof matchedSrv.deliveryDaysOffset === "number" && invoice.date) {
-                          const d = new Date(invoice.date);
-                          d.setDate(d.getDate() + (matchedSrv.deliveryDaysOffset || 0));
-                          srvDeliveryDate = d.toISOString().split("T")[0];
+                          const customHolidays = settings.customHolidays || [];
+                          const calcResult = calculateWorkingDaysDeliveryDate(
+                            invoice.date, 
+                            matchedSrv.deliveryDaysOffset || 0, 
+                            customHolidays, 
+                            matchedSrv.name,
+                            settings.includeSaturdayAsWeekend !== false
+                          );
+                          srvDeliveryDate = calcResult.deliveryDate;
                         }
+                        const srvDayName = srvDeliveryDate ? getArabicDayName(srvDeliveryDate) : "";
 
                         return (
                           <div key={sIdx} className="space-y-1.5">
@@ -282,7 +301,7 @@ export default function ThermalReceipt({ invoice, settings, services, onClose, o
                               <div className="border-t-2 border-black px-2 py-1.5 text-center text-[11px] text-black font-bold bg-white flex items-center justify-between">
                                 <span>موعد تسليم الخدمة:</span>
                                 <span className="font-mono font-black text-xs text-black border border-black px-1.5 py-0.5 rounded-xs">
-                                  {srvDeliveryDate || (matchedSrv?.duration ? matchedSrv.duration : "حسب جهة الإصدار")}
+                                  {srvDeliveryDate ? `${srvDayName ? srvDayName + " " : ""}${srvDeliveryDate}` : (matchedSrv?.duration ? matchedSrv.duration : "حسب جهة الإصدار")}
                                 </span>
                               </div>
                             </div>

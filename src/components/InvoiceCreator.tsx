@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { Service, CustomerInput, Invoice, InvoiceStatus, AppSettings, Employee, DictionaryItem } from "../types";
 import { translateWithGemini, createInvoiceOnServer, saveDictionaryWord } from "../lib/api";
-import { Plus, Trash2, FileText, UserPlus, Sparkles, Printer, Send, Check, AlertCircle, Info, Calendar, BookOpen } from "lucide-react";
+import { calculateWorkingDaysDeliveryDate, getArabicDayName, isNonWorkingDay } from "../lib/businessDays";
+import { Plus, Trash2, FileText, UserPlus, Sparkles, Printer, Send, Check, AlertCircle, Info, Calendar, BookOpen, ShieldAlert } from "lucide-react";
 import ThermalReceipt from "./ThermalReceipt";
 
 interface InvoiceCreatorProps {
@@ -121,11 +122,18 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
     if (matched) {
       item.price = (matched.govPrice + matched.officeFee) * item.quantity;
       
-      // Calculate delivery date automatically based on offsetDays
-      const today = new Date();
+      // Calculate delivery date automatically based on official working days:
+      // Services starting with '#' consider Saturday a working day; other services consider Saturday a holiday.
       const offset = matched.deliveryDaysOffset || 0;
-      today.setDate(today.getDate() + offset);
-      item.deliveryDate = today.toISOString().split("T")[0];
+      const customHolidays = settings.customHolidays || [];
+      const calcResult = calculateWorkingDaysDeliveryDate(
+        new Date(),
+        offset,
+        customHolidays,
+        matched.name,
+        settings.includeSaturdayAsWeekend !== false
+      );
+      item.deliveryDate = calcResult.deliveryDate;
     } else {
       item.price = 0;
       item.deliveryDate = "";
@@ -432,14 +440,21 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
         const matched = services.find(srv => srv.name === s.serviceId || srv.id === s.serviceId);
         let srvDeliveryDate = s.deliveryDate && s.deliveryDate.trim() ? s.deliveryDate.trim() : "";
         if (!srvDeliveryDate && matched && typeof matched.deliveryDaysOffset === "number" && inv.date) {
-          const d = new Date(inv.date);
-          d.setDate(d.getDate() + (matched.deliveryDaysOffset || 0));
-          srvDeliveryDate = d.toISOString().split("T")[0];
+          const customHolidays = settings.customHolidays || [];
+          const calcResult = calculateWorkingDaysDeliveryDate(
+            inv.date, 
+            matched.deliveryDaysOffset || 0, 
+            customHolidays, 
+            matched.name,
+            settings.includeSaturdayAsWeekend !== false
+          );
+          srvDeliveryDate = calcResult.deliveryDate;
         }
         if (srvDeliveryDate) allDeliveryDates.push(srvDeliveryDate);
 
+        const deliveryDayName = srvDeliveryDate ? getArabicDayName(srvDeliveryDate) : "";
         const deliveryInfo = srvDeliveryDate 
-          ? `\n    📅 موعد التسليم: ${srvDeliveryDate}` 
+          ? `\n    📅 موعد التسليم: ${deliveryDayName ? deliveryDayName + " " : ""}${srvDeliveryDate} (أيام عمل رسمية)` 
           : (matched?.duration ? `\n    ⏱️ مدة التنفيذ: ${matched.duration}` : "");
 
         return `• ${matched?.name || s.serviceId} (عدد: ${s.quantity}) - السعر: ${s.price} ج.م${deliveryInfo}`;
@@ -932,7 +947,9 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
                               </div>
                               <div className="text-amber-700 flex items-center gap-1 font-bold">
                                 <Calendar className="w-3.5 h-3.5" />
-                                <span>موعد الاستلام التلقائي المحسوب: {srv.deliveryDate}</span>
+                                <span>
+                                  موعد الاستلام التلقائي المحسوب: {srv.deliveryDate ? `${getArabicDayName(srv.deliveryDate) ? getArabicDayName(srv.deliveryDate) + " " : ""}${srv.deliveryDate} (أيام عمل ${selectedServiceObj.name.trim().startsWith("#") ? "• السبت عمل" : "• السبت عطلة"})` : "غير محدد"}
+                                </span>
                               </div>
                             </div>
                             <div>
