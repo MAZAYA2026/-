@@ -1298,6 +1298,59 @@ app.post("/api/sheets/webhook/sync-dictionary", async (req, res) => {
   }
 });
 
+// Dedicated Webhook Sync Settings Endpoint
+app.post("/api/sheets/webhook/sync-settings", async (req, res) => {
+  const { webhookUrl } = req.body;
+  const db = readDB();
+  const targetUrl = webhookUrl || db.settings.googleSheetWebhookUrl;
+
+  if (!targetUrl || !targetUrl.startsWith("http")) {
+    return res.status(400).json({ error: "الرجاء إدخال رابط سكربت Webhook صالح أولاً." });
+  }
+
+  try {
+    // 1. Send push containing ONLY settings to update the settings sheet
+    await fetch(targetUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        action: "push_settings",
+        settings: db.settings,
+        db: { settings: db.settings }
+      }),
+      redirect: "follow",
+    });
+
+    // 2. Test pulling back to check if settings were saved in the sheet
+    let savedInSheet = false;
+    try {
+      const pulledDB = await pullFromGoogleWebhook(targetUrl);
+      const s = pulledDB?.settings || {};
+      if (s.headerText || s.subHeaderText || s.welcomeMessage || s.whatsappTemplate || s.readyMessage || s.footerText) {
+        savedInSheet = true;
+      }
+    } catch (e) {
+      console.log("Could not pull to verify sheet settings:", e);
+    }
+
+    if (savedInSheet) {
+      return res.json({
+        status: "success",
+        savedInSheet: true,
+        message: "تم حفظ وتحديث إعدادات وبيانات المكتب في ورقة (Settings_الاعدادات_والرسائل) بملف جوجل شيت بنجاح! 💾✅"
+      });
+    } else {
+      return res.json({
+        status: "warning",
+        savedInSheet: false,
+        message: "تم إرسال الإعدادات بنجاح إلى السكربت. إذا لم تظهر ورقة Settings_الاعدادات_والرسائل في ملف جوجل شيت، يرجى تحديث كود Apps Script بالنسخة المحدثة ثم اختيار (Deploy > New version)."
+      });
+    }
+  } catch (err: any) {
+    res.status(500).json({ error: "فشل إرسال الإعدادات إلى السكربت: " + err.message });
+  }
+});
+
 // Webhook Pull DB Endpoint
 app.post("/api/sheets/webhook/pull", async (req, res) => {
   const { webhookUrl } = req.body;
@@ -1312,9 +1365,20 @@ app.post("/api/sheets/webhook/pull", async (req, res) => {
     const pulledDB = await pullFromGoogleWebhook(targetUrl);
     
     // Retain webhook configuration and enforce manual mode (autoSync: false)
+    const pulledSettings = pulledDB.settings || {};
+    const hasProfileSettingsInSheet = Boolean(
+      pulledSettings.headerText || 
+      pulledSettings.subHeaderText || 
+      pulledSettings.footerText || 
+      pulledSettings.welcomeMessage || 
+      pulledSettings.whatsappTemplate ||
+      pulledSettings.readyMessage ||
+      pulledSettings.deliveryMessage
+    );
+
     pulledDB.settings = {
       ...db.settings,
-      ...(pulledDB.settings || {}),
+      ...(hasProfileSettingsInSheet ? pulledSettings : {}),
       googleSheetWebhookUrl: targetUrl,
       autoSyncWebhook: false, // Strict manual mode
       googleSheetId: db.settings.googleSheetId || "",
@@ -1360,13 +1424,38 @@ app.post("/api/sheets/sync", (req, res) => {
 });
 
 // 11. Update settings endpoint
-app.post("/api/db/settings", (req, res) => {
+app.post("/api/db/settings", async (req, res) => {
   const newSettings = req.body;
   const db = readDB();
   db.settings = { ...db.settings, ...newSettings };
   writeDB(db);
-  triggerBackgroundWebhookSync(db);
-  res.json({ status: "success", settings: db.settings });
+
+  // If webhook is configured, also push settings directly to Google Sheet
+  const webhookUrl = db.settings?.googleSheetWebhookUrl;
+  let sheetSyncMessage = "";
+  if (webhookUrl && webhookUrl.startsWith("http")) {
+    try {
+      await fetch(webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({
+          action: "push_settings",
+          settings: db.settings,
+          db: { settings: db.settings }
+        }),
+        redirect: "follow",
+      });
+      sheetSyncMessage = "وتم حفظ وتحديث الإعدادات في ملف جوجل شيت أيضاً بنجاح! 📊✅";
+    } catch (err: any) {
+      console.warn("Could not push settings to Google Sheet:", err.message);
+    }
+  }
+
+  res.json({ 
+    status: "success", 
+    settings: db.settings,
+    message: sheetSyncMessage ? `تم حفظ الإعدادات محلياً ${sheetSyncMessage}` : "تم حفظ إعدادات النظام بنجاح!"
+  });
 });
 
 // Vite Middleware Integration for Dev / Static Asset Server for Production

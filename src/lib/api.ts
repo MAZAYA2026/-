@@ -298,3 +298,16 @@ export async function syncDictionaryToGoogleWebhook(webhookUrl?: string): Promis
   return response.json();
 }
 
+export async function syncSettingsToGoogleWebhook(webhookUrl?: string): Promise<any> {
+  const response = await fetch("/api/sheets/webhook/sync-settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ webhookUrl }),
+  });
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || "فشل تسجيل وحفظ الإعدادات في جوجل شيت");
+  }
+  return response.json();
+}
+

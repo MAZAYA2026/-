@@ -6,6 +6,7 @@ import {
   pushDataToGoogleWebhook,
   pullDataFromGoogleWebhook,
   syncDictionaryToGoogleWebhook,
+  syncSettingsToGoogleWebhook,
   saveDictionaryWord,
   deleteDictionaryWord
 } from "../lib/api";
@@ -80,6 +81,99 @@ export default function SettingsConfig({
   const [dictSyncLoading, setDictSyncLoading] = useState(false);
   const [dictSyncResult, setDictSyncResult] = useState<{ type: "success" | "warning" | "error"; message: string } | null>(null);
   const [showDictScriptGuide, setShowDictScriptGuide] = useState(false);
+
+  // Settings sheet sync states
+  const [settingsSyncLoading, setSettingsSyncLoading] = useState(false);
+  const [settingsSyncResult, setSettingsSyncResult] = useState<{ type: "success" | "warning" | "error"; message: string } | null>(null);
+
+  const handleSyncSettingsToSheet = async () => {
+    const rawUrl = googleSheetWebhookUrl.trim();
+    if (!rawUrl) {
+      alert("الرجاء إدخال رابط سكربت Webhook الخاص بجوجل شيت أولاً.");
+      return;
+    }
+
+    setSettingsSyncLoading(true);
+    setSettingsSyncResult(null);
+    try {
+      // 1. Save settings locally first
+      const payload: AppSettings = {
+        headerText: headerText.trim(),
+        subHeaderText: subHeaderText.trim(),
+        welcomeMessage: welcomeMessage.trim(),
+        whatsappTemplate: whatsappTemplate.trim(),
+        readyMessage: readyMessage.trim(),
+        deliveryMessage: deliveryMessage.trim(),
+        googleSheetId: settings.googleSheetId || "",
+        googleSheetUrl: googleSheetUrl.trim(),
+        googleSheetWebhookUrl: rawUrl,
+        autoSyncWebhook: autoSyncWebhook,
+        footerText: footerText.trim(),
+        googleSheetsConnected: true,
+      };
+      const result = await updateSettingsOnServer(payload);
+      onSettingsUpdated(result);
+
+      // 2. Push settings directly to sheet
+      const res = await syncSettingsToGoogleWebhook(rawUrl);
+      setSettingsSyncResult({
+        type: res.savedInSheet ? "success" : "warning",
+        message: res.message || "تم حفظ وتصدير الإعدادات وبيانات المكتب إلى جوجل شيت بنجاح! 💾✅"
+      });
+      setTimeout(() => setSettingsSyncResult(null), 7000);
+    } catch (err: any) {
+      setSettingsSyncResult({
+        type: "error",
+        message: `فشل حفظ الإعدادات في جوجل شيت: ${err.message}`
+      });
+    } finally {
+      setSettingsSyncLoading(false);
+    }
+  };
+
+  const handlePullSettingsFromSheet = async () => {
+    const rawUrl = googleSheetWebhookUrl.trim();
+    if (!rawUrl) {
+      alert("الرجاء إدخال رابط سكربت Webhook الخاص بجوجل شيت أولاً.");
+      return;
+    }
+    const confirmPull = window.confirm("هل تريد استيراد وسحب بيانات الملف التعريفي والترويسة وقوالب الرسائل المسجلة في ملف جوجل شيت واعتمادها الآن؟");
+    if (!confirmPull) return;
+
+    setSettingsSyncLoading(true);
+    setSettingsSyncResult(null);
+    try {
+      const res = await pullDataFromGoogleWebhook(rawUrl);
+      if (res.db && res.db.settings) {
+        const s = res.db.settings;
+        if (s.headerText) setHeaderText(s.headerText);
+        if (s.subHeaderText !== undefined) setSubHeaderText(s.subHeaderText);
+        if (s.welcomeMessage) setWelcomeMessage(s.welcomeMessage);
+        if (s.whatsappTemplate) setWhatsappTemplate(s.whatsappTemplate);
+        if (s.readyMessage) setReadyMessage(s.readyMessage);
+        if (s.deliveryMessage) setDeliveryMessage(s.deliveryMessage);
+        if (s.footerText) setFooterText(s.footerText);
+        onSettingsUpdated(s);
+        setSettingsSyncResult({
+          type: "success",
+          message: "تم بنجاح استيراد بيانات الملف التعريفي والرسائل من ملف جوجل شيت! 📥✅"
+        });
+      } else {
+        setSettingsSyncResult({
+          type: "warning",
+          message: "لم يتم العثور على إعدادات مسجلة في ملف جوجل شيت."
+        });
+      }
+      setTimeout(() => setSettingsSyncResult(null), 7000);
+    } catch (err: any) {
+      setSettingsSyncResult({
+        type: "error",
+        message: `فشل الاستيراد من جوجل شيت: ${err.message}`
+      });
+    } finally {
+      setSettingsSyncLoading(false);
+    }
+  };
 
   const handleSyncDictionaryToSheets = async () => {
     setDictSyncLoading(true);
@@ -282,20 +376,25 @@ function doPost(e) {
       if (db.settings) {
         var stSheet = getOrCreateSheet(ss, "Settings_الاعدادات_والرسائل");
         stSheet.clearContents();
-        var stHeaders = ["بند الإعداد", "القيمة المحفوظة"];
+        var stHeaders = ["بند الإعداد (Setting Name)", "القيمة المحفوظة (Value)", "المعرف البرمجي (Key)"];
         var stRows = [
           stHeaders,
-          ["اسم المكتب بالترويسة", db.settings.headerText || ""],
-          ["الترويسة الفرعية", db.settings.subHeaderText || ""],
-          ["هاتف التواصل والشكاوى", db.settings.welcomeMessage || ""],
-          ["قالب رسالة الفاتورة (واتساب)", db.settings.whatsappTemplate || ""],
-          ["قالب رسالة جاهزية الأوراق للاستلام", db.settings.readyMessage || ""],
-          ["قالب رسالة تم التسليم بنجاح", db.settings.deliveryMessage || ""],
-          ["تذييل الفاتورة المطبوعة", db.settings.footerText || ""],
-          ["إعدادات النظام كاملة (JSON)", JSON.stringify(db.settings || {})]
+          ["اسم وبيانات المكتب بالترويسة", db.settings.headerText || "", "headerText"],
+          ["الترويسة الفرعية", db.settings.subHeaderText || "", "subHeaderText"],
+          ["رسالة الترحيب واستلام الطلب", db.settings.welcomeMessage || "", "welcomeMessage"],
+          ["قالب رسالة الفاتورة (واتساب)", db.settings.whatsappTemplate || "", "whatsappTemplate"],
+          ["قالب رسالة جاهزية الأوراق للاستلام", db.settings.readyMessage || "", "readyMessage"],
+          ["قالب رسالة تم التسليم بنجاح", db.settings.deliveryMessage || "", "deliveryMessage"],
+          ["تذييل الفاتورة المطبوعة", db.settings.footerText || "", "footerText"],
+          ["إعدادات النظام كاملة (JSON)", JSON.stringify(db.settings || {}), "settings_json"]
         ];
         stSheet.getRange(1, 1, stRows.length, stRows[0].length).setValues(stRows);
         formatHeader(stSheet, stHeaders.length);
+        try {
+          stSheet.setColumnWidth(1, 240);
+          stSheet.setColumnWidth(2, 450);
+          stSheet.setColumnWidth(3, 160);
+        } catch(cwErr) {}
       }
 
       // --- Sheet 5: Dictionary_قاموس_الاسماء ---
@@ -332,7 +431,38 @@ function doPost(e) {
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
-    // 2. Direct Specific Dictionary Push
+    // 2. Direct Specific Settings Push
+    if (action === "push_settings") {
+      var stData = contents.settings || (contents.db && contents.db.settings) || {};
+      var sSheet = getOrCreateSheet(ss, "Settings_الاعدادات_والرسائل");
+      sSheet.clearContents();
+      var sHeaders = ["بند الإعداد (Setting Name)", "القيمة المحفوظة (Value)", "المعرف البرمجي (Key)"];
+      var sRows = [
+        sHeaders,
+        ["اسم وبيانات المكتب بالترويسة", stData.headerText || "", "headerText"],
+        ["الترويسة الفرعية", stData.subHeaderText || "", "subHeaderText"],
+        ["رسالة الترحيب واستلام الطلب", stData.welcomeMessage || "", "welcomeMessage"],
+        ["قالب رسالة الفاتورة (واتساب)", stData.whatsappTemplate || "", "whatsappTemplate"],
+        ["قالب رسالة جاهزية الأوراق للاستلام", stData.readyMessage || "", "readyMessage"],
+        ["قالب رسالة تم التسليم بنجاح", stData.deliveryMessage || "", "deliveryMessage"],
+        ["تذييل الفاتورة المطبوعة", stData.footerText || "", "footerText"],
+        ["إعدادات النظام كاملة (JSON)", JSON.stringify(stData || {}), "settings_json"]
+      ];
+      sSheet.getRange(1, 1, sRows.length, sRows[0].length).setValues(sRows);
+      formatHeader(sSheet, sHeaders.length);
+      try {
+        sSheet.setColumnWidth(1, 240);
+        sSheet.setColumnWidth(2, 450);
+        sSheet.setColumnWidth(3, 160);
+      } catch(cwErr) {}
+
+      return ContentService.createTextOutput(JSON.stringify({ 
+        status: "success", 
+        message: "تم حفظ وتحديث إعدادات وبيانات المكتب في ورقة (Settings_الاعدادات_والرسائل) بملف جوجل شيت بنجاح! 💾✅" 
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // 3. Direct Specific Dictionary Push
     if (action === "push_dictionary") {
       var dictList = contents.dictionary || (contents.db && contents.db.dictionary) || [];
       if (Array.isArray(dictList)) {
@@ -467,15 +597,45 @@ function doGet(e) {
     }
 
     // 4. Read Settings
-    var stSheet = ss.getSheetByName("Settings_الاعدادات_والرسائل") || ss.getSheetByName("Settings");
+    var stSheet = ss.getSheetByName("Settings_الاعدادات_والرسائل") || 
+                  ss.getSheetByName("Settings") || 
+                  ss.getSheetByName("الاعدادات") || 
+                  ss.getSheetByName("الاعدادات_والرسائل");
     if (stSheet) {
       var stValues = stSheet.getDataRange().getValues();
       for (var st = 1; st < stValues.length; st++) {
-        var key = String(stValues[st][0] || "");
-        var val = String(stValues[st][1] || "");
-        if (key.indexOf("JSON") !== -1) {
+        var row = stValues[st];
+        var label = String(row[0] || "").trim();
+        var val = row[1] !== undefined && row[1] !== null ? String(row[1]) : "";
+        var key = String(row[2] || "").trim();
+
+        // 1. Check direct key
+        if (key && key !== "settings_json") {
+          db.settings[key] = val;
+        }
+
+        // 2. Fallback matching by label
+        if (label.indexOf("ترويسة") !== -1 && label.indexOf("فرعية") === -1) {
+          db.settings.headerText = val;
+        } else if (label.indexOf("فرعية") !== -1) {
+          db.settings.subHeaderText = val;
+        } else if (label.indexOf("ترحيب") !== -1 || label.indexOf("استلام الطلب") !== -1 || label.indexOf("welcome") !== -1) {
+          db.settings.welcomeMessage = val;
+        } else if (label.indexOf("واتساب") !== -1 || label.indexOf("whatsapp") !== -1) {
+          db.settings.whatsappTemplate = val;
+        } else if (label.indexOf("جاهزية") !== -1 || label.indexOf("ready") !== -1) {
+          db.settings.readyMessage = val;
+        } else if (label.indexOf("التسليم بنجاح") !== -1 || label.indexOf("delivery") !== -1) {
+          db.settings.deliveryMessage = val;
+        } else if (label.indexOf("تذييل") !== -1 || label.indexOf("footer") !== -1) {
+          db.settings.footerText = val;
+        }
+
+        // 3. Complete JSON backup
+        if (label.indexOf("JSON") !== -1 || key === "settings_json") {
           try {
-            db.settings = JSON.parse(val);
+            var parsed = JSON.parse(val);
+            db.settings = Object.assign({}, parsed, db.settings);
           } catch(e){}
         }
       }
@@ -757,7 +917,7 @@ function formatHeader(sheet, numCols) {
 
       const result = await updateSettingsOnServer(payload);
       onSettingsUpdated(result);
-      alert("تم حفظ إعدادات النظام وتحديث قنوات الربط الرقمي والقوالب بنجاح! 💾");
+      alert("تم حفظ إعدادات النظام وتحديثها في ملف جوجل شيت بنجاح! 💾✅");
     } catch (err) {
       console.error(err);
       alert("حدث خطأ أثناء حفظ الإعدادات بالخادم.");
@@ -781,10 +941,48 @@ function formatHeader(sheet, numCols) {
         
         {/* Core Office Profile Card */}
         <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
-          <h3 className="font-bold text-sm text-slate-800 flex items-center gap-1.5 border-b border-slate-100 pb-2">
-            <Settings className="w-4.5 h-4.5 text-slate-500" />
-            الملف التعريفي للمكتب:
-          </h3>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+            <h3 className="font-bold text-sm text-slate-800 flex items-center gap-1.5">
+              <Settings className="w-4.5 h-4.5 text-slate-500" />
+              <span>الملف التعريفي للمكتب وترويسة الفاتورة:</span>
+            </h3>
+            
+            {/* Quick Settings Sync Buttons */}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handlePullSettingsFromSheet}
+                disabled={settingsSyncLoading}
+                className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-[11px] font-bold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                title="سحب أحدث بيانات الترويسة والرسائل من ملف جوجل شيت"
+              >
+                <span>استيراد الإعدادات من جوجل شيت 📥</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSyncSettingsToSheet}
+                disabled={settingsSyncLoading}
+                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-xs"
+                title="حفظ وتصدير بيانات الترويسة والرسائل في ورقة Settings بجوجل شيت فوراً"
+              >
+                <span>{settingsSyncLoading ? "جاري الحفظ..." : "تصدير وحفظ في جوجل شيت 📤"}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Sync status alert for settings */}
+          {settingsSyncResult && (
+            <div className={`p-3 rounded-xl text-xs font-bold flex items-center gap-2 ${
+              settingsSyncResult.type === "success" 
+                ? "bg-emerald-50 text-emerald-800 border border-emerald-200" 
+                : settingsSyncResult.type === "warning" 
+                ? "bg-amber-50 text-amber-800 border border-amber-200" 
+                : "bg-rose-50 text-rose-800 border border-rose-200"
+            }`}>
+              <span>{settingsSyncResult.message}</span>
+            </div>
+          )}
 
           <div className="grid md:grid-cols-2 gap-4">
             <div className="space-y-1">
