@@ -503,8 +503,8 @@ app.post("/api/db/services", (req, res) => {
   service.id = "srv-" + Date.now();
   db.services.push(service);
   writeDB(db);
-  triggerBackgroundWebhookSync(db, `إضافة خدمة جديدة: ${service.name}`);
-  res.json({ status: "success", service, sheetSynced: true });
+  // No real-time sync to Google Sheets for services
+  res.json({ status: "success", service });
 });
 
 app.put("/api/db/services/:id", (req, res) => {
@@ -519,18 +519,17 @@ app.put("/api/db/services/:id", (req, res) => {
 
   db.services[index] = { ...db.services[index], ...updatedService, id };
   writeDB(db);
-  triggerBackgroundWebhookSync(db, `تعديل خدمة وأسعارها: ${db.services[index].name}`);
-  res.json({ status: "success", service: db.services[index], sheetSynced: true });
+  // No real-time sync to Google Sheets for services
+  res.json({ status: "success", service: db.services[index] });
 });
 
 app.delete("/api/db/services/:id", (req, res) => {
   const id = req.params.id;
   const db = readDB();
-  const deletedService = db.services.find((srv: any) => srv.id === id);
   db.services = db.services.filter((srv: any) => srv.id !== id);
   writeDB(db);
-  triggerBackgroundWebhookSync(db, `حذف خدمة: ${deletedService?.name || id}`);
-  res.json({ status: "success", message: "Service deleted", sheetSynced: true });
+  // No real-time sync to Google Sheets for services
+  res.json({ status: "success", message: "Service deleted" });
 });
 
 // Reorder services endpoint
@@ -563,8 +562,8 @@ app.post("/api/db/services/reorder", (req, res) => {
   }
 
   writeDB(db);
-  triggerBackgroundWebhookSync(db, "إعادة ترتيب الخدمات");
-  res.json({ status: "success", services: db.services, sheetSynced: true });
+  // No real-time sync to Google Sheets for services
+  res.json({ status: "success", services: db.services });
 });
 
 // 8. Collection Closings endpoint

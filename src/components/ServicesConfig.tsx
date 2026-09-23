@@ -5,8 +5,7 @@ import {
   updateServiceOnServer, 
   deleteServiceOnServer, 
   reorderServicesOnServer,
-  pullDataFromGoogleWebhook,
-  pushDataToGoogleWebhook
+  pullDataFromGoogleWebhook
 } from "../lib/api";
 import { 
   Plus, Edit3, Trash2, Check, X, ShieldAlert, Sparkles, FolderPlus, DollarSign, Clock, FileText,
@@ -37,7 +36,7 @@ export default function ServicesConfig({
 }: ServicesConfigProps) {
   const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
 
-  // Sheet sync states
+  // Sheet sync states (import only)
   const [sheetLoading, setSheetLoading] = useState(false);
   const [sheetFeedback, setSheetFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
@@ -61,29 +60,6 @@ export default function ServicesConfig({
       setSheetFeedback({
         type: "error",
         message: `فشل الاستيراد: ${err.message}`
-      });
-    } finally {
-      setSheetLoading(false);
-    }
-  };
-
-  const handlePushToSheets = async () => {
-    const confirmPush = window.confirm("هل تريد رفع وحفظ مسميات الخدمات والأسعار الحالية إلى ملف جوجل شيت الآن؟");
-    if (!confirmPush) return;
-
-    setSheetLoading(true);
-    setSheetFeedback(null);
-    try {
-      const res = await pushDataToGoogleWebhook(googleSheetWebhookUrl);
-      setSheetFeedback({
-        type: "success",
-        message: res.message || "تم حفظ وتصدير الخدمات إلى جوجل شيت بنجاح! 📤"
-      });
-      setTimeout(() => setSheetFeedback(null), 4000);
-    } catch (err: any) {
-      setSheetFeedback({
-        type: "error",
-        message: `فشل التصدير: ${err.message}`
       });
     } finally {
       setSheetLoading(false);
@@ -308,37 +284,16 @@ export default function ServicesConfig({
         
         <div className="flex flex-wrap items-center gap-2">
           {googleSheetWebhookUrl && (
-            <>
-              <div 
-                className="flex items-center gap-1.5 px-3 py-2 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-xl shadow-xs"
-                title="أي تعديل أو حفظ في الخدمات والأسعار يُحفظ تلقائياً في ملف جوجل شيت لحظياً"
-              >
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span>مزامنة لحظية مع جوجل شيت ⚡</span>
-              </div>
-
-              <button
-                type="button"
-                onClick={handlePullFromSheets}
-                disabled={sheetLoading}
-                className="px-3.5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer disabled:opacity-50"
-                title="سحب واستيراد أحدث مسميات الخدمات والأسعار من ملف جوجل شيت"
-              >
-                <Download className={`w-4 h-4 ${sheetLoading ? "animate-spin" : ""}`} />
-                <span>استيراد الخدمات من جوجل شيت 📥</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handlePushToSheets}
-                disabled={sheetLoading}
-                className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-bold text-xs rounded-xl flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer disabled:opacity-50"
-                title="تصدير وحفظ قائمة الخدمات الحالية في ملف جوجل شيت"
-              >
-                <Download className="w-4 h-4 rotate-180 text-emerald-400" />
-                <span>تصدير للشيت 📤</span>
-              </button>
-            </>
+            <button
+              type="button"
+              onClick={handlePullFromSheets}
+              disabled={sheetLoading}
+              className="px-3.5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer disabled:opacity-50"
+              title="سحب واستيراد أحدث مسميات الخدمات والأسعار من ملف جوجل شيت"
+            >
+              <Download className={`w-4 h-4 ${sheetLoading ? "animate-spin" : ""}`} />
+              <span>استيراد الخدمات من جوجل شيت 📥</span>
+            </button>
           )}
 
           {!showCreateForm && (
