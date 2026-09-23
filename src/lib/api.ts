@@ -311,3 +311,25 @@ export async function syncSettingsToGoogleWebhook(webhookUrl?: string): Promise<
   return response.json();
 }
 
+export async function importInvoicesFromGoogleSheet(webhookUrl?: string): Promise<{
+  status: string;
+  message: string;
+  count: number;
+  newCount: number;
+  updatedCount: number;
+  totalInvoices: number;
+  invoices: Invoice[];
+}> {
+  const response = await fetch("/api/sheets/webhook/import-invoices", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ webhookUrl }),
+  });
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || "فشل استيراد الفواتير من جوجل شيت");
+  }
+  return response.json();
+}
+
+

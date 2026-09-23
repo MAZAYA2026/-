@@ -341,6 +341,7 @@ export default function App() {
               activeEmployee={activeEmployee} 
               onInvoiceUpdated={handleInvoiceUpdated} 
               onInvoiceDeleted={handleInvoiceDeleted} 
+              onInvoicesLoaded={(loadedInvoices) => setInvoices(loadedInvoices)}
             />
           )}
 

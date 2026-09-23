@@ -1,8 +1,8 @@
 import React, { useState } from "react";
 import { Invoice, InvoiceStatus, AppSettings, Service, Employee, CustomerInput } from "../types";
-import { updateInvoiceOnServer, deleteInvoiceOnServer } from "../lib/api";
+import { updateInvoiceOnServer, deleteInvoiceOnServer, importInvoicesFromGoogleSheet } from "../lib/api";
 import { calculateWorkingDaysDeliveryDate, getArabicDayName } from "../lib/businessDays";
-import { Search, Edit3, Trash2, Printer, Send, CheckCircle, PackageOpen, X, MapPin, Calendar, Info, RefreshCw, AlertCircle, Save } from "lucide-react";
+import { Search, Edit3, Trash2, Printer, Send, CheckCircle, CheckCircle2, PackageOpen, X, MapPin, Calendar, Info, RefreshCw, AlertCircle, Save, FileSpreadsheet, Download } from "lucide-react";
 import ThermalReceipt from "./ThermalReceipt";
 
 interface InvoiceQueryProps {
@@ -12,9 +12,18 @@ interface InvoiceQueryProps {
   activeEmployee: Employee;
   onInvoiceUpdated: (updated: Invoice) => void;
   onInvoiceDeleted: (invoiceId: number) => void;
+  onInvoicesLoaded?: (invoices: Invoice[]) => void;
 }
 
-export default function InvoiceQuery({ invoices, services, settings, activeEmployee, onInvoiceUpdated, onInvoiceDeleted }: InvoiceQueryProps) {
+export default function InvoiceQuery({ 
+  invoices, 
+  services, 
+  settings, 
+  activeEmployee, 
+  onInvoiceUpdated, 
+  onInvoiceDeleted,
+  onInvoicesLoaded 
+}: InvoiceQueryProps) {
   // Search parameters
   const [searchId, setSearchId] = useState("");
   const [searchName, setSearchName] = useState("");
@@ -23,6 +32,16 @@ export default function InvoiceQuery({ invoices, services, settings, activeEmplo
   const [searchService, setSearchService] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+
+  // Import from Google Sheet status
+  const [isImporting, setIsImporting] = useState(false);
+  const [importResultModal, setImportResultModal] = useState<{
+    count: number;
+    newCount: number;
+    updatedCount: number;
+    totalInvoices: number;
+    message: string;
+  } | null>(null);
 
   // UI state for Drawer Number Prompt
   const [promptDrawerInvoice, setPromptDrawerInvoice] = useState<Invoice | null>(null);
@@ -34,6 +53,27 @@ export default function InvoiceQuery({ invoices, services, settings, activeEmplo
 
   // Print Receipt modal state
   const [printInvoice, setPrintInvoice] = useState<Invoice | null>(null);
+
+  const handleImportFromSheet = async () => {
+    setIsImporting(true);
+    try {
+      const res = await importInvoicesFromGoogleSheet(settings?.googleSheetWebhookUrl);
+      if (onInvoicesLoaded && Array.isArray(res.invoices)) {
+        onInvoicesLoaded(res.invoices);
+      }
+      setImportResultModal({
+        count: res.count,
+        newCount: res.newCount,
+        updatedCount: res.updatedCount,
+        totalInvoices: res.totalInvoices || res.invoices?.length || 0,
+        message: res.message
+      });
+    } catch (err: any) {
+      alert("خطأ أثناء استيراد الفواتير من جوجل شيت: " + (err.message || err));
+    } finally {
+      setIsImporting(false);
+    }
+  };
 
   // Filtered invoices
   const filteredInvoices = invoices.filter((inv) => {
@@ -331,8 +371,26 @@ export default function InvoiceQuery({ invoices, services, settings, activeEmplo
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-5">
         <div>
-          <h2 className="text-xl font-extrabold text-slate-900 font-cairo">شاشة الاستعلام والمحفوظات</h2>
-          <p className="text-sm text-slate-500 mt-1">البحث عن فواتير الأسر، تعيين أدراج الأرشفة وتحديث الحالات</p>
+          <div className="flex items-center gap-2">
+            <h2 className="text-xl font-extrabold text-slate-900 font-cairo">شاشة الاستعلام والمحفوظات</h2>
+            <span className="text-[11px] font-bold bg-slate-100 text-slate-600 px-2.5 py-0.5 rounded-full border border-slate-200 font-mono">
+              {invoices.length} فاتورة
+            </span>
+          </div>
+          <p className="text-sm text-slate-500 mt-1">البحث عن فواتير الأسر، تعيين أدراج الأرشفة، وتحديث الحالات واسترجاع السجلات</p>
+        </div>
+
+        {/* Action Buttons: Import previous invoices from Google Sheet */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            onClick={handleImportFromSheet}
+            disabled={isImporting}
+            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white font-bold rounded-xl text-xs flex items-center gap-2 shadow-xs transition-all cursor-pointer font-cairo"
+            title="استيراد واسترجاع جميع الفواتير السابقة المخزنة في قاعدة بيانات جوجل شيت إكسيل"
+          >
+            <FileSpreadsheet className={`w-4 h-4 ${isImporting ? "animate-spin" : ""}`} />
+            <span>{isImporting ? "جاري استيراد الفواتير من الشيت..." : "استيراد الفواتير من شيت إكسيل (Google Sheets)"}</span>
+          </button>
         </div>
       </div>
 
@@ -598,6 +656,29 @@ export default function InvoiceQuery({ invoices, services, settings, activeEmplo
             </div>
           );
         })}
+
+        {/* Empty state when no invoices match or database was cleared */}
+        {filteredInvoices.length === 0 && (
+          <div className="col-span-full bg-white border border-slate-200 rounded-2xl p-10 text-center space-y-4 shadow-2xs">
+            <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto shadow-inner">
+              <FileSpreadsheet className="w-8 h-8" />
+            </div>
+            <div className="space-y-1.5 max-w-md mx-auto">
+              <h4 className="font-extrabold text-slate-800 text-base font-cairo">لا توجد فواتير معروضة حالياً</h4>
+              <p className="text-xs text-slate-500 leading-relaxed font-cairo">
+                إذا كنت قد قمت بتعديل الأكواد البرمجية أو إعادة تشغيل النظام وتم مسح الفواتير المحلية، يمكنك استرجاع واستيراد كافة الفواتير السابقة المخزنة بأمان في قاعدة بيانات شيت إكسيل (Google Sheets) بضغطة زر واحدة.
+              </p>
+            </div>
+            <button
+              onClick={handleImportFromSheet}
+              disabled={isImporting}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer font-cairo"
+            >
+              <FileSpreadsheet className={`w-4 h-4 ${isImporting ? "animate-spin" : ""}`} />
+              <span>{isImporting ? "جاري الاستيراد..." : "استيراد الفواتير السابقة من قاعدة بيانات الشيت إكسيل"}</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* DRAWER NUMBER INPUT PROMPT MODAL */}
@@ -787,6 +868,49 @@ export default function InvoiceQuery({ invoices, services, settings, activeEmplo
           onClose={() => setPrintInvoice(null)}
           onSendWhatsApp={() => handleSendWhatsAppWelcome(printInvoice)}
         />
+      )}
+
+      {/* Import Result Notification Modal */}
+      {importResultModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl animate-fade-in-up font-cairo border border-slate-100">
+            <div className="p-6 text-center space-y-4">
+              <div className="w-14 h-14 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto shadow-inner">
+                <CheckCircle2 className="w-8 h-8" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="font-extrabold text-base text-slate-900">تم استيراد الفواتير بنجاح!</h3>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  {importResultModal.message}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200 text-center">
+                <div className="p-1.5">
+                  <span className="text-[10px] text-slate-500 block font-bold">إجمالي بالشيت</span>
+                  <span className="text-lg font-black text-slate-800 font-mono">{importResultModal.count}</span>
+                </div>
+                <div className="p-1.5 border-r border-l border-slate-200">
+                  <span className="text-[10px] text-emerald-600 block font-bold">جديدة مضافة</span>
+                  <span className="text-lg font-black text-emerald-600 font-mono">+{importResultModal.newCount}</span>
+                </div>
+                <div className="p-1.5">
+                  <span className="text-[10px] text-blue-600 block font-bold">محدثة ومزامنة</span>
+                  <span className="text-lg font-black text-blue-600 font-mono">{importResultModal.updatedCount}</span>
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <button
+                  onClick={() => setImportResultModal(null)}
+                  className="w-full py-2.5 bg-slate-950 hover:bg-slate-900 text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer"
+                >
+                  إغلاق وعرض الفواتير المستوردة ({importResultModal.totalInvoices})
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
     </div>

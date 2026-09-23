@@ -1414,6 +1414,94 @@ app.post("/api/sheets/webhook/pull", async (req, res) => {
   }
 });
 
+// Dedicated Webhook Import Invoices Endpoint (restore past invoices from Google Sheets Excel)
+app.post("/api/sheets/webhook/import-invoices", async (req, res) => {
+  const { webhookUrl } = req.body;
+  const db = readDB();
+  const targetUrl = webhookUrl || db.settings.googleSheetWebhookUrl;
+
+  if (!targetUrl || !targetUrl.startsWith("http")) {
+    return res.status(400).json({ 
+      error: "لم يتم العثور على رابط سكربت Webhook صالح لملف جوجل شيت. يرجى التأكد من الرابط في صفحة الإعدادات أولاً." 
+    });
+  }
+
+  try {
+    const pulledDB = await pullFromGoogleWebhook(targetUrl);
+    const sheetInvoices = Array.isArray(pulledDB?.invoices) ? pulledDB.invoices : [];
+
+    if (sheetInvoices.length === 0) {
+      return res.json({
+        status: "empty",
+        count: 0,
+        newCount: 0,
+        updatedCount: 0,
+        totalInvoices: db.invoices?.length || 0,
+        invoices: db.invoices || [],
+        message: "تم الاتصال بملف جوجل شيت بنجاح، ولكن ورقة (Invoices_الفواتير) لا تحتوي على فواتير مسجلة بعد."
+      });
+    }
+
+    const currentInvoices = db.invoices || [];
+    const invoiceMap = new Map<number, any>();
+
+    // Index existing local invoices
+    currentInvoices.forEach((inv: any) => {
+      if (inv && inv.invoiceId) {
+        invoiceMap.set(inv.invoiceId, inv);
+      }
+    });
+
+    let newCount = 0;
+    let updatedCount = 0;
+
+    // Merge or append from Google Sheets
+    sheetInvoices.forEach((sheetInv: any) => {
+      if (!sheetInv || !sheetInv.invoiceId) return;
+
+      if (!invoiceMap.has(sheetInv.invoiceId)) {
+        // Brand new invoice from sheet
+        invoiceMap.set(sheetInv.invoiceId, sheetInv);
+        newCount++;
+      } else {
+        // Invoice exists locally: update details if sheet has customers or updated status
+        const existing = invoiceMap.get(sheetInv.invoiceId);
+        const sheetCustomers = Array.isArray(sheetInv.customers) ? sheetInv.customers : [];
+        const existingCustomers = Array.isArray(existing.customers) ? existing.customers : [];
+
+        if (sheetCustomers.length > 0 || !existingCustomers.length) {
+          invoiceMap.set(sheetInv.invoiceId, {
+            ...existing,
+            ...sheetInv,
+            archiveDrawer: sheetInv.archiveDrawer || existing.archiveDrawer || "",
+            status: (sheetInv.status && sheetInv.status !== "NEW") ? sheetInv.status : (existing.status || sheetInv.status || "NEW")
+          });
+          updatedCount++;
+        }
+      }
+    });
+
+    // Sort by invoiceId descending
+    const mergedInvoices = Array.from(invoiceMap.values()).sort((a, b) => b.invoiceId - a.invoiceId);
+
+    db.invoices = mergedInvoices;
+    writeDB(db);
+
+    res.json({
+      status: "success",
+      count: sheetInvoices.length,
+      newCount,
+      updatedCount,
+      totalInvoices: mergedInvoices.length,
+      invoices: mergedInvoices,
+      message: `تم استيراد واسترجاع ${sheetInvoices.length} فاتورة سابقة من قاعدة بيانات جوجل شيت إكسيل بنجاح (${newCount} فاتورة جديدة مضافة، و${updatedCount} تم تحديثها ومزامنتها)! 🎉`
+    });
+  } catch (err: any) {
+    console.error("Failed to import invoices from sheet:", err);
+    res.status(500).json({ error: "فشل استيراد الفواتير من جوجل شيت: " + err.message });
+  }
+});
+
 app.post("/api/sheets/sync", (req, res) => {
   const { sheetUrl, sheetId } = req.body;
   const db = readDB();
