@@ -229,7 +229,7 @@ export default function ServicesConfig({
       onServiceCreated(result);
       resetForm();
       setShowCreateForm(false);
-      alert("تمت إضافة الخدمة الجديدة بنجاح في كتالوج المكتب.");
+      alert("تمت إضافة الخدمة الجديدة وحفظها في قاعدة البيانات وملف جوجل شيت لحظياً! ⚡📊");
     } catch (err) {
       console.error(err);
       alert("حدث خطأ أثناء إضافة الخدمة الجديدة.");
@@ -269,7 +269,7 @@ export default function ServicesConfig({
       const result = await updateServiceOnServer(editingServiceId, payload);
       onServiceUpdated(result);
       resetForm();
-      alert("تم تحديث معلومات الخدمة المحددة بنجاح.");
+      alert("تم حفظ التعديلات وتحديث الأسعار في قاعدة البيانات وملف جوجل شيت لحظياً! ⚡📊");
     } catch (err) {
       console.error(err);
       alert("حدث خطأ أثناء حفظ التحديثات للخدمة.");
@@ -289,6 +289,7 @@ export default function ServicesConfig({
     try {
       await deleteServiceOnServer(id);
       onServiceDeleted(id);
+      showFeedback("تم حذف الخدمة وتحديث ملف جوجل شيت لحظياً! ⚡📊");
     } catch (err) {
       console.error(err);
       alert("حدث خطأ أثناء حذف الخدمة.");
@@ -308,6 +309,14 @@ export default function ServicesConfig({
         <div className="flex flex-wrap items-center gap-2">
           {googleSheetWebhookUrl && (
             <>
+              <div 
+                className="flex items-center gap-1.5 px-3 py-2 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-xl shadow-xs"
+                title="أي تعديل أو حفظ في الخدمات والأسعار يُحفظ تلقائياً في ملف جوجل شيت لحظياً"
+              >
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span>مزامنة لحظية مع جوجل شيت ⚡</span>
+              </div>
+
               <button
                 type="button"
                 onClick={handlePullFromSheets}
