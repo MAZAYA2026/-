@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { Service, CustomerInput, Invoice, InvoiceStatus, AppSettings, Employee, DictionaryItem } from "../types";
-import { translateWithGemini, createInvoiceOnServer, saveDictionaryWord } from "../lib/api";
+import { createInvoiceOnServer, saveDictionaryWord } from "../lib/api";
 import { calculateWorkingDaysDeliveryDate, getArabicDayName, isNonWorkingDay } from "../lib/businessDays";
 import { generateWhatsAppWelcomeMessage, getWhatsAppUrl } from "../lib/whatsapp";
+import { breakdownArabicName, extractAtomicWordTokens, normalizeArabic } from "../lib/dictionary";
 import { Plus, Trash2, FileText, UserPlus, Sparkles, Printer, Send, Check, AlertCircle, Info, Calendar, BookOpen, ShieldAlert } from "lucide-react";
 import ThermalReceipt from "./ThermalReceipt";
 
@@ -15,36 +16,16 @@ interface InvoiceCreatorProps {
   onDictionaryUpdated?: (newDict: DictionaryItem[]) => void;
 }
 
-// Helper to look up name in the local dictionary immediately
-function lookupInstantDictionary(arabicName: string, dict?: DictionaryItem[]): string | null {
-  if (!arabicName || !arabicName.trim() || !dict || dict.length === 0) return null;
-  const normalize = (s: string) => (s || "").replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/[\u064B-\u065F]/g, "").trim();
-  const clean = arabicName.trim();
-  const normClean = normalize(clean);
-
-  // 1. Exact match
-  const matchFull = dict.find(d => normalize(d.arabic) === normClean || d.arabic.trim() === clean);
-  if (matchFull) return matchFull.english.toUpperCase();
-
-  // 2. Word-by-word
-  const words = clean.split(/\s+/).filter(Boolean);
-  if (words.length === 0) return null;
-  const translatedWords: string[] = [];
-  for (const w of words) {
-    const normW = normalize(w);
-    const m = dict.find(d => normalize(d.arabic) === normW || d.arabic.trim() === w);
-    if (!m) return null;
-    translatedWords.push(m.english.toUpperCase());
-  }
-  return translatedWords.join(" ");
-}
-
 export default function InvoiceCreator({ services, settings, activeEmployee, onInvoiceCreated, dictionary = [], onDictionaryUpdated }: InvoiceCreatorProps) {
   // Master form state: list of customers on this invoice
   const [customers, setCustomers] = useState<CustomerInput[]>([createEmptyCustomer()]);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
   
+  // Missing word translation inputs and saving state
+  const [missingWordInputs, setMissingWordInputs] = useState<{ [word: string]: string }>({});
+  const [savingWord, setSavingWord] = useState<string | null>(null);
+
   // States for printing overlay
   const [printInvoice, setPrintInvoice] = useState<Invoice | null>(null);
   const [lastCreatedInvoice, setLastCreatedInvoice] = useState<Invoice | null>(null);
@@ -55,7 +36,7 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
     return {
       arabicName: "",
       englishName: "",
-      englishNameOption: "gemini",
+      englishNameOption: "dictionary",
       nationalId: "",
       birthDate: "",
       phone: "",
@@ -183,37 +164,52 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
     setCustomers(updated);
   };
 
-  // Perform translation
-  const handleTranslateName = async (cIdx: number) => {
+  // Perform dictionary lookup
+  const handleTranslateName = (cIdx: number) => {
     const customer = customers[cIdx];
     if (!customer.arabicName.trim()) {
-      alert("الرجاء إدخال الاسم العربي أولاً ليتم ترجمته.");
+      alert("الرجاء إدخال الاسم العربي أولاً ليتم ترجمته بالقاموس.");
       return;
     }
 
-    // Check instant local dictionary first
-    const instant = lookupInstantDictionary(customer.arabicName, dictionary);
-    if (instant) {
-      const updated = [...customers];
-      updated[cIdx].englishName = instant;
-      setCustomers(updated);
+    const breakdown = breakdownArabicName(customer.arabicName, dictionary);
+    const updated = [...customers];
+    if (breakdown.assembledEnglish) {
+      updated[cIdx].englishName = breakdown.assembledEnglish;
+    }
+    setCustomers(updated);
+  };
+
+  const handleSaveMissingWord = async (cIdx: number, arWord: string, providedEn?: string) => {
+    const enVal = (providedEn || missingWordInputs[arWord] || "").trim().toUpperCase();
+    if (!enVal) {
+      alert(`الرجاء إدخال ترجمة المقطع (${arWord}) بالإنجليزية أولاً.`);
       return;
     }
-
-    setLoading(true);
+    setSavingWord(arWord);
     try {
-      const result = await translateWithGemini(customer.arabicName);
-      const updated = [...customers];
-      updated[cIdx].englishName = result.english;
-      setCustomers(updated);
-      if (result.dictionary && onDictionaryUpdated) {
-        onDictionaryUpdated(result.dictionary);
+      const updatedDict = await saveDictionaryWord(arWord, enVal);
+      if (onDictionaryUpdated) {
+        onDictionaryUpdated(updatedDict);
       }
+      // Re-evaluate customer's full name with the updated dictionary
+      const cust = customers[cIdx];
+      const newBreakdown = breakdownArabicName(cust.arabicName, updatedDict);
+      const updated = [...customers];
+      if (newBreakdown.assembledEnglish) {
+        updated[cIdx].englishName = newBreakdown.assembledEnglish;
+      }
+      setCustomers(updated);
+      setMissingWordInputs(prev => {
+        const next = { ...prev };
+        delete next[arWord];
+        return next;
+      });
     } catch (err) {
       console.error(err);
-      alert("حدث خطأ أثناء الترجمة باستخدام الذكاء الاصطناعي. تم استخدام ترجمة مبدئية.");
+      alert("حدث خطأ أثناء حفظ الاسم في القاموس وجوجل شيت.");
     } finally {
-      setLoading(false);
+      setSavingWord(null);
     }
   };
 
@@ -282,9 +278,12 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
       // Check passport service flags
       const isPass = isPassportRelated(cust);
       if (isPass) {
-        if (cust.englishNameOption === "gemini" && !cust.englishName.trim()) {
-          newErrors[`c-${cIdx}-englishName`] = "الاسم الإنجليزي إلزامي للخدمات التي تبدأ بـ # أو ##.";
-          isValid = false;
+        if (cust.englishNameOption !== "previous") {
+          const breakdown = breakdownArabicName(cust.arabicName, dictionary);
+          if (!cust.englishName.trim() || !breakdown.allFound) {
+            newErrors[`c-${cIdx}-englishName`] = "من فضلك تأكد من ترجمة الاسم بالإنجليزي قبل مغادرة المكتب";
+            isValid = false;
+          }
         }
         if (!cust.nationalId.trim()) {
           newErrors[`c-${cIdx}-nationalId`] = "الرقم القومي إلزامي لخدمات الجوازات.";
@@ -327,6 +326,28 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
     setLoading(true);
 
     try {
+      // Auto-save any new word tokens from customer names into dictionary and Google Sheets (as atomic words)
+      for (const cust of customers) {
+        if (cust.arabicName && cust.englishName && cust.englishNameOption !== "previous") {
+          const tokens = extractAtomicWordTokens(cust.arabicName, cust.englishName);
+          for (const token of tokens) {
+            const exists = dictionary.some(
+              d => normalizeArabic(d.arabic) === normalizeArabic(token.arabic) && d.english.toUpperCase() === token.english.toUpperCase()
+            );
+            if (!exists) {
+              try {
+                const newDict = await saveDictionaryWord(token.arabic, token.english);
+                if (onDictionaryUpdated) {
+                  onDictionaryUpdated(newDict);
+                }
+              } catch (e) {
+                console.warn("Could not auto-save token:", token, e);
+              }
+            }
+          }
+        }
+      }
+
       // Calculate totals
       let totalGov = 0;
       let totalOffice = 0;
@@ -395,16 +416,16 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
     }
   };
 
-  // Automatically trigger translation on Arabic Name change or blur if Passport related
+  // Automatically trigger dictionary lookup on Arabic Name change or blur if Passport related
   const handleArabicNameChange = (cIdx: number, val: string) => {
     const updated = [...customers];
     updated[cIdx].arabicName = val;
     
     // Auto instant lookup if name matches dictionary and translation option is active
-    if (updated[cIdx].englishNameOption === "gemini" && val.trim().length >= 2) {
-      const match = lookupInstantDictionary(val, dictionary);
-      if (match) {
-        updated[cIdx].englishName = match;
+    if (updated[cIdx].englishNameOption !== "previous" && val.trim().length >= 2) {
+      const breakdown = breakdownArabicName(val, dictionary);
+      if (breakdown.assembledEnglish) {
+        updated[cIdx].englishName = breakdown.assembledEnglish;
       }
     }
     setCustomers(updated);
@@ -413,14 +434,12 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
   const handleArabicNameBlur = (cIdx: number) => {
     const cust = customers[cIdx];
     const isPass = isPassportRelated(cust);
-    if (isPass && cust.arabicName.trim() && cust.englishNameOption === "gemini") {
-      const match = lookupInstantDictionary(cust.arabicName, dictionary);
-      if (match) {
+    if (isPass && cust.arabicName.trim() && cust.englishNameOption !== "previous") {
+      const breakdown = breakdownArabicName(cust.arabicName, dictionary);
+      if (breakdown.assembledEnglish) {
         const updated = [...customers];
-        updated[cIdx].englishName = match;
+        updated[cIdx].englishName = breakdown.assembledEnglish;
         setCustomers(updated);
-      } else if (!cust.englishName.trim()) {
-        handleTranslateName(cIdx);
       }
     }
   };
@@ -622,11 +641,11 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
                     </div>
 
                     {/* English Name translation panel on a separate dedicated full-width row */}
-                    <div className="space-y-2 bg-white/80 p-3.5 rounded-xl border border-blue-200/80 shadow-xs">
+                    <div className="space-y-3 bg-white/90 p-4 rounded-xl border border-blue-200/80 shadow-xs">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <label className="text-xs font-bold text-slate-800 font-cairo flex items-center gap-1.5">
-                          <Sparkles className="w-3.5 h-3.5 text-blue-600" />
-                          <span>الاسم باللغة الإنجليزية (بعد الترجمة)</span>
+                          <BookOpen className="w-3.5 h-3.5 text-blue-600" />
+                          <span>الاسم باللغة الإنجليزية (القاموس المعتمد للجوازات)</span>
                           <span className="text-rose-500">*</span>
                           <span className="text-[10px] text-slate-400 font-normal mr-1">(أحرف كبيرة CAPITAL تلقائياً)</span>
                         </label>
@@ -637,15 +656,19 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
                             <input
                               type="radio"
                               name={`c-${cIdx}-eng-opt`}
-                              checked={customer.englishNameOption === "gemini"}
+                              checked={customer.englishNameOption !== "previous"}
                               onChange={() => {
                                 const updated = [...customers];
-                                updated[cIdx].englishNameOption = "gemini";
+                                updated[cIdx].englishNameOption = "dictionary";
+                                const breakdown = breakdownArabicName(customer.arabicName, dictionary);
+                                if (breakdown.assembledEnglish) {
+                                  updated[cIdx].englishName = breakdown.assembledEnglish;
+                                }
                                 setCustomers(updated);
                               }}
                               className="w-3.5 h-3.5 text-blue-600 focus:ring-0 cursor-pointer"
                             />
-                            <span>ترجمة فورية للطلب</span>
+                            <span>ترجمة معتمدة بالقاموس وجوجل شيت</span>
                           </label>
                           <label className="flex items-center gap-1.5 cursor-pointer hover:text-blue-700 transition-colors">
                             <input
@@ -670,43 +693,133 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
                           type="text"
                           value={customer.englishNameOption === "previous" ? "نفس ترجمة الجواز السابق" : customer.englishName}
                           onChange={(e) => {
-                            if (customer.englishNameOption === "previous") return;
                             const updated = [...customers];
                             updated[cIdx].englishName = e.target.value.toUpperCase();
+                            if (customer.englishNameOption === "previous" && e.target.value !== "نفس ترجمة الجواز السابق") {
+                              updated[cIdx].englishNameOption = "dictionary";
+                            }
                             setCustomers(updated);
                           }}
-                          disabled={customer.englishNameOption === "previous"}
                           placeholder="مثال: MOHAMED AHMED MAHMOUD ALI"
                           dir="ltr"
                           className={`w-full bg-slate-50 border rounded-xl px-4 py-3 text-sm font-bold font-mono tracking-wide focus:outline-hidden transition-all ${
                             errors[`c-${cIdx}-englishName`] 
                               ? "border-rose-400 bg-rose-50/20 text-rose-900 focus:ring-rose-200" 
                               : "border-slate-300 focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-100 text-slate-800"
-                          } ${customer.englishNameOption === "previous" ? "opacity-75 italic text-slate-500 font-sans" : ""}`}
+                          } ${customer.englishNameOption === "previous" ? "italic text-slate-600 font-sans" : ""}`}
                         />
-                        {customer.englishNameOption === "gemini" && (
+                        {customer.englishNameOption !== "previous" && (
                           <button
                             type="button"
                             onClick={() => handleTranslateName(cIdx)}
-                            className="px-4 py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shrink-0 shadow-xs cursor-pointer whitespace-nowrap"
-                            title="ترجم بالقاموس والذكاء الاصطناعي"
+                            className="px-4 py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shrink-0 shadow-xs cursor-pointer whitespace-nowrap font-cairo"
+                            title="تطبيق الترجمة من قاموس الأسماء المعتمد"
                           >
-                            <Sparkles className="w-4 h-4" />
-                            <span>ترجم بالذكاء الاصطناعي</span>
+                            <BookOpen className="w-4 h-4" />
+                            <span>تطبيق القاموس</span>
                           </button>
                         )}
                       </div>
 
-                      {lookupInstantDictionary(customer.arabicName, dictionary) && customer.englishNameOption === "gemini" && (
-                        <div className="flex items-center gap-1.5 text-[11px] text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200/80 font-medium">
-                          <BookOpen className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                          <span>تم جلب الترجمة تلقائياً وبسرعة من قاموس الأسماء المعتمد</span>
-                        </div>
-                      )}
+                      {/* Dictionary status and missing words alert section */}
+                      {(() => {
+                        if (customer.englishNameOption === "previous" || !customer.arabicName.trim()) return null;
+                        const breakdown = breakdownArabicName(customer.arabicName, dictionary);
+
+                        // All words found in dictionary
+                        if (breakdown.allFound) {
+                          return (
+                            <div className="flex items-center gap-2 text-xs text-emerald-800 bg-emerald-50 px-3 py-2 rounded-xl border border-emerald-200/90 font-cairo">
+                              <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                              <span>تم اعتماد ترجمة جميع مقاطع الاسم بالكامل من قاموس جوجل شيت المعتمد 📖✅</span>
+                            </div>
+                          );
+                        }
+
+                        // Some words missing in dictionary
+                        return (
+                          <div className="p-3.5 bg-amber-50/90 border-2 border-amber-300 rounded-xl space-y-3 animate-fade-in">
+                            {/* Required explicit prompt */}
+                            <div className="flex items-center gap-2 text-amber-900 font-bold text-xs font-cairo">
+                              <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
+                              <span className="text-sm">من فضلك تأكد من ترجمة الاسم بالإنجليزي قبل مغادرة المكتب</span>
+                            </div>
+                            <p className="text-[11px] text-amber-800 font-cairo leading-relaxed">
+                              يوجد مقطع أو أكثر من اسم المواطن غير مسجل في قاموس جوجل شيت. يرجى كتابة ترجمة المقطع بالإنجليزية وفقاً لرغبة العميل لاعتماده وحفظه كمرجع لنا في قاعدة البيانات:
+                            </p>
+
+                            {/* Missing words dedicated inputs */}
+                            <div className="space-y-2 pt-1 border-t border-amber-200/80">
+                              {breakdown.missingWords.map((missingWord) => {
+                                const inputVal = missingWordInputs[missingWord] || "";
+                                const isSaving = savingWord === missingWord;
+
+                                return (
+                                  <div key={missingWord} className="flex flex-col sm:flex-row sm:items-center gap-2 bg-white/95 p-2.5 rounded-lg border border-amber-200 shadow-2xs">
+                                    <div className="flex items-center gap-1.5 shrink-0">
+                                      <span className="text-[11px] font-medium text-slate-500 font-cairo">المقطع غير المسجل:</span>
+                                      <span className="px-2.5 py-0.5 bg-amber-100 text-amber-900 font-bold rounded-md text-xs font-cairo">
+                                        {missingWord}
+                                      </span>
+                                    </div>
+
+                                    <div className="flex-1">
+                                      <input
+                                        type="text"
+                                        value={inputVal}
+                                        onChange={(e) => setMissingWordInputs(prev => ({ ...prev, [missingWord]: e.target.value.toUpperCase() }))}
+                                        placeholder={`اكتب ترجمة (${missingWord}) بالإنجليزية...`}
+                                        dir="ltr"
+                                        className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold uppercase text-slate-800 focus:outline-hidden focus:border-blue-500 focus:bg-white"
+                                      />
+                                    </div>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSaveMissingWord(cIdx, missingWord)}
+                                      disabled={isSaving || !inputVal.trim()}
+                                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg text-xs font-bold font-cairo flex items-center justify-center gap-1 transition-colors shrink-0 disabled:opacity-40 cursor-pointer shadow-xs whitespace-nowrap"
+                                    >
+                                      <Plus className="w-3.5 h-3.5" />
+                                      <span>{isSaving ? "جاري الحفظ..." : "حفظ في القاموس والشيت 💾"}</span>
+                                    </button>
+                                  </div>
+                                );
+                              })}
+                            </div>
+
+                            {/* Batch save if customer.englishName has matched word count */}
+                            {(() => {
+                              if (!customer.englishName.trim()) return null;
+                              const arWords = customer.arabicName.trim().split(/\s+/).filter(Boolean);
+                              const enWords = customer.englishName.trim().split(/\s+/).filter(Boolean);
+                              if (arWords.length !== enWords.length || arWords.length === 0) return null;
+
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    const tokens = extractAtomicWordTokens(customer.arabicName, customer.englishName);
+                                    for (const t of tokens) {
+                                      if (breakdown.missingWords.includes(t.arabic)) {
+                                        await handleSaveMissingWord(cIdx, t.arabic, t.english);
+                                      }
+                                    }
+                                  }}
+                                  className="w-full py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold font-cairo flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs mt-1"
+                                >
+                                  <Check className="w-3.5 h-3.5" />
+                                  <span>حفظ ترجمة المقاطع الجديدة في القاموس وجوجل شيت دفعة واحدة 💾</span>
+                                </button>
+                              );
+                            })()}
+                          </div>
+                        );
+                      })()}
 
                       {errors[`c-${cIdx}-englishName`] && (
-                        <p className="text-[11px] text-rose-600 flex items-center gap-1 mt-1">
-                          <AlertCircle className="w-3.5 h-3.5" />
+                        <p className="text-[11px] text-rose-600 flex items-center gap-1 mt-1 font-cairo font-bold">
+                          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
                           <span>{errors[`c-${cIdx}-englishName`]}</span>
                         </p>
                       )}

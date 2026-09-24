@@ -8,6 +8,7 @@ import {
   syncDictionaryToGoogleWebhook,
   syncSettingsToGoogleWebhook,
   saveDictionaryWord,
+  updateDictionaryWord,
   deleteDictionaryWord
 } from "../lib/api";
 import { 
@@ -34,6 +35,8 @@ import {
   Search,
   Plus,
   Trash2,
+  Edit3,
+  X,
   Calendar,
   CalendarCheck
 } from "lucide-react";
@@ -90,6 +93,7 @@ export default function SettingsConfig({
   const [dictSyncLoading, setDictSyncLoading] = useState(false);
   const [dictSyncResult, setDictSyncResult] = useState<{ type: "success" | "warning" | "error"; message: string } | null>(null);
   const [showDictScriptGuide, setShowDictScriptGuide] = useState(false);
+  const [editingDictItem, setEditingDictItem] = useState<{ originalArabic: string; arabic: string; english: string } | null>(null);
 
   // Settings sheet sync states
   const [settingsSyncLoading, setSettingsSyncLoading] = useState(false);
@@ -250,6 +254,42 @@ export default function SettingsConfig({
     } catch (err) {
       console.error(err);
       alert("حدث خطأ أثناء حذف الكلمة من القاموس.");
+    } finally {
+      setDictLoading(false);
+    }
+  };
+
+  const handleStartEditDict = (item: DictionaryItem) => {
+    setEditingDictItem({
+      originalArabic: item.arabic,
+      arabic: item.arabic,
+      english: item.english,
+    });
+  };
+
+  const handleCancelEditDict = () => {
+    setEditingDictItem(null);
+  };
+
+  const handleSaveEditDict = async () => {
+    if (!editingDictItem || !editingDictItem.arabic.trim() || !editingDictItem.english.trim()) return;
+
+    setDictLoading(true);
+    try {
+      const updatedDict = await updateDictionaryWord(
+        editingDictItem.originalArabic,
+        editingDictItem.arabic.trim(),
+        editingDictItem.english.trim().toUpperCase()
+      );
+      if (onDictionaryUpdated) {
+        onDictionaryUpdated(updatedDict);
+      }
+      setDictFeedback(`تم تعديل وحفظ الاسم "${editingDictItem.arabic}" (${editingDictItem.english.trim().toUpperCase()}) في القاموس وجوجل شيت بنجاح! 📖✅`);
+      setEditingDictItem(null);
+      setTimeout(() => setDictFeedback(""), 4000);
+    } catch (err) {
+      console.error(err);
+      alert("حدث خطأ أثناء تعديل الاسم في القاموس.");
     } finally {
       setDictLoading(false);
     }
@@ -1567,24 +1607,86 @@ function formatHeader(sheet, numCols) {
                           const q = dictSearch.trim().toLowerCase();
                           return i.arabic.toLowerCase().includes(q) || i.english.toLowerCase().includes(q);
                         })
-                        .map((item, idx) => (
-                          <tr key={idx} className="hover:bg-slate-50/80 transition-colors">
-                            <td className="px-4 py-2.5 text-center text-slate-400 font-mono text-[11px]">{idx + 1}</td>
-                            <td className="px-4 py-2.5 font-bold text-slate-800 font-cairo">{item.arabic}</td>
-                            <td className="px-4 py-2.5 font-mono font-bold text-blue-700 tracking-wide dir-ltr text-right">{item.english}</td>
-                            <td className="px-4 py-2.5 text-center">
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteDictionaryWord(item.arabic, item.english)}
-                                disabled={dictLoading}
-                                title="حذف هذا الاسم من القاموس"
-                                className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
+                        .map((item, idx) => {
+                          const isEditing = editingDictItem && editingDictItem.originalArabic === item.arabic;
+                          return (
+                            <tr key={idx} className={`${isEditing ? "bg-blue-50/40" : "hover:bg-slate-50/80"} transition-colors`}>
+                              <td className="px-4 py-2.5 text-center text-slate-400 font-mono text-[11px]">{idx + 1}</td>
+                              <td className="px-4 py-2.5 font-bold text-slate-800 font-cairo">
+                                {isEditing ? (
+                                  <input
+                                    type="text"
+                                    value={editingDictItem.arabic}
+                                    onChange={(e) => setEditingDictItem({ ...editingDictItem, arabic: e.target.value })}
+                                    className="w-full bg-white border border-blue-300 rounded-lg px-2.5 py-1 text-xs font-bold text-slate-800 focus:outline-hidden focus:border-blue-500 font-cairo"
+                                    placeholder="الاسم بالعربي"
+                                  />
+                                ) : (
+                                  item.arabic
+                                )}
+                              </td>
+                              <td className="px-4 py-2.5 font-mono font-bold text-blue-700 tracking-wide dir-ltr text-right">
+                                {isEditing ? (
+                                  <input
+                                    type="text"
+                                    value={editingDictItem.english}
+                                    onChange={(e) => setEditingDictItem({ ...editingDictItem, english: e.target.value.toUpperCase() })}
+                                    dir="ltr"
+                                    className="w-full bg-white border border-blue-300 rounded-lg px-2.5 py-1 text-xs font-mono font-bold text-blue-700 uppercase focus:outline-hidden focus:border-blue-500"
+                                    placeholder="الترجمة بالإنجليزي"
+                                  />
+                                ) : (
+                                  item.english
+                                )}
+                              </td>
+                              <td className="px-4 py-2.5 text-center">
+                                {isEditing ? (
+                                  <div className="flex items-center justify-center gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={handleSaveEditDict}
+                                      disabled={dictLoading || !editingDictItem.arabic.trim() || !editingDictItem.english.trim()}
+                                      title="حفظ التعديل في القاموس وجوجل شيت 💾"
+                                      className="p-1.5 text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer disabled:opacity-40"
+                                    >
+                                      <Check className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={handleCancelEditDict}
+                                      disabled={dictLoading}
+                                      title="إلغاء التعديل"
+                                      className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                                    >
+                                      <X className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center justify-center gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleStartEditDict(item)}
+                                      disabled={dictLoading}
+                                      title="تعديل هذا الاسم بالإنجليزي أو العربي"
+                                      className="p-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                                    >
+                                      <Edit3 className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteDictionaryWord(item.arabic, item.english)}
+                                      disabled={dictLoading}
+                                      title="حذف هذا الاسم من القاموس"
+                                      className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
                     </tbody>
                   </table>
                 )}

@@ -149,6 +149,23 @@ export async function saveDictionaryWord(arabic: string, english: string): Promi
   return result.dictionary;
 }
 
+export async function updateDictionaryWord(originalArabic: string, newArabic: string, newEnglish: string): Promise<DictionaryItem[]> {
+  const response = await fetch("/api/db/dictionary", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ 
+      originalArabic, 
+      arabic: newArabic.trim(), 
+      english: newEnglish.trim().toUpperCase() 
+    }),
+  });
+  if (!response.ok) {
+    throw new Error("Failed to update dictionary word");
+  }
+  const result = await response.json();
+  return result.dictionary;
+}
+
 export async function saveDictionaryBatch(items: { arabic: string; english: string }[]): Promise<DictionaryItem[]> {
   const response = await fetch("/api/db/dictionary", {
     method: "POST",

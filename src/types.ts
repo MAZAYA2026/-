@@ -19,7 +19,7 @@ export interface Service {
 export interface CustomerInput {
   arabicName: string; // الاسم العربي (Mandatory)
   englishName: string; // الاسم الإنجليزي (Optional, mandatory if service starts with # or ##)
-  englishNameOption: "gemini" | "previous"; // Translation choice
+  englishNameOption: "dictionary" | "previous" | "gemini"; // Translation choice (dictionary-based or previous passport)
   nationalId: string; // الرقم القومى (Visible/mandatory if service starts with # or ##)
   birthDate: string; // تاريخ الميلاد (Automatically calculated from National ID)
   phone: string; // رقم الهاتف (Mandatory, validates as Egyptian (11 digits starting with 01) or general)
