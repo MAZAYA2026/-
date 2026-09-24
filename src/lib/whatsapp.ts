@@ -1,10 +1,19 @@
 import { Invoice, Service, AppSettings } from "../types";
 import { calculateWorkingDaysDeliveryDate, getArabicDayName } from "./businessDays";
 
+export const WHATSAPP_DIVIDER = "━━━━━━━━━━━━━━━━━━━━";
+
 /**
- * Builds a clean, deduplicated WhatsApp welcome / payment details message.
- * Handles single customer, multiple services per customer, and multiple individuals per invoice
- * without repeating names, service details, or delivery dates.
+ * Builds a beautifully formatted WhatsApp welcome / order receipt message.
+ * Places clear aesthetic dividers (WHATSAPP_DIVIDER) between every piece of information:
+ * 1. Intro & Invoice Header
+ * 2. Name (Arabic & English)
+ * 3. Profession
+ * 4. Selected Service(s)
+ * 5. Service Instructions & Guidelines
+ * 6. Financial Cost & Fees
+ * 7. Final Delivery Deadline (Official Business Days)
+ * 8. Closing & Contact
  */
 export function generateWhatsAppWelcomeMessage(
   inv: Invoice, 
@@ -13,7 +22,7 @@ export function generateWhatsAppWelcomeMessage(
 ): string {
   if (!inv || !inv.customers || inv.customers.length === 0) return "";
 
-  // 1. Collect all non-empty delivery dates for services in this invoice
+  // 1. Calculate the final delivery date across all services
   const allDeliveryDates: string[] = [];
   inv.customers.forEach((cust) => {
     cust.services.forEach((s) => {
@@ -41,99 +50,194 @@ export function generateWhatsAppWelcomeMessage(
   const maxDeliveryDayName = maxDeliveryDate ? getArabicDayName(maxDeliveryDate) : "";
   const deliveryDisplay = maxDeliveryDate 
     ? `${maxDeliveryDayName ? maxDeliveryDayName + " " : ""}${maxDeliveryDate} (أيام عمل رسمية)` 
-    : "حسب المواعيد المقررة لكل خدمة";
+    : "حسب المواعيد الرسمية المقررة بكل خدمة";
 
-  // 2. Greeting customer name(s)
-  const validCustomers = inv.customers.filter((c) => c.arabicName && c.arabicName.trim());
-  let greetingName = "عميلنا العزيز";
-  if (validCustomers.length === 1) {
-    greetingName = validCustomers[0].arabicName.trim();
-  } else if (validCustomers.length === 2) {
-    greetingName = `${validCustomers[0].arabicName.trim()} و ${validCustomers[1].arabicName.trim()}`;
-  } else if (validCustomers.length > 2) {
-    greetingName = `${validCustomers[0].arabicName.trim()} والأسرة الكريمة (${validCustomers.length} أفراد)`;
+  const isSingleCustomer = inv.customers.length === 1;
+
+  // ── Section 1: الترويسة ورقم الفاتورة ──────────────────────
+  const headerTitle = (settings.headerText || "مكتب مزايا للخدمات الحكومية والجوازات").trim();
+  const headerSub = (settings.subHeaderText || "جوازات طنطا والمعاملات الحكومية").trim();
+  const invDate = inv.date || new Date().toISOString().split("T")[0];
+
+  const headerLines: string[] = [
+    `*${headerTitle}*`,
+  ];
+  if (headerSub) {
+    headerLines.push(`_${headerSub}_`);
+  }
+  headerLines.push(`📄 *فاتورة استلام طلب رقم:* #${inv.invoiceId}`);
+  headerLines.push(`📅 *تاريخ المعاملة:* ${invDate}`);
+
+  // ── Section 2: الاسم (العربي والإنجليزي) ────────────────────
+  const nameLines: string[] = [];
+  let arabicNameOnly = "";
+  let englishNameOnly = "";
+
+  if (isSingleCustomer) {
+    const cust = inv.customers[0];
+    arabicNameOnly = cust.arabicName?.trim() || "عميلنا العزيز";
+    nameLines.push(`👤 *الاسم:*`);
+    nameLines.push(arabicNameOnly);
+    if (cust.englishName && cust.englishName.trim() && cust.englishName !== "N/A" && cust.englishName !== "نفس ترجمة الجواز السابق") {
+      englishNameOnly = cust.englishName.trim().toUpperCase();
+      nameLines.push(`🔤 *الاسم بالإنجليزي:*`);
+      nameLines.push(englishNameOnly);
+    }
+  } else {
+    nameLines.push(`👥 *الأسماء وبيانات الأفراد (${inv.customers.length} أفراد):*`);
+    const arNames: string[] = [];
+    const enNames: string[] = [];
+    inv.customers.forEach((c, idx) => {
+      const ar = c.arabicName?.trim() || `فرد ${idx + 1}`;
+      arNames.push(`${idx + 1}️⃣ ${ar}`);
+      nameLines.push(`${idx + 1}️⃣ *الاسم:* ${ar}`);
+      if (c.englishName && c.englishName.trim() && c.englishName !== "N/A" && c.englishName !== "نفس ترجمة الجواز السابق") {
+        const en = c.englishName.trim().toUpperCase();
+        enNames.push(`${idx + 1}️⃣ ${en}`);
+        nameLines.push(`    🔤 *بالإنجليزي:* ${en}`);
+      }
+    });
+    arabicNameOnly = arNames.join("\n");
+    englishNameOnly = enNames.join("\n");
   }
 
-  // 3. Build deduplicated services and individuals list
-  const isSingleCustomer = inv.customers.length === 1;
-  const sections: string[] = [];
+  // ── Section 3: المهنة ───────────────────────────────────────
+  const profLines: string[] = [];
+  profLines.push(`💼 *المهنة:*`);
+  if (isSingleCustomer) {
+    const p = inv.customers[0]?.profession?.trim();
+    profLines.push(p && p !== "N/A" ? p : "حسب بطاقة الرقم القومي / المستندات الرسمية");
+  } else {
+    inv.customers.forEach((c, idx) => {
+      const p = c.profession?.trim();
+      const pText = p && p !== "N/A" ? p : "حسب بطاقة الرقم القومي";
+      profLines.push(`• ${c.arabicName?.trim() || `فرد ${idx + 1}`}: ${pText}`);
+    });
+  }
 
-  inv.customers.forEach((cust, idx) => {
-    const lines: string[] = [];
-
-    // If multiple individuals, identify each individual cleanly
+  // ── Section 4: الخدمة المختارة ──────────────────────────────
+  const srvLines: string[] = [];
+  srvLines.push(isSingleCustomer && inv.customers[0].services.length === 1 ? `📋 *الخدمة المختارة:*` : `📋 *الخدمات المختارة:*`);
+  inv.customers.forEach((cust, cIdx) => {
     if (!isSingleCustomer) {
-      lines.push(`👤 الفرد (${idx + 1}): ${cust.arabicName?.trim() || "بدون اسم"}`);
+      srvLines.push(`*(${cust.arabicName?.trim() || `فرد ${cIdx + 1}`}):*`);
     }
-
-    // Passport details if available (show once per individual, not repeated per service)
-    const extraParts: string[] = [];
-    if (cust.englishName && cust.englishName.trim() && cust.englishName !== "N/A") {
-      extraParts.push(`EN: ${cust.englishName.trim()}`);
-    }
-    if (cust.profession && cust.profession.trim() && cust.profession !== "N/A") {
-      extraParts.push(`المهنة: ${cust.profession.trim()}`);
-    }
-    if (extraParts.length > 0) {
-      lines.push(isSingleCustomer ? `📝 ${extraParts.join(" | ")}` : `   📝 ${extraParts.join(" | ")}`);
-    }
-
-    // List each service for this individual cleanly without duplicate durations or duplicate titles
-    const seenServices = new Set<string>();
+    const seen = new Set<string>();
     cust.services.forEach((s) => {
       const matched = services.find((srv) => srv.name === s.serviceId || srv.id === s.serviceId);
       const srvName = matched?.name || s.serviceId;
       const srvKey = `${srvName}_${s.quantity}_${s.price}`;
-      
-      // Avoid duplicate lines if identical
-      if (seenServices.has(srvKey)) return;
-      seenServices.add(srvKey);
+      if (seen.has(srvKey)) return;
+      seen.add(srvKey);
 
-      const qtyStr = s.quantity > 1 ? ` (عدد: ${s.quantity})` : "";
+      const qtyStr = s.quantity > 1 ? ` (العدد: ${s.quantity})` : "";
       const priceStr = s.price > 0 ? ` - ${s.price} ج.م` : "";
-      
-      const prefix = isSingleCustomer ? "• " : "   • ";
-      lines.push(`${prefix}${srvName}${qtyStr}${priceStr}`);
+      const prefix = isSingleCustomer ? "• " : "  • ";
+      srvLines.push(`${prefix}${srvName}${qtyStr}${priceStr}`);
     });
-
-    if (lines.length > 0) {
-      sections.push(lines.join("\n"));
-    }
   });
 
-  const servicesDetailsText = sections.join("\n------------------------------------\n");
+  // ── Section 5: تعليمات هذه الخدمة ────────────────────────────
+  const instLines: string[] = [];
+  instLines.push(`📌 *تعليمات هذه الخدمة:*`);
+  const collectedInstructions: string[] = [];
 
-  // 4. Base template from settings or standard clean template
-  let template = settings.welcomeMessage?.trim();
-  
-  // If template is the default or contains redundant headers, clean it up:
-  if (!template) {
-    template = `مرحباً بك {اسم_العميل}، تم استلام طلبك برقم #{رقم_الفاتورة} بنجاح.
-الخدمات المطلوبة:
-{الخدمات}
-💰 إجمالي الحساب: {السعر} ج.م
-📅 موعد الاستلام المتوقع: {موعد_التسليم}`;
+  inv.customers.forEach((cust) => {
+    cust.services.forEach((s) => {
+      const matched = services.find((srv) => srv.name === s.serviceId || srv.id === s.serviceId);
+      if (matched?.instructions && matched.instructions.trim()) {
+        const trimmed = matched.instructions.trim();
+        if (!collectedInstructions.includes(trimmed)) {
+          collectedInstructions.push(trimmed);
+        }
+      }
+      if (s.notes && s.notes.trim() && !collectedInstructions.includes(s.notes.trim())) {
+        collectedInstructions.push(s.notes.trim());
+      }
+    });
+  });
+
+  if (collectedInstructions.length > 0) {
+    collectedInstructions.forEach((inst) => {
+      instLines.push(`• ${inst}`);
+    });
+    instLines.push(`• يرجى إحضار أصل بطاقة الرقم القومي سارية أو المستندات الأصلية لمطابقتها عند الاستلام.`);
+  } else {
+    // Official standard instructions for Mazaya Passports & Government Services
+    instLines.push(`• يرجى إحضار أصل بطاقة الرقم القومي سارية أو المستندات الأصلية لمطابقتها عند الاستلام.`);
+    instLines.push(`• تسليم المعاملات يتم لصاحب الشأن شخصياً أو بموجب توكيل رسمي ساري طبقاً لتعليمات مصلحة الجوازات والأمن العام.`);
+    instLines.push(`• يرجى الاحتفاظ بصورة هذه الفاتورة الإلكترونية لتقديمها عند الحضور للاستلام.`);
   }
 
-  // Replace placeholders
-  let formatted = template
-    .replace(/{اسم_العميل}/g, greetingName)
-    .replace(/{رقم_الفاتورة}/g, inv.invoiceId.toString())
-    .replace(/{الخدمات}/g, servicesDetailsText)
+  // ── Section 6: التكلفة ──────────────────────────────────────
+  const costLines: string[] = [];
+  costLines.push(`💰 *التكلفة المالية:*`);
+  costLines.push(`• إجمالي الفاتورة: ${inv.totalAmount} ج.م`);
+  if (typeof inv.totalGov === "number" && inv.totalGov > 0 && typeof inv.totalOffice === "number" && inv.totalOffice > 0) {
+    costLines.push(`• تفصيل المبلغ: رسوم حكومية (${inv.totalGov} ج.م) + أتعاب المكتب (${inv.totalOffice} ج.م)`);
+  }
+
+  // ── Section 7: الميعاد النهائي للتسليم ───────────────────────
+  const deliveryLines: string[] = [];
+  deliveryLines.push(`🕒 *الميعاد النهائي للتسليم:*`);
+  deliveryLines.push(`📅 ${deliveryDisplay}`);
+
+  // ── Section 8: الخاتمة ──────────────────────────────────────
+  const closingLines: string[] = [];
+  closingLines.push(`✨ *نسعد دائماً بخدمتكم وتسهيل معاملاتكم*`);
+  const customFooter = settings.footerText?.trim();
+  if (customFooter) {
+    closingLines.push(customFooter.replace(/\n+/g, " - "));
+  } else {
+    closingLines.push(`شكراً لتعاملكم مع مكتب مزايا للجوازات والمعاملات الحكومية.`);
+  }
+  closingLines.push(`📍 طنطا - شارع الجلاء - بجوار الجوازات`);
+  if (settings.contactPhone && settings.contactPhone.trim()) {
+    closingLines.push(`📞 للاستفسار والمتابعة: ${settings.contactPhone.trim()}`);
+  }
+
+  // Standard divided sections
+  const sections = [
+    headerLines.join("\n"),
+    nameLines.join("\n"),
+    profLines.join("\n"),
+    srvLines.join("\n"),
+    instLines.join("\n"),
+    costLines.join("\n"),
+    deliveryLines.join("\n"),
+    closingLines.join("\n"),
+  ];
+
+  // Check if user has a custom template in settings with explicit divider placeholders
+  const userTemplate = settings.welcomeMessage?.trim();
+  const isOldSquashedTemplate = !userTemplate || 
+    userTemplate.includes("عزيزنا {اسم_العميل}، تم استلام طلباتك بمكتب مزايا") ||
+    !userTemplate.includes("━");
+
+  if (isOldSquashedTemplate) {
+    return sections.join(`\n\n${WHATSAPP_DIVIDER}\n\n`);
+  }
+
+  // If user provided a customized template containing dividers or placeholders
+  let formatted = userTemplate
+    .replace(/{فاصل}/g, WHATSAPP_DIVIDER)
+    .replace(/{اسم_العميل}/g, arabicNameOnly)
+    .replace(/{الاسم}/g, arabicNameOnly)
+    .replace(/{الاسم_الانجليزي}/g, englishNameOnly ? `🔤 *الاسم بالإنجليزي:*\n${englishNameOnly}` : "")
+    .replace(/{المهنة}/g, profLines.slice(1).join("\n"))
+    .replace(/{الخدمات}/g, srvLines.slice(1).join("\n"))
+    .replace(/{الخدمة_المختارة}/g, srvLines.slice(1).join("\n"))
+    .replace(/{تعليمات_الخدمة}/g, instLines.slice(1).join("\n"))
     .replace(/{السعر}/g, inv.totalAmount.toString())
-    .replace(/{تاريخ_اليوم}/g, inv.date || "")
+    .replace(/{التكلفة}/g, costLines.slice(1).join("\n"))
+    .replace(/{تاريخ_اليوم}/g, invDate)
     .replace(/{موعد_التسليم}/g, deliveryDisplay)
-    .replace(/{تاريخ_الاستلام}/g, deliveryDisplay);
+    .replace(/{الميعاد_النهائي}/g, deliveryDisplay)
+    .replace(/{الخاتمة}/g, closingLines.slice(1).join("\n"))
+    .replace(/{رقم_الفاتورة}/g, inv.invoiceId.toString());
 
-  // If user template did NOT have delivery date placeholder and delivery date is known, append it once
-  if (maxDeliveryDate && !template.includes("{موعد_التسليم}") && !template.includes("{تاريخ_الاستلام}") && !formatted.includes(maxDeliveryDate)) {
-    formatted += `\n📅 موعد استلام المعاملة: ${deliveryDisplay}`;
-  }
-
-  // Footer text if defined and not already included
-  if (settings.footerText && settings.footerText.trim() && !formatted.includes(settings.footerText.trim())) {
-    formatted += `\n\n${settings.footerText.trim()}`;
-  }
+  // Clean empty lines caused by missing optional placeholders
+  formatted = formatted.replace(/\n{3,}/g, "\n\n");
 
   return formatted;
 }

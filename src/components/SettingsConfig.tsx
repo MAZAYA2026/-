@@ -63,6 +63,7 @@ export default function SettingsConfig({
 }: SettingsConfigProps) {
   const [headerText, setHeaderText] = useState(settings.headerText || "مكتب مزايا للجوازات والمعاملات");
   const [subHeaderText, setSubHeaderText] = useState(settings.subHeaderText ?? "جوازات طنطا والمعاملات الحكومية");
+  const [contactPhone, setContactPhone] = useState(settings.contactPhone || "01020304050");
   const [welcomeMessage, setWelcomeMessage] = useState(settings.welcomeMessage || "");
   const [whatsappTemplate, setWhatsappTemplate] = useState(settings.whatsappTemplate || "");
   const [readyMessage, setReadyMessage] = useState(settings.readyMessage || "");
@@ -113,6 +114,7 @@ export default function SettingsConfig({
       const payload: AppSettings = {
         headerText: headerText.trim(),
         subHeaderText: subHeaderText.trim(),
+        contactPhone: contactPhone.trim(),
         welcomeMessage: welcomeMessage.trim(),
         whatsappTemplate: whatsappTemplate.trim(),
         readyMessage: readyMessage.trim(),
@@ -784,6 +786,7 @@ function formatHeader(sheet, numCols) {
         const payload: AppSettings = {
           headerText: headerText.trim(),
           subHeaderText: subHeaderText.trim(),
+          contactPhone: contactPhone.trim(),
           welcomeMessage: welcomeMessage.trim(),
           whatsappTemplate: whatsappTemplate.trim(),
           readyMessage: readyMessage.trim(),
@@ -809,6 +812,7 @@ function formatHeader(sheet, numCols) {
       const payload: AppSettings = {
         headerText: headerText.trim(),
         subHeaderText: subHeaderText.trim(),
+        contactPhone: contactPhone.trim(),
         welcomeMessage: welcomeMessage.trim(),
         whatsappTemplate: whatsappTemplate.trim(),
         readyMessage: readyMessage.trim(),
@@ -954,6 +958,7 @@ function formatHeader(sheet, numCols) {
       const payload: AppSettings = {
         headerText: headerText.trim(),
         subHeaderText: subHeaderText.trim(),
+        contactPhone: contactPhone.trim(),
         welcomeMessage: welcomeMessage.trim(),
         whatsappTemplate: whatsappTemplate.trim(),
         readyMessage: readyMessage.trim(),
@@ -1050,14 +1055,13 @@ function formatHeader(sheet, numCols) {
               />
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-700 block">رقم هاتف التواصل والشكاوى:</label>
+              <label className="text-xs font-bold text-slate-700 block">رقم هاتف التواصل والشكاوى (يظهر في الرسائل والإيصالات):</label>
               <input 
                 type="text" 
-                value={welcomeMessage}
-                onChange={(e) => setWelcomeMessage(e.target.value)}
+                value={contactPhone}
+                onChange={(e) => setContactPhone(e.target.value)}
                 placeholder="e.g. 01020304050"
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono"
-                required
               />
             </div>
           </div>
@@ -1108,6 +1112,103 @@ function formatHeader(sheet, numCols) {
           </h3>
 
           <div className="space-y-4">
+            {/* First Welcome WhatsApp Message */}
+            <div className="space-y-2 border border-blue-100 bg-blue-50/40 rounded-xl p-3.5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <label className="text-xs font-bold text-blue-900 block">
+                  🌟 قالب رسالة استلام الطلب والترحيب الأولى (رسالة الفاتورة الأولى للعميل):
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setWelcomeMessage(`*مكتب مزايا للخدمات الحكومية والجوازات*
+📄 *فاتورة استلام طلب رقم:* #{رقم_الفاتورة}
+📅 *تاريخ المعاملة:* {تاريخ_اليوم}
+
+━━━━━━━━━━━━━━━━━━━━
+
+👤 *الاسم:*
+{الاسم}
+{الاسم_الانجليزي}
+
+━━━━━━━━━━━━━━━━━━━━
+
+💼 *المهنة:*
+{المهنة}
+
+━━━━━━━━━━━━━━━━━━━━
+
+📋 *الخدمة المختارة:*
+{الخدمات}
+
+━━━━━━━━━━━━━━━━━━━━
+
+📌 *تعليمات هذه الخدمة:*
+{تعليمات_الخدمة}
+
+━━━━━━━━━━━━━━━━━━━━
+
+💰 *التكلفة المالية:*
+• إجمالي الفاتورة: {السعر} ج.م
+
+━━━━━━━━━━━━━━━━━━━━
+
+🕒 *الميعاد النهائي للتسليم:*
+📅 {موعد_التسليم}
+
+━━━━━━━━━━━━━━━━━━━━
+
+✨ *نسعد دائماً بخدمتكم وتسهيل معاملاتكم*
+{الخاتمة}`);
+                  }}
+                  className="text-[10px] font-bold text-blue-700 hover:text-blue-900 bg-white border border-blue-200 px-2 py-1 rounded-lg hover:bg-blue-50 transition-colors shadow-2xs self-start sm:self-auto"
+                >
+                  استعادة القالب الأنيق الافتراضي (مع الفواصل الجمالية) 🔄
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-600">
+                هذه هي الرسالة الأولى التي تُرسل للعميل عبر الواتساب فور تسجيل الفاتورة، ومزودة بفواصل جمالية أنيقة ━━━━━━━━━━━━━━━━━━━━ بين كل معلومة والأخرى.
+              </p>
+              <textarea 
+                value={welcomeMessage}
+                onChange={(e) => setWelcomeMessage(e.target.value)}
+                placeholder="قالب رسالة الواتساب الأولى..."
+                rows={9}
+                className="w-full bg-white border border-blue-200 rounded-xl p-3 text-xs font-mono leading-relaxed"
+                dir="rtl"
+              />
+              <div className="space-y-1 text-[10px]">
+                <div className="font-bold text-slate-600">المتغيرات الصالحة للإدراج السريع:</div>
+                <div className="flex flex-wrap gap-1.5 font-mono">
+                  {[
+                    "{اسم_العميل}",
+                    "{الاسم}",
+                    "{الاسم_الانجليزي}",
+                    "{المهنة}",
+                    "{الخدمات}",
+                    "{تعليمات_الخدمة}",
+                    "{التكلفة}",
+                    "{السعر}",
+                    "{موعد_التسليم}",
+                    "{الميعاد_النهائي}",
+                    "{الخاتمة}",
+                    "{رقم_الفاتورة}",
+                    "{تاريخ_اليوم}",
+                    "{فاصل}"
+                  ].map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => setWelcomeMessage((prev) => prev + " " + tag)}
+                      className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-blue-800 font-bold hover:bg-blue-50 transition-colors"
+                    >
+                      {tag}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-700 block">قالب الإخطار بجاهزية الأوراق (مرحلة Ready):</label>
               <textarea 

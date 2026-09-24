@@ -29,6 +29,7 @@ export interface CustomerInput {
     quantity: number;
     price: number; // Total price = (govPrice + officeFee) * qty
     deliveryDate: string; // Calculated delivery date
+    notes?: string; // ملاحظات أو تعليمات خاصة بالخدمة
   }[];
 }
 
@@ -84,7 +85,8 @@ export interface AppSettings {
   headerText: string; // نص مقدمة الفاتورة
   subHeaderText?: string; // السطر الفرعي أسفل ترويسة الفاتورة المطبوعة (مثل: جوازات طنطا والمعاملات الحكومية)
   footerText: string; // خاتمة الفاتورة
-  welcomeMessage: string; // رسالة ترحيب
+  contactPhone?: string; // رقم هاتف التواصل والشكاوى
+  welcomeMessage: string; // رسالة ترحيب واستلام الطلب الأولى
   readyMessage: string; // رسالة جاهز للتسليم
   deliveryMessage: string; // رسالة تم التسليم
   whatsappTemplate: string; // General template
