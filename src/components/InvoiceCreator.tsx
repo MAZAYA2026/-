@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Service, CustomerInput, Invoice, InvoiceStatus, AppSettings, Employee, DictionaryItem } from "../types";
 import { translateWithGemini, createInvoiceOnServer, saveDictionaryWord } from "../lib/api";
 import { calculateWorkingDaysDeliveryDate, getArabicDayName, isNonWorkingDay } from "../lib/businessDays";
+import { generateWhatsAppWelcomeMessage, getWhatsAppUrl } from "../lib/whatsapp";
 import { Plus, Trash2, FileText, UserPlus, Sparkles, Printer, Send, Check, AlertCircle, Info, Calendar, BookOpen, ShieldAlert } from "lucide-react";
 import ThermalReceipt from "./ThermalReceipt";
 
@@ -424,92 +425,16 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
     }
   };
 
-  // WhatsApp welcome link generator
+  // WhatsApp welcome link generator (deduplicated and clean)
   const handleSendWhatsAppWelcome = (inv: Invoice) => {
     if (!inv) return;
     
-    // We compose the message following the exact variable substitution guidelines
-    // {اسم_العميل} {رقم_الفاتورة} {الخدمات} {تاريخ_اليوم} {موعد_التسليم}
-    
-    const allDeliveryDates: string[] = [];
-
-    let customersText = "";
-    inv.customers.forEach((cust, idx) => {
-      const isPass = cust.englishName || cust.profession;
-      let servicesLines = cust.services.map(s => {
-        const matched = services.find(srv => srv.name === s.serviceId || srv.id === s.serviceId);
-        let srvDeliveryDate = s.deliveryDate && s.deliveryDate.trim() ? s.deliveryDate.trim() : "";
-        if (!srvDeliveryDate && matched && typeof matched.deliveryDaysOffset === "number" && inv.date) {
-          const customHolidays = settings.customHolidays || [];
-          const calcResult = calculateWorkingDaysDeliveryDate(
-            inv.date, 
-            matched.deliveryDaysOffset || 0, 
-            customHolidays, 
-            matched.name,
-            settings.includeSaturdayAsWeekend !== false
-          );
-          srvDeliveryDate = calcResult.deliveryDate;
-        }
-        if (srvDeliveryDate) allDeliveryDates.push(srvDeliveryDate);
-
-        const deliveryDayName = srvDeliveryDate ? getArabicDayName(srvDeliveryDate) : "";
-        const deliveryInfo = srvDeliveryDate 
-          ? `\n    📅 موعد التسليم: ${deliveryDayName ? deliveryDayName + " " : ""}${srvDeliveryDate} (أيام عمل رسمية)` 
-          : (matched?.duration ? `\n    ⏱️ مدة التنفيذ: ${matched.duration}` : "");
-
-        return `• ${matched?.name || s.serviceId} (عدد: ${s.quantity}) - السعر: ${s.price} ج.م${deliveryInfo}`;
-      }).join("\n");
-      
-      let passDetails = "";
-      if (isPass) {
-        passDetails = `\n  الاسم بالإنجليزي: ${cust.englishName || 'N/A'}\n  المهنة: ${cust.profession || 'N/A'}`;
-        // If passport-related, append duration and delivery instructions
-        const passportServices = cust.services.filter(s => s.serviceId.startsWith('#') || s.serviceId.startsWith('##'));
-        passportServices.forEach(ps => {
-          const matched = services.find(srv => srv.name === ps.serviceId);
-          if (matched) {
-            passDetails += `\n  - مدة التنفيذ: ${matched.duration}\n  - تعليمات التسليم: ${matched.instructions}`;
-          }
-        });
-      }
-
-      customersText += `العميل (${idx + 1}): ${cust.arabicName}${passDetails}\nالخدمات المطلوبة:\n${servicesLines}\n`;
-      customersText += `------------------------------------\n`;
-    });
-
-    const maxDeliveryDate = allDeliveryDates.length > 0 ? allDeliveryDates.sort().reverse()[0] : "";
-
-    let welcomeTemplate = settings.welcomeMessage || "مرحباً بك {اسم_العميل}، تم استلام طلبك برقم {رقم_الفاتورة} للخدمات: {الخدمات}";
-    if (maxDeliveryDate && !welcomeTemplate.includes("{موعد_التسليم}") && !welcomeTemplate.includes("{تاريخ_الاستلام}")) {
-      welcomeTemplate += `\n📅 موعد استلام المعاملة: {موعد_التسليم}`;
-    }
-    
-    // Replace variables in templates
-    const primaryCustomerName = inv.customers[0]?.arabicName || "عميلنا العزيز";
-    
-    let formattedMessage = welcomeTemplate
-      .replace(/{اسم_العميل}/g, primaryCustomerName)
-      .replace(/{رقم_الفاتورة}/g, inv.invoiceId.toString())
-      .replace(/{الخدمات}/g, customersText)
-      .replace(/{السعر}/g, inv.totalAmount.toString())
-      .replace(/{تاريخ_اليوم}/g, inv.date)
-      .replace(/{موعد_التسليم}/g, maxDeliveryDate || "حسب موعد كل خدمة")
-      .replace(/{تاريخ_الاستلام}/g, maxDeliveryDate || "حسب موعد كل خدمة");
-
-    // Append generic footer settings
-    formattedMessage += `\n\n${settings.footerText || ""}`;
+    const formattedMessage = generateWhatsAppWelcomeMessage(inv, services, settings);
 
     const targetCustomer = inv.customers.find(c => c.phone && c.phone.trim().length > 0) || inv.customers[0];
     const rawPhone = targetCustomer?.phone ? targetCustomer.phone.trim() : "";
     if (rawPhone) {
-      let cleanPhone = rawPhone.replace(/\D/g, "");
-      if (cleanPhone.startsWith("0")) {
-        cleanPhone = "2" + cleanPhone;
-      } else if (!cleanPhone.startsWith("20") && cleanPhone.length === 10) {
-        cleanPhone = "20" + cleanPhone;
-      }
-      const encodedMsg = encodeURIComponent(formattedMessage);
-      const waUrl = `https://wa.me/${cleanPhone}?text=${encodedMsg}`;
+      const waUrl = getWhatsAppUrl(rawPhone, formattedMessage);
       
       const win = window.open(waUrl, "_blank", "noopener,noreferrer");
       if (!win) {

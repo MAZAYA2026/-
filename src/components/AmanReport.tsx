@@ -100,6 +100,17 @@ export default function AmanReport({ invoices, services, activeEmployee }: AmanR
     document.body.removeChild(link);
   };
 
+  // Dynamic font sizing for customer name to ensure full name fits without truncation
+  const getNameFontSize = (name: string): string => {
+    if (!name) return "20px";
+    const len = name.trim().length;
+    if (len <= 20) return "20px";
+    if (len <= 24) return "19px";
+    if (len <= 28) return "18px";
+    if (len <= 33) return "16.5px";
+    return "15px";
+  };
+
   // Direct print of the styled A4 pages
   const handlePrintA4 = () => {
     const printContent = reportPrintRef.current?.innerHTML;
@@ -192,7 +203,6 @@ export default function AmanReport({ invoices, services, activeEmployee }: AmanR
           border: 1px solid black !important;
           padding: 0 4px !important;
           font-family: 'Cairo', sans-serif !important;
-          font-size: 20px !important;
           font-weight: 700 !important;
           line-height: 1.1 !important;
           vertical-align: middle !important;
@@ -367,14 +377,7 @@ export default function AmanReport({ invoices, services, activeEmployee }: AmanR
                         <col style={{ width: "3.5cm" }} />
                         <col />
                       </colgroup>
-                      <thead>
-                        <tr className="bg-slate-50 border-b-2 border-black" style={{ height: "7.2mm" }}>
-                          <th className="border border-black text-center font-bold" style={{ width: "1cm", fontFamily: "'Cairo', sans-serif", fontSize: "20px", fontWeight: "bold", padding: "0 1px" }}>م</th>
-                          <th className="border border-black text-right font-bold" style={{ width: "9.5cm", fontFamily: "'Cairo', sans-serif", fontSize: "20px", fontWeight: "bold", padding: "0 4px" }}>الاسم</th>
-                          <th className="border border-black text-center font-bold" style={{ width: "3.5cm", fontFamily: "'Cairo', sans-serif", fontSize: "20px", fontWeight: "bold", padding: "0 2px", whiteSpace: "nowrap" }}>تاريخ الميلاد</th>
-                          <th className="border border-black text-center font-bold" style={{ fontFamily: "'Cairo', sans-serif", fontSize: "20px", fontWeight: "bold", padding: "0 2px" }}>الملاحظات</th>
-                        </tr>
-                      </thead>
+                      {/* Starts directly with the first row of data - table header row removed per user request */}
                       <tbody>
                         {Array.from({ length: ROWS_PER_PAGE }).map((_, rIdx) => {
                           const cust = pageCustomers[rIdx];
@@ -385,7 +388,18 @@ export default function AmanReport({ invoices, services, activeEmployee }: AmanR
                               <td className="border border-black text-center font-bold p-0" style={{ width: "1cm", fontFamily: "'Cairo', sans-serif", fontSize: "20px", fontWeight: "bold", lineHeight: 1.1 }}>
                                 {absoluteIdx}
                               </td>
-                              <td className="border border-black text-right font-bold" style={{ width: "9.5cm", fontFamily: "'Cairo', sans-serif", fontSize: "20px", fontWeight: "bold", lineHeight: 1.1, padding: "0 4px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              <td 
+                                className="border border-black text-right font-bold" 
+                                style={{ 
+                                  width: "9.5cm", 
+                                  fontFamily: "'Cairo', sans-serif", 
+                                  fontSize: cust ? getNameFontSize(cust.arabicName) : "20px", 
+                                  fontWeight: "bold", 
+                                  lineHeight: 1.1, 
+                                  padding: "0 4px", 
+                                  whiteSpace: "nowrap" 
+                                }}
+                              >
                                 {cust ? cust.arabicName : ""}
                               </td>
                               <td className="border border-black text-center font-bold" style={{ width: "3.5cm", fontFamily: "'Cairo', sans-serif", fontSize: "20px", fontWeight: "bold", lineHeight: 1.1, padding: "0 2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -401,14 +415,14 @@ export default function AmanReport({ invoices, services, activeEmployee }: AmanR
                     </table>
                   </div>
 
-                  {/* Signoff Section - Compact space not exceeding 10mm to preserve single A4 page */}
+                  {/* Signoff Section - Placed at the far right with ample space for the officer's signature */}
                   <div 
-                    className="flex justify-end items-center px-4 pt-1 mt-1 border-t border-black text-black font-cairo"
-                    style={{ height: "10mm", maxHeight: "10mm", boxSizing: "border-box" }}
+                    className="flex justify-start items-center px-4 pt-2 mt-2 border-t-2 border-black text-black font-cairo"
+                    style={{ height: "14mm", maxHeight: "15mm", boxSizing: "border-box" }}
                   >
                     <div className="flex items-center gap-3" style={{ fontFamily: "'Cairo', sans-serif", fontSize: "20px", fontWeight: "bold" }}>
-                      <span>توقيع رئيس القسم :</span>
-                      <span className="inline-block border-b border-dotted border-black w-56 h-4 mb-1"></span>
+                      <span>رئيس القسم :</span>
+                      <span className="inline-block border-b-2 border-dotted border-black w-72 h-4 mb-1"></span>
                     </div>
                   </div>
 
