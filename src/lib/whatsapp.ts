@@ -59,7 +59,15 @@ export function generateWhatsAppWelcomeMessage(
   // ── Section 1: الترويسة ورقم الفاتورة ──────────────────────
   const headerTitle = (settings.headerText || "مكتب مزايا للخدمات الحكومية والجوازات").trim();
   const headerSub = (settings.subHeaderText || "جوازات طنطا والمعاملات الحكومية").trim();
-  const invDate = inv.date || new Date().toISOString().split("T")[0];
+  let invDate = inv.date || new Date().toISOString().split("T")[0];
+  if (invDate.includes("GMT") || invDate.length > 10) {
+    try {
+      const d = new Date(invDate);
+      if (!isNaN(d.getTime())) {
+        invDate = d.toISOString().split("T")[0];
+      }
+    } catch {}
+  }
 
   const headerLines: string[] = [
     `*${headerTitle}*`,
@@ -179,7 +187,12 @@ export function generateWhatsAppWelcomeMessage(
     collectedInstructions.forEach((inst) => {
       instLines.push(`• ${inst}`);
     });
-    instLines.push(`• يرجى إحضار أصل بطاقة الرقم القومي سارية أو المستندات الأصلية للمطابقة.`);
+    const alreadyMentionsId = collectedInstructions.some(
+      (inst) => inst.includes("الرقم القومي") || inst.includes("البطاقة") || inst.includes("أصل وصورة")
+    );
+    if (!alreadyMentionsId) {
+      instLines.push(`• يرجى إحضار أصل بطاقة الرقم القومي سارية أو المستندات الأصلية للمطابقة.`);
+    }
   } else {
     // Official concise instructions
     instLines.push(`• يرجى إحضار أصل بطاقة الرقم القومي سارية أو المستندات الأصلية للمطابقة عند الاستلام.`);

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { Invoice, InvoiceStatus, AppSettings, Service, Employee, CustomerInput } from "../types";
 import { updateInvoiceOnServer, deleteInvoiceOnServer, importInvoicesFromGoogleSheet } from "../lib/api";
 import { calculateWorkingDaysDeliveryDate, getArabicDayName } from "../lib/businessDays";
@@ -171,9 +171,18 @@ export default function InvoiceQuery({
     }
   };
 
-  // WhatsApp triggers (deduplicated and clean)
+  const lastWhatsAppDispatchTime = useRef<number>(0);
+
+  // WhatsApp triggers (deduplicated, single-dispatch, and debounced)
   const handleSendWhatsAppWelcome = (inv: Invoice) => {
     if (!inv) return;
+
+    // Prevent double clicking or dual simultaneous dispatch
+    const now = Date.now();
+    if (now - lastWhatsAppDispatchTime.current < 2000) {
+      return;
+    }
+    lastWhatsAppDispatchTime.current = now;
 
     const formattedMessage = generateWhatsAppWelcomeMessage(inv, services, settings);
 
@@ -181,16 +190,7 @@ export default function InvoiceQuery({
     const rawPhone = targetCustomer?.phone ? targetCustomer.phone.trim() : "";
     if (rawPhone) {
       const waUrl = getWhatsAppUrl(rawPhone, formattedMessage);
-      const opened = window.open(waUrl, "_blank", "noopener,noreferrer");
-      if (!opened) {
-        const link = document.createElement("a");
-        link.href = waUrl;
-        link.target = "_blank";
-        link.rel = "noopener noreferrer";
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-      }
+      window.open(waUrl, "_blank");
     } else {
       alert("رقم هاتف العميل غير متوفر في هذه الفاتورة.");
     }

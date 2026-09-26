@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Service, CustomerInput, Invoice, InvoiceStatus, AppSettings, Employee, DictionaryItem } from "../types";
 import { createInvoiceOnServer, saveDictionaryWord } from "../lib/api";
 import { calculateWorkingDaysDeliveryDate, getArabicDayName, isNonWorkingDay } from "../lib/businessDays";
@@ -444,10 +444,19 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
     }
   };
 
-  // WhatsApp welcome link generator (deduplicated and clean)
+  const lastWhatsAppDispatchTime = useRef<number>(0);
+
+  // WhatsApp welcome link generator (deduplicated, single-dispatch, and debounced)
   const handleSendWhatsAppWelcome = (inv: Invoice) => {
     if (!inv) return;
     
+    // Prevent double clicking or dual simultaneous dispatch
+    const now = Date.now();
+    if (now - lastWhatsAppDispatchTime.current < 2000) {
+      return;
+    }
+    lastWhatsAppDispatchTime.current = now;
+
     const formattedMessage = generateWhatsAppWelcomeMessage(inv, services, settings);
 
     const targetCustomer = inv.customers.find(c => c.phone && c.phone.trim().length > 0) || inv.customers[0];
@@ -455,16 +464,8 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
     if (rawPhone) {
       const waUrl = getWhatsAppUrl(rawPhone, formattedMessage);
       
-      const win = window.open(waUrl, "_blank", "noopener,noreferrer");
-      if (!win) {
-        const link = document.createElement("a");
-        link.href = waUrl;
-        link.target = "_blank";
-        link.rel = "noopener noreferrer";
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-      }
+      // Open single tab cleanly without redundant fallback triggers
+      window.open(waUrl, "_blank");
     } else {
       alert("رقم هاتف العميل غير متوفر في هذه الفاتورة لإرسال رسالة الواتساب.");
     }
