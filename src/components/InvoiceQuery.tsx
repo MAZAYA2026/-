@@ -1,7 +1,7 @@
 import React, { useState, useRef } from "react";
 import { Invoice, InvoiceStatus, AppSettings, Service, Employee, CustomerInput } from "../types";
 import { updateInvoiceOnServer, deleteInvoiceOnServer } from "../lib/api";
-import { calculateWorkingDaysDeliveryDate, getArabicDayName } from "../lib/businessDays";
+import { calculateWorkingDaysDeliveryDate, getArabicDayName, recalculateCustomerServicesDeliveryDates } from "../lib/businessDays";
 import { generateWhatsAppWelcomeMessage, getWhatsAppUrl } from "../lib/whatsapp";
 import { Search, Edit3, Trash2, Printer, Send, CheckCircle, PackageOpen, X, MapPin, Calendar, Info, RefreshCw, AlertCircle, Save } from "lucide-react";
 import ThermalReceipt from "./ThermalReceipt";
@@ -225,6 +225,9 @@ export default function InvoiceQuery({
       let totalOffice = 0;
       let totalAmount = 0;
 
+      const customHolidays = settings.customHolidays || [];
+      const includeSaturday = settings.includeSaturdayAsWeekend !== false;
+
       editCustomers.forEach((cust) => {
         cust.services.forEach((s) => {
           const matched = services.find(srv => srv.id === s.serviceId || srv.name === s.serviceId);
@@ -233,19 +236,17 @@ export default function InvoiceQuery({
             totalOffice += matched.officeFee * s.quantity;
             totalAmount += (matched.govPrice + matched.officeFee) * s.quantity;
             s.price = (matched.govPrice + matched.officeFee) * s.quantity;
-
-            // Recalculate delivery date according to official working days and Saturday rule for #
-            const customHolidays = settings.customHolidays || [];
-            const calcResult = calculateWorkingDaysDeliveryDate(
-              editingInvoice.date || new Date(),
-              matched.deliveryDaysOffset || 0,
-              customHolidays,
-              matched.name,
-              settings.includeSaturdayAsWeekend !== false
-            );
-            s.deliveryDate = calcResult.deliveryDate;
           }
         });
+
+        // Recalculate delivery dates sequentially (service 2 starts after service 1, etc.)
+        cust.services = recalculateCustomerServicesDeliveryDates(
+          cust.services,
+          editingInvoice.date || new Date(),
+          services,
+          customHolidays,
+          includeSaturday
+        );
       });
 
       const updated = {
@@ -429,6 +430,35 @@ export default function InvoiceQuery({
                     <span className="text-slate-300">|</span>
                     <span>بواسطة: {inv.employeeName}</span>
                   </div>
+                  {(() => {
+                    const customHolidays = settings.customHolidays || [];
+                    const includeSaturday = settings.includeSaturdayAsWeekend !== false;
+                    const allDates: string[] = [];
+                    let hasMultiple = false;
+                    inv.customers.forEach((c) => {
+                      if (c.services.length > 1) hasMultiple = true;
+                      const seqServices = recalculateCustomerServicesDeliveryDates(
+                        c.services,
+                        inv.date || new Date(),
+                        services,
+                        customHolidays,
+                        includeSaturday
+                      );
+                      seqServices.forEach((s) => {
+                        if (s.deliveryDate) allDates.push(s.deliveryDate);
+                      });
+                    });
+                    const maxDate = allDates.length > 0 ? [...allDates].sort().reverse()[0] : "";
+                    if (!maxDate) return null;
+                    const dayName = getArabicDayName(maxDate);
+                    return (
+                      <div className="text-[10px] text-indigo-700 bg-indigo-50/80 border border-indigo-100 rounded-md px-2 py-0.5 mt-1 inline-flex items-center gap-1 font-bold font-cairo">
+                        <Calendar className="w-3 h-3 text-indigo-500" />
+                        <span>موعد التسليم النهائي: {dayName ? `${dayName} ` : ""}{maxDate}</span>
+                        {hasMultiple && <span className="text-[9px] text-indigo-500 font-normal font-cairo">(تراكمي)</span>}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 <div className="flex gap-1.5 no-print">
@@ -482,9 +512,16 @@ export default function InvoiceQuery({
                       {/* Customer services list */}
                       <div className="mt-1.5 space-y-1 pl-1">
                         {cust.services.map((s, sIdx) => (
-                          <div key={sIdx} className="flex justify-between text-[11px] text-slate-600">
+                          <div key={sIdx} className="flex justify-between items-center text-[11px] text-slate-600">
                             <span>• {s.serviceId}</span>
-                            <span className="font-mono">x{s.quantity}</span>
+                            <div className="flex items-center gap-1.5 font-mono text-[10px]">
+                              {s.deliveryDate && (
+                                <span className="text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded-sm border border-amber-200">
+                                  {s.deliveryDate}
+                                </span>
+                              )}
+                              <span className="text-slate-400">x{s.quantity}</span>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -687,9 +724,27 @@ export default function InvoiceQuery({
 
                   {/* Edit selected services */}
                   <div className="space-y-2">
-                    <span className="text-[11px] font-bold text-slate-600 block">تعديل الخدمات للعميل:</span>
+                    <div className="flex justify-between items-center">
+                      <span className="text-[11px] font-bold text-slate-600">تعديل الخدمات للعميل:</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const updated = [...editCustomers];
+                          updated[cIdx].services.push({
+                            serviceId: services[0]?.name || "",
+                            quantity: 1,
+                            price: 0,
+                            deliveryDate: ""
+                          });
+                          setEditCustomers(updated);
+                        }}
+                        className="text-[11px] font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1 cursor-pointer font-cairo"
+                      >
+                        + إضافة خدمة إضافية
+                      </button>
+                    </div>
                     {cust.services.map((s, sIdx) => (
-                      <div key={sIdx} className="flex gap-3 items-center bg-slate-50 p-2.5 rounded-lg border border-slate-150">
+                      <div key={sIdx} className="flex gap-2 items-center bg-slate-50 p-2.5 rounded-lg border border-slate-150">
                         <select
                           value={s.serviceId}
                           onChange={(e) => {
@@ -697,7 +752,7 @@ export default function InvoiceQuery({
                             updated[cIdx].services[sIdx].serviceId = e.target.value;
                             setEditCustomers(updated);
                           }}
-                          className="flex-1 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs"
+                          className="flex-1 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-cairo"
                         >
                           {services.map((srv, idx) => (
                             <option key={srv.id} value={srv.name}>
@@ -716,6 +771,20 @@ export default function InvoiceQuery({
                           }}
                           className="w-16 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono text-center"
                         />
+                        {cust.services.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updated = [...editCustomers];
+                              updated[cIdx].services = updated[cIdx].services.filter((_, i) => i !== sIdx);
+                              setEditCustomers(updated);
+                            }}
+                            className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                            title="حذف هذه الخدمة"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     ))}
                   </div>

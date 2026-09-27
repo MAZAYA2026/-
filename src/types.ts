@@ -79,6 +79,8 @@ export interface Employee {
 export interface HolidayItem {
   date: string; // YYYY-MM-DD
   name: string; // اسم العطلة الرسمية
+  originalDate?: string; // التاريخ الأصلي قبل الترحيل بقرار رئيس الوزراء
+  shifted?: boolean; // تم ترحيلها بقرار حكومي
 }
 
 export interface AppSettings {

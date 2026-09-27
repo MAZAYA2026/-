@@ -1,5 +1,5 @@
 import { Invoice, Service, AppSettings } from "../types";
-import { calculateWorkingDaysDeliveryDate, getArabicDayName } from "./businessDays";
+import { calculateWorkingDaysDeliveryDate, getArabicDayName, recalculateCustomerServicesDeliveryDates } from "./businessDays";
 
 export const WHATSAPP_DIVIDER = "───────";
 
@@ -24,28 +24,36 @@ export function generateWhatsAppWelcomeMessage(
 ): string {
   if (!inv || !inv.customers || inv.customers.length === 0) return "";
 
-  // 1. Calculate the final delivery date across all services
+  const customHolidays = settings.customHolidays || [];
+  const includeSaturday = settings.includeSaturdayAsWeekend !== false;
+  const invoiceBaseDate = inv.date || new Date().toISOString().split("T")[0];
+
+  // 1. Calculate sequential delivery dates across all customers and services
+  // If customer has multiple services, service 2 starts after service 1 finishes (تراكمي)
   const allDeliveryDates: string[] = [];
-  inv.customers.forEach((cust) => {
-    cust.services.forEach((s) => {
-      let srvDeliveryDate = s.deliveryDate && s.deliveryDate.trim() ? s.deliveryDate.trim() : "";
-      if (!srvDeliveryDate && inv.date) {
-        const matched = services.find((srv) => srv.name === s.serviceId || srv.id === s.serviceId);
-        if (matched && typeof matched.deliveryDaysOffset === "number") {
-          const calc = calculateWorkingDaysDeliveryDate(
-            inv.date,
-            matched.deliveryDaysOffset || 0,
-            settings.customHolidays || [],
-            matched.name,
-            settings.includeSaturdayAsWeekend !== false
-          );
-          srvDeliveryDate = calc.deliveryDate;
-        }
-      }
-      if (srvDeliveryDate && !allDeliveryDates.includes(srvDeliveryDate)) {
-        allDeliveryDates.push(srvDeliveryDate);
+  let hasMultipleServicesForAnyCust = false;
+
+  const resolvedCustomers = inv.customers.map((cust) => {
+    if (cust.services.length > 1) {
+      hasMultipleServicesForAnyCust = true;
+    }
+    const seqServices = recalculateCustomerServicesDeliveryDates(
+      cust.services,
+      invoiceBaseDate,
+      services,
+      customHolidays,
+      includeSaturday
+    );
+    seqServices.forEach((s) => {
+      const d = s.deliveryDate && s.deliveryDate.trim() ? s.deliveryDate.trim() : "";
+      if (d && !allDeliveryDates.includes(d)) {
+        allDeliveryDates.push(d);
       }
     });
+    return {
+      ...cust,
+      services: seqServices
+    };
   });
 
   const maxDeliveryDate = allDeliveryDates.length > 0 ? [...allDeliveryDates].sort().reverse()[0] : "";
@@ -54,7 +62,7 @@ export function generateWhatsAppWelcomeMessage(
     ? `${maxDeliveryDayName ? maxDeliveryDayName + " " : ""}${maxDeliveryDate} (أيام عمل رسمية)` 
     : "حسب المواعيد الرسمية المقررة بكل خدمة";
 
-  const isSingleCustomer = inv.customers.length === 1;
+  const isSingleCustomer = resolvedCustomers.length === 1;
 
   // ── Section 1: الترويسة ورقم الفاتورة ──────────────────────
   const headerTitle = (settings.headerText || "مكتب مزايا للخدمات الحكومية والجوازات").trim();
@@ -92,7 +100,7 @@ export function generateWhatsAppWelcomeMessage(
   const multiCustomerLines: string[] = [];
 
   if (isSingleCustomer) {
-    const cust = inv.customers[0];
+    const cust = resolvedCustomers[0];
     arabicNameOnly = cust.arabicName?.trim() || "عميلنا العزيز";
     const hasEnglish = cust.englishName && cust.englishName.trim() && cust.englishName !== "N/A" && cust.englishName !== "نفس ترجمة الجواز السابق";
     englishNameOnly = hasEnglish ? cust.englishName.trim().toUpperCase() : "";
@@ -107,25 +115,28 @@ export function generateWhatsAppWelcomeMessage(
     profSectionLines.push(`💼 *المهنة:* ${professionOnly}`);
 
     const srvItems: string[] = [];
-    cust.services.forEach((s) => {
+    cust.services.forEach((s, sIdx) => {
       const matched = services.find((srv) => srv.name === s.serviceId || srv.id === s.serviceId);
       const srvName = matched?.name || s.serviceId;
       const qtyStr = s.quantity > 1 ? ` (العدد: ${s.quantity})` : "";
       const priceStr = s.price > 0 ? ` - ${s.price} ج.م` : "";
-      srvItems.push(`• ${srvName}${qtyStr}${priceStr}`);
+      const srvDeliveryStr = s.deliveryDate 
+        ? ` [تسليم: ${getArabicDayName(s.deliveryDate) ? getArabicDayName(s.deliveryDate) + " " : ""}${s.deliveryDate}${sIdx > 0 ? " - يبدأ احتسابها بعد انتهاء الخدمة السابقة" : ""}]` 
+        : "";
+      srvItems.push(`• ${srvName}${qtyStr}${priceStr}${srvDeliveryStr}`);
     });
     servicesOnly = srvItems.join("\n");
     srvSectionLines.push(cust.services.length > 1 ? `📋 *الخدمات المطلوبة:*` : `📋 *الخدمة المطلوبة:*`);
     srvSectionLines.push(servicesOnly);
   } else {
     // Multi-customer: Group each person's details together cleanly!
-    multiCustomerLines.push(`👥 *بيانات الأفراد والخدمات (${inv.customers.length} أفراد):*`);
+    multiCustomerLines.push(`👥 *بيانات الأفراد والخدمات (${resolvedCustomers.length} أفراد):*`);
     const arNames: string[] = [];
     const enNames: string[] = [];
     const profs: string[] = [];
     const allSrvs: string[] = [];
 
-    inv.customers.forEach((cust, idx) => {
+    resolvedCustomers.forEach((cust, idx) => {
       const arName = cust.arabicName?.trim() || `فرد ${idx + 1}`;
       arNames.push(`${idx + 1}️⃣ ${arName}`);
 
@@ -144,12 +155,13 @@ export function generateWhatsAppWelcomeMessage(
       multiCustomerLines.push(`   💼 المهنة: ${pText}`);
 
       const custSrvNames: string[] = [];
-      cust.services.forEach((s) => {
+      cust.services.forEach((s, sIdx) => {
         const matched = services.find((srv) => srv.name === s.serviceId || srv.id === s.serviceId);
         const srvName = matched?.name || s.serviceId;
         const qtyStr = s.quantity > 1 ? ` (${s.quantity})` : "";
         const priceStr = s.price > 0 ? ` [${s.price} ج.م]` : "";
-        const fullSrv = `${srvName}${qtyStr}${priceStr}`;
+        const delivStr = s.deliveryDate ? ` [تسليم: ${s.deliveryDate}${sIdx > 0 ? " - يبدأ بعد السابقة" : ""}]` : "";
+        const fullSrv = `${srvName}${qtyStr}${priceStr}${delivStr}`;
         custSrvNames.push(fullSrv);
         allSrvs.push(`• (${arName}): ${fullSrv}`);
       });
@@ -212,6 +224,9 @@ export function generateWhatsAppWelcomeMessage(
     `🕒 *الميعاد النهائي للتسليم:*`,
     `📅 ${deliveryDisplay}`
   ];
+  if (hasMultipleServicesForAnyCust) {
+    deliveryLines.push(`_(يبدأ احتساب مدة كل خدمة بعد الانتهاء من الخدمة السابقة بالتتابع لحساب الوقت الفعلي للاستلام)_`);
+  }
 
   // ── Section 6: الخاتمة والتواصل (بدون تكرار شروط الاستلام) ─────
   const closingLines: string[] = [
@@ -261,6 +276,10 @@ export function generateWhatsAppWelcomeMessage(
     return sections.join(`\n\n${WHATSAPP_DIVIDER}\n\n`);
   }
 
+  const deliveryDisplayFull = (maxDeliveryDate && hasMultipleServicesForAnyCust)
+    ? `${deliveryDisplay}\n_(يبدأ احتساب مدة كل خدمة بعد الانتهاء من الخدمة السابقة بالتتابع لحساب الوقت الفعلي للاستلام)_`
+    : deliveryDisplay;
+
   // If user provided a customized template, replace placeholders accurately WITHOUT adding extra headings:
   let formatted = userTemplate
     .replace(/{فاصل}/g, WHATSAPP_DIVIDER)
@@ -274,8 +293,8 @@ export function generateWhatsAppWelcomeMessage(
     .replace(/{السعر}/g, inv.totalAmount.toString())
     .replace(/{التكلفة}/g, costLines.slice(1).join("\n"))
     .replace(/{تاريخ_اليوم}/g, invDate)
-    .replace(/{موعد_التسليم}/g, deliveryDisplay)
-    .replace(/{الميعاد_النهائي}/g, deliveryDisplay)
+    .replace(/{موعد_التسليم}/g, deliveryDisplayFull)
+    .replace(/{الميعاد_النهائي}/g, deliveryDisplayFull)
     .replace(/{الخاتمة}/g, closingLines.slice(1).join("\n"))
     .replace(/{رقم_الفاتورة}/g, inv.invoiceId.toString());
 

@@ -3,11 +3,13 @@
 export interface HolidayItem {
   date: string; // YYYY-MM-DD
   name: string; // اسم العطلة أو المناسبة
+  originalDate?: string; // التاريخ الأصلي قبل الترحيل بقرار رئيس الوزراء
+  shifted?: boolean; // تم ترحيلها بقرار حكومي
 }
 
 // Built-in list of official Egyptian government holidays for 2025, 2026, 2027 and annual fixed events
 export const DEFAULT_OFFICIAL_HOLIDAYS: HolidayItem[] = [
-  // Fixed annual national holidays
+  // Fixed annual national holidays - 2025
   { date: "2025-01-07", name: "عيد الميلاد المجيد" },
   { date: "2025-01-25", name: "ثورة 25 يناير وعيد الشرطة" },
   { date: "2025-03-30", name: "عيد الفطر المبارك (وقفة)" },
@@ -61,6 +63,101 @@ export const DEFAULT_OFFICIAL_HOLIDAYS: HolidayItem[] = [
 ];
 
 /**
+ * Returns the effective list of holidays.
+ * If customHolidays is provided and has items, it is authoritative.
+ * Otherwise returns the built-in Egyptian official holidays list.
+ */
+export function getEffectiveHolidays(customHolidays?: HolidayItem[]): HolidayItem[] {
+  if (customHolidays && customHolidays.length > 0) {
+    return customHolidays;
+  }
+  return DEFAULT_OFFICIAL_HOLIDAYS;
+}
+
+/**
+ * Shifts a holiday date to the nearest Thursday of that week
+ * according to Egyptian Prime Minister decrees (قرار ترحيل الإجازات إلى يوم الخميس).
+ */
+export function shiftDateToThursday(dateStr: string): string {
+  const d = parseDateYMD(dateStr);
+  const day = d.getDay(); // 0 = Sun, 1 = Mon, 2 = Tue, 3 = Wed, 4 = Thu, 5 = Fri, 6 = Sat
+  let daysToAdd = 0;
+  if (day < 4) {
+    // Sun(0), Mon(1), Tue(2), Wed(3) -> Thu(4)
+    daysToAdd = 4 - day;
+  } else if (day === 4) {
+    daysToAdd = 0; // Already Thursday
+  } else if (day === 5) {
+    // Friday -> following Thursday (+6)
+    daysToAdd = 6;
+  } else if (day === 6) {
+    // Saturday -> following Thursday (+5)
+    daysToAdd = 5;
+  }
+  const shifted = new Date(d.getTime());
+  shifted.setDate(shifted.getDate() + daysToAdd);
+  return formatDateYMD(shifted);
+}
+
+/**
+ * Shifts a holiday date to Sunday
+ * according to Egyptian Prime Minister decrees (قرار ترحيل الإجازات إلى يوم الأحد).
+ */
+export function shiftDateToSunday(dateStr: string): string {
+  const d = parseDateYMD(dateStr);
+  const day = d.getDay(); // 0 = Sun, 1 = Mon, 2 = Tue, 3 = Wed, 4 = Thu, 5 = Fri, 6 = Sat
+  let daysToAdd = 0;
+  if (day === 0) {
+    daysToAdd = 0; // Already Sunday
+  } else if (day === 4) {
+    // Thursday -> following Sunday (+3)
+    daysToAdd = 3;
+  } else if (day === 5) {
+    // Friday -> following Sunday (+2)
+    daysToAdd = 2;
+  } else if (day === 6) {
+    // Saturday -> following Sunday (+1)
+    daysToAdd = 1;
+  } else {
+    // Mon(1), Tue(2), Wed(3) -> following Sunday
+    daysToAdd = 7 - day;
+  }
+  const shifted = new Date(d.getTime());
+  shifted.setDate(shifted.getDate() + daysToAdd);
+  return formatDateYMD(shifted);
+}
+
+/**
+ * Shifts a holiday to a specific target date with an official decree label
+ */
+export function shiftHolidayToDate(item: HolidayItem, targetDate: string, customReason?: string): HolidayItem {
+  const baseName = item.name.replace(/\s*\(مرحّلة.*\)/g, "").trim();
+  const dayName = getArabicDayName(targetDate);
+  const reasonText = customReason || `مرحّلة ليوم ${dayName} بقرار رئيس الوزراء`;
+  return {
+    ...item,
+    date: targetDate,
+    name: `${baseName} (${reasonText})`,
+    originalDate: item.originalDate || item.date,
+    shifted: true
+  };
+}
+
+/**
+ * Reverts a shifted holiday back to its original calendar date
+ */
+export function revertHolidayShift(item: HolidayItem): HolidayItem {
+  const baseName = item.name.replace(/\s*\(مرحّلة.*\)/g, "").trim();
+  return {
+    ...item,
+    date: item.originalDate || item.date,
+    name: baseName,
+    originalDate: undefined,
+    shifted: false
+  };
+}
+
+/**
  * Format a Date object as YYYY-MM-DD using local time
  */
 export function formatDateYMD(d: Date): string {
@@ -110,7 +207,7 @@ export function shouldIncludeSaturdayAsWeekend(serviceNameOrId?: string, globalS
  * Checks if a given date is a non-working day for passport offices / government departments:
  * - Friday (day 5) is always an official weekend.
  * - Saturday (day 6) is a weekend for most ministries and government administrations (configurable).
- * - Official State / National Holidays (عطلات رسمية للدولة).
+ * - Official State / National Holidays (عطلات الدولة والمرحلة بقرارات رئيس الوزراء).
  */
 export function isNonWorkingDay(
   date: Date, 
@@ -130,17 +227,11 @@ export function isNonWorkingDay(
   }
 
   const dateStr = formatDateYMD(date);
+  const effective = getEffectiveHolidays(customHolidays);
 
-  // Check custom holidays first
-  const custom = customHolidays.find(h => h.date === dateStr);
-  if (custom) {
-    return { isHoliday: true, reason: custom.name || "عطلة رسمية مسجلة" };
-  }
-
-  // Check standard Egyptian national holidays
-  const builtIn = DEFAULT_OFFICIAL_HOLIDAYS.find(h => h.date === dateStr);
-  if (builtIn) {
-    return { isHoliday: true, reason: builtIn.name };
+  const matchedHoliday = effective.find(h => h.date === dateStr);
+  if (matchedHoliday) {
+    return { isHoliday: true, reason: matchedHoliday.name || "عطلة رسمية" };
   }
 
   return { isHoliday: false };
@@ -227,6 +318,104 @@ export function calculateWorkingDaysDeliveryDate(
 }
 
 /**
+ * Sequential Services Delivery Date Calculation:
+ * When a customer selects multiple services, the duration of the second service
+ * begins AFTER the completion of the first service (تراكمي متتابع),
+ * providing the real, actual final delivery date for each service and for the total order.
+ */
+export function recalculateCustomerServicesDeliveryDates<T extends { 
+  serviceId: string; 
+  deliveryDate?: string; 
+  price?: number; 
+  quantity?: number;
+}>(
+  servicesList: T[],
+  startDateStr: string | Date,
+  catalogServices: { id: string; name: string; deliveryDaysOffset?: number; duration?: string }[],
+  customHolidays: HolidayItem[] = [],
+  globalSaturdayWeekendSetting: boolean = true
+): T[] {
+  let currentStart = typeof startDateStr === "string" ? startDateStr : formatDateYMD(startDateStr);
+
+  return servicesList.map((item) => {
+    if (!item.serviceId) {
+      return { ...item, deliveryDate: "" };
+    }
+
+    const itemRaw = item.serviceId || "";
+    const itemClean = itemRaw.replace(/^[#\s]+/, "").trim();
+
+    // Match service by ID, exact name, trimmed name, or clean name without '#' prefix
+    const matched = catalogServices.find(s => 
+      s.id === itemRaw || 
+      s.name.trim() === itemRaw.trim() ||
+      (s.name && s.name.replace(/^[#\s]+/, "").trim() === itemClean) ||
+      (itemRaw && s.id === itemRaw.trim())
+    );
+
+    let offset = 0;
+    if (matched && typeof matched.deliveryDaysOffset === "number") {
+      offset = matched.deliveryDaysOffset;
+    } else if (matched?.duration) {
+      // Fallback: extract number of days from duration string e.g. "3 أيام عمل" -> 3
+      const numMatch = matched.duration.match(/\d+/);
+      if (numMatch) {
+        offset = parseInt(numMatch[0], 10);
+      } else if (matched.duration.includes("يوم واحد") || matched.duration.includes("يوم عمل")) {
+        offset = 1;
+      }
+    }
+
+    const serviceName = matched ? matched.name : itemRaw;
+    const calc = calculateWorkingDaysDeliveryDate(
+      currentStart,
+      offset,
+      customHolidays,
+      serviceName,
+      globalSaturdayWeekendSetting
+    );
+
+    // If a delivery date is computed, the next service in the sequential queue starts from this date
+    if (calc.deliveryDate) {
+      currentStart = calc.deliveryDate;
+    }
+
+    return {
+      ...item,
+      deliveryDate: calc.deliveryDate
+    };
+  });
+}
+
+/**
+ * Helper to get the actual final delivery date for a customer's services
+ */
+export function getCustomerFinalDeliveryDate<T extends { deliveryDate?: string }>(servicesList: T[]): {
+  deliveryDate: string;
+  dayName: string;
+  hasMultipleServices: boolean;
+  allDates: string[];
+} {
+  const allDates: string[] = [];
+  servicesList.forEach(s => {
+    if (s.deliveryDate && s.deliveryDate.trim()) {
+      allDates.push(s.deliveryDate.trim());
+    }
+  });
+
+  const sorted = [...allDates].sort();
+  const deliveryDate = sorted.length > 0 ? sorted[sorted.length - 1] : "";
+  const dayName = deliveryDate ? getArabicDayName(deliveryDate) : "";
+
+  return {
+    deliveryDate,
+    dayName,
+    hasMultipleServices: servicesList.length > 1,
+    allDates
+  };
+}
+
+/**
  * Returns Arabic day name for a given YYYY-MM-DD date string
  */
 export function getArabicDayName(dateStr: string): string {
@@ -238,3 +427,4 @@ export function getArabicDayName(dateStr: string): string {
     return "";
   }
 }
+

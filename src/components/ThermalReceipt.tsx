@@ -1,6 +1,6 @@
 import React, { useRef } from "react";
 import { Invoice, AppSettings, Service } from "../types";
-import { calculateWorkingDaysDeliveryDate, getArabicDayName } from "../lib/businessDays";
+import { calculateWorkingDaysDeliveryDate, getArabicDayName, recalculateCustomerServicesDeliveryDates } from "../lib/businessDays";
 import { Printer, X, Send } from "lucide-react";
 
 interface ThermalReceiptProps {
@@ -167,23 +167,23 @@ export default function ThermalReceipt({ invoice, settings, services, onClose, o
                 const allDeliveryDates: string[] = [];
                 const customHolidays = settings.customHolidays || [];
                 const includeSaturday = settings.includeSaturdayAsWeekend !== false;
+                let hasMultipleServices = false;
 
                 invoice.customers.forEach((c) => {
-                  c.services.forEach((s) => {
-                    if (s.deliveryDate && s.deliveryDate.trim()) {
-                      allDeliveryDates.push(s.deliveryDate.trim());
-                    } else {
-                      const matched = services.find((srv) => srv.id === s.serviceId || srv.name === s.serviceId);
-                      if (matched && typeof matched.deliveryDaysOffset === "number" && invoice.date) {
-                        const calcResult = calculateWorkingDaysDeliveryDate(
-                          invoice.date, 
-                          matched.deliveryDaysOffset || 0, 
-                          customHolidays, 
-                          matched.name,
-                          settings.includeSaturdayAsWeekend !== false
-                        );
-                        allDeliveryDates.push(calcResult.deliveryDate);
-                      }
+                  if (c.services.length > 1) {
+                    hasMultipleServices = true;
+                  }
+                  const seqServices = recalculateCustomerServicesDeliveryDates(
+                    c.services,
+                    invoice.date || new Date(),
+                    services,
+                    customHolidays,
+                    includeSaturday
+                  );
+                  seqServices.forEach((s) => {
+                    const finalD = s.deliveryDate || "";
+                    if (finalD && !allDeliveryDates.includes(finalD)) {
+                      allDeliveryDates.push(finalD);
                     }
                   });
                 });
@@ -191,11 +191,16 @@ export default function ThermalReceipt({ invoice, settings, services, onClose, o
                 if (!maxDeliveryDate) return null;
                 const dayName = getArabicDayName(maxDeliveryDate);
                 return (
-                  <div className="bg-white border-2 border-black p-1.5 rounded-xs mt-1.5 text-center text-black">
-                    <div className="text-[11px] font-bold text-black">موعد استلام المعاملة النهائي (أيام عمل):</div>
-                    <div className="text-xs font-black font-mono mt-0.5 text-black tracking-wider">
+                  <div className="bg-white border-2 border-black p-2 rounded-xs mt-1.5 text-center text-black">
+                    <div className="text-[11px] font-bold text-black">موعد استلام المعاملة النهائي الفعلي (أيام عمل رسمية):</div>
+                    <div className="text-sm font-black font-mono mt-0.5 text-black tracking-wider">
                       {dayName ? `${dayName} ` : ""}{maxDeliveryDate}
                     </div>
+                    {hasMultipleServices && (
+                      <div className="text-[9px] font-bold text-black mt-1 border-t border-dashed border-black pt-1">
+                        * يبدأ احتساب مدة الخدمة التالية بعد انتهاء الخدمة السابقة بالتتابع
+                      </div>
+                    )}
                   </div>
                 );
               })()}
@@ -241,74 +246,77 @@ export default function ThermalReceipt({ invoice, settings, services, onClose, o
                     <div className="border-t-2 border-dashed border-black my-2"></div>
 
                     {/* Services selected */}
-                    <div className="space-y-3 mt-2">
-                      {customer.services.map((item, sIdx) => {
-                        const matchedSrv = services.find(s => s.id === item.serviceId || s.name === item.serviceId);
-                        const govPrice = matchedSrv ? matchedSrv.govPrice : 0;
-                        const officeFee = matchedSrv ? matchedSrv.officeFee : 0;
-                        const singleGovTotal = govPrice * item.quantity;
-                        const singleOfficeTotal = officeFee * item.quantity;
+                    {(() => {
+                      const customHolidays = settings.customHolidays || [];
+                      const includeSaturday = settings.includeSaturdayAsWeekend !== false;
+                      const seqCustomerServices = recalculateCustomerServicesDeliveryDates(
+                        customer.services,
+                        invoice.date || new Date(),
+                        services,
+                        customHolidays,
+                        includeSaturday
+                      );
 
-                        // Calculate delivery date if not explicitly set
-                        let srvDeliveryDate = item.deliveryDate && item.deliveryDate.trim() ? item.deliveryDate.trim() : "";
-                        if (!srvDeliveryDate && matchedSrv && typeof matchedSrv.deliveryDaysOffset === "number" && invoice.date) {
-                          const customHolidays = settings.customHolidays || [];
-                          const calcResult = calculateWorkingDaysDeliveryDate(
-                            invoice.date, 
-                            matchedSrv.deliveryDaysOffset || 0, 
-                            customHolidays, 
-                            matchedSrv.name,
-                            settings.includeSaturdayAsWeekend !== false
-                          );
-                          srvDeliveryDate = calcResult.deliveryDate;
-                        }
-                        const srvDayName = srvDeliveryDate ? getArabicDayName(srvDeliveryDate) : "";
+                      return (
+                        <div className="space-y-3 mt-2">
+                          {seqCustomerServices.map((item, sIdx) => {
+                            const matchedSrv = services.find(s => s.id === item.serviceId || s.name === item.serviceId);
+                            const govPrice = matchedSrv ? matchedSrv.govPrice : 0;
+                            const officeFee = matchedSrv ? matchedSrv.officeFee : 0;
+                            const singleGovTotal = govPrice * item.quantity;
+                            const singleOfficeTotal = officeFee * item.quantity;
+                            const srvDeliveryDate = item.deliveryDate && item.deliveryDate.trim() ? item.deliveryDate.trim() : "";
+                            const srvDayName = srvDeliveryDate ? getArabicDayName(srvDeliveryDate) : "";
 
-                        return (
-                          <div key={sIdx} className="space-y-1.5">
-                            {/* Service header with name on right and quantity on left */}
-                            <div className="flex justify-between items-center text-[12px] font-bold text-black px-0.5">
-                              <span className="font-mono text-black font-black text-sm">x{item.quantity}</span>
-                              <span className="text-right text-black font-bold">{matchedSrv?.name || item.serviceId}</span>
-                            </div>
+                            return (
+                              <div key={sIdx} className="space-y-1.5">
+                                {/* Service header with name on right and quantity on left */}
+                                <div className="flex justify-between items-center text-[12px] font-bold text-black px-0.5">
+                                  <span className="font-mono text-black font-black text-sm">x{item.quantity}</span>
+                                  <span className="text-right text-black font-bold">{matchedSrv?.name || item.serviceId}</span>
+                                </div>
 
-                            {/* Detailed financial breakdown table */}
-                            <div className="border-2 border-black rounded-xs overflow-hidden bg-white">
-                              <table className="w-full text-center text-[11px] border-collapse text-black">
-                                <thead>
-                                  <tr className="bg-white text-black font-bold border-b-2 border-black">
-                                    <th className="py-1.5 border-l-2 border-black w-1/3 text-center text-black font-bold">المجموع</th>
-                                    <th className="py-1.5 border-l-2 border-black w-1/3 text-center text-black font-bold">رسوم المكتب</th>
-                                    <th className="py-1.5 w-1/3 text-center text-black font-bold">السعر الحكومي</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  <tr className="text-black font-bold bg-white">
-                                    <td className="py-1.5 border-l-2 border-black font-mono font-bold text-center text-black">
-                                      {item.price.toFixed(2)} <span className="text-[9px] text-black font-cairo">ج.م</span>
-                                    </td>
-                                    <td className="py-1.5 border-l-2 border-black font-mono font-bold text-center text-black">
-                                      {singleOfficeTotal.toFixed(2)} <span className="text-[9px] text-black font-cairo">ج.م</span>
-                                    </td>
-                                    <td className="py-1.5 font-mono font-bold text-center text-black">
-                                      {singleGovTotal.toFixed(2)} <span className="text-[9px] text-black font-cairo">ج.م</span>
-                                    </td>
-                                  </tr>
-                                </tbody>
-                              </table>
-                              
-                              {/* Expected delivery date bar - prominent */}
-                              <div className="border-t-2 border-black px-2 py-1.5 text-center text-[11px] text-black font-bold bg-white flex items-center justify-between">
-                                <span>موعد تسليم الخدمة:</span>
-                                <span className="font-mono font-black text-xs text-black border border-black px-1.5 py-0.5 rounded-xs">
-                                  {srvDeliveryDate ? `${srvDayName ? srvDayName + " " : ""}${srvDeliveryDate}` : (matchedSrv?.duration ? matchedSrv.duration : "حسب جهة الإصدار")}
-                                </span>
+                                {/* Detailed financial breakdown table */}
+                                <div className="border-2 border-black rounded-xs overflow-hidden bg-white">
+                                  <table className="w-full text-center text-[11px] border-collapse text-black">
+                                    <thead>
+                                      <tr className="bg-white text-black font-bold border-b-2 border-black">
+                                        <th className="py-1.5 border-l-2 border-black w-1/3 text-center text-black font-bold">المجموع</th>
+                                        <th className="py-1.5 border-l-2 border-black w-1/3 text-center text-black font-bold">رسوم المكتب</th>
+                                        <th className="py-1.5 w-1/3 text-center text-black font-bold">السعر الحكومي</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      <tr className="text-black font-bold bg-white">
+                                        <td className="py-1.5 border-l-2 border-black font-mono font-bold text-center text-black">
+                                          {item.price.toFixed(2)} <span className="text-[9px] text-black font-cairo">ج.م</span>
+                                        </td>
+                                        <td className="py-1.5 border-l-2 border-black font-mono font-bold text-center text-black">
+                                          {singleOfficeTotal.toFixed(2)} <span className="text-[9px] text-black font-cairo">ج.م</span>
+                                        </td>
+                                        <td className="py-1.5 font-mono font-bold text-center text-black">
+                                          {singleGovTotal.toFixed(2)} <span className="text-[9px] text-black font-cairo">ج.م</span>
+                                        </td>
+                                      </tr>
+                                    </tbody>
+                                  </table>
+                                  
+                                  {/* Expected delivery date bar - prominent */}
+                                  <div className="border-t-2 border-black px-2 py-1.5 text-center text-[11px] text-black font-bold bg-white flex items-center justify-between">
+                                    <span>
+                                      {customer.services.length > 1 && sIdx > 0 ? "موعد الاستلام (يبدأ بعد السابقة):" : "موعد تسليم الخدمة:"}
+                                    </span>
+                                    <span className="font-mono font-black text-xs text-black border border-black px-1.5 py-0.5 rounded-xs">
+                                      {srvDeliveryDate ? `${srvDayName ? srvDayName + " " : ""}${srvDeliveryDate}` : (matchedSrv?.duration ? matchedSrv.duration : "حسب جهة الإصدار")}
+                                    </span>
+                                  </div>
+                                </div>
                               </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
                   </div>
                 );
               })}

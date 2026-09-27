@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Service, CustomerInput, Invoice, InvoiceStatus, AppSettings, Employee, DictionaryItem } from "../types";
 import { createInvoiceOnServer, saveDictionaryWord } from "../lib/api";
-import { calculateWorkingDaysDeliveryDate, getArabicDayName, isNonWorkingDay } from "../lib/businessDays";
+import { calculateWorkingDaysDeliveryDate, getArabicDayName, isNonWorkingDay, recalculateCustomerServicesDeliveryDates } from "../lib/businessDays";
 import { generateWhatsAppWelcomeMessage, getWhatsAppUrl } from "../lib/whatsapp";
 import { breakdownArabicName, extractAtomicWordTokens, normalizeArabic } from "../lib/dictionary";
-import { Plus, Trash2, FileText, UserPlus, Sparkles, Printer, Send, Check, AlertCircle, Info, Calendar, BookOpen, ShieldAlert } from "lucide-react";
+import { Plus, Trash2, FileText, UserPlus, Sparkles, Printer, Send, Check, AlertCircle, Info, Calendar, BookOpen, ShieldAlert, CalendarCheck } from "lucide-react";
 import ThermalReceipt from "./ThermalReceipt";
 
 interface InvoiceCreatorProps {
@@ -103,23 +103,21 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
     const matched = services.find(s => s.id === val || s.name === val);
     if (matched) {
       item.price = (matched.govPrice + matched.officeFee) * item.quantity;
-      
-      // Calculate delivery date automatically based on official working days:
-      // Services starting with '#' consider Saturday a working day; other services consider Saturday a holiday.
-      const offset = matched.deliveryDaysOffset || 0;
-      const customHolidays = settings.customHolidays || [];
-      const calcResult = calculateWorkingDaysDeliveryDate(
-        new Date(),
-        offset,
-        customHolidays,
-        matched.name,
-        settings.includeSaturdayAsWeekend !== false
-      );
-      item.deliveryDate = calcResult.deliveryDate;
     } else {
       item.price = 0;
       item.deliveryDate = "";
     }
+
+    // Recalculate sequential delivery dates for all services of this customer:
+    // If multiple services are selected, service 2 starts after service 1 finishes, service 3 after service 2, etc.
+    const customHolidays = settings.customHolidays || [];
+    updated[cIdx].services = recalculateCustomerServicesDeliveryDates(
+      updated[cIdx].services,
+      new Date(),
+      services,
+      customHolidays,
+      settings.includeSaturdayAsWeekend !== false
+    );
 
     setCustomers(updated);
   };
@@ -133,6 +131,17 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
     if (matched) {
       item.price = (matched.govPrice + matched.officeFee) * item.quantity;
     }
+
+    // Recalculate sequential delivery dates for all services of this customer
+    const customHolidays = settings.customHolidays || [];
+    updated[cIdx].services = recalculateCustomerServicesDeliveryDates(
+      updated[cIdx].services,
+      new Date(),
+      services,
+      customHolidays,
+      settings.includeSaturdayAsWeekend !== false
+    );
+
     setCustomers(updated);
   };
 
@@ -248,6 +257,17 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
     if (!confirmed) return;
 
     updated[cIdx].services = updated[cIdx].services.filter((_, idx) => idx !== sIdx);
+    
+    // Recalculate remaining services sequentially
+    const customHolidays = settings.customHolidays || [];
+    updated[cIdx].services = recalculateCustomerServicesDeliveryDates(
+      updated[cIdx].services,
+      new Date(),
+      services,
+      customHolidays,
+      settings.includeSaturdayAsWeekend !== false
+    );
+
     setCustomers(updated);
   };
 
@@ -356,8 +376,19 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
       const formattedCustomers = customers.map(cust => {
         const isPass = isPassportRelated(cust);
         
+        // Recalculate sequential delivery dates right here to guarantee exact accuracy:
+        // Service 2 starts after Service 1 completes, Service 3 after Service 2, etc.
+        const customHolidays = settings.customHolidays || [];
+        const seqServices = recalculateCustomerServicesDeliveryDates(
+          cust.services,
+          new Date(),
+          services,
+          customHolidays,
+          settings.includeSaturdayAsWeekend !== false
+        );
+
         // Prepare services with resolved names
-        const formattedServices = cust.services.map(s => {
+        const formattedServices = seqServices.map(s => {
           const matched = services.find(srv => srv.id === s.serviceId || srv.name === s.serviceId);
           const serviceName = matched ? matched.name : s.serviceId;
           
@@ -984,11 +1015,16 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
                               <div>
                                 <span className="font-bold text-slate-800">مدة تنفيذ الخدمة:</span> {selectedServiceObj.duration}
                               </div>
-                              <div className="text-amber-700 flex items-center gap-1 font-bold">
+                              <div className="text-amber-700 flex flex-wrap items-center gap-1 font-bold">
                                 <Calendar className="w-3.5 h-3.5" />
                                 <span>
-                                  موعد الاستلام التلقائي المحسوب: {srv.deliveryDate ? `${getArabicDayName(srv.deliveryDate) ? getArabicDayName(srv.deliveryDate) + " " : ""}${srv.deliveryDate} (أيام عمل ${selectedServiceObj.name.trim().startsWith("#") ? "• السبت عمل" : "• السبت عطلة"})` : "غير محدد"}
+                                  موعد الاستلام: {srv.deliveryDate ? `${getArabicDayName(srv.deliveryDate) ? getArabicDayName(srv.deliveryDate) + " " : ""}${srv.deliveryDate} (أيام عمل ${selectedServiceObj.name.trim().startsWith("#") ? "• السبت عمل" : "• السبت عطلة"})` : "غير محدد"}
                                 </span>
+                                {sIdx > 0 && customer.services[sIdx - 1]?.deliveryDate && (
+                                  <span className="text-[10px] text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded-sm border border-blue-200 mr-1">
+                                    يبدأ احتسابها بعد انتهاء الخدمة السابقة ({customer.services[sIdx - 1].deliveryDate})
+                                  </span>
+                                )}
                               </div>
                             </div>
                             <div>
@@ -1005,6 +1041,25 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
                       </div>
                     );
                   })}
+
+                  {/* Cumulative Delivery Date Summary for Multiple Services */}
+                  {customer.services.length > 1 && (() => {
+                    const validDates = customer.services.map(s => s.deliveryDate).filter(Boolean);
+                    const finalDelivery = validDates.length > 0 ? validDates[validDates.length - 1] : "";
+                    const finalDayName = finalDelivery ? getArabicDayName(finalDelivery) : "";
+                    return finalDelivery ? (
+                      <div className="bg-emerald-50/90 border border-emerald-300 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2 text-xs font-cairo">
+                        <div className="flex items-center gap-2 text-emerald-950 font-bold">
+                          <CalendarCheck className="w-4.5 h-4.5 text-emerald-600" />
+                          <span>الميعاد النهائي الفعلي لتسليم كافة خدمات ({customer.arabicName?.trim() || `العميل ${cIdx + 1}`}):</span>
+                        </div>
+                        <div className="font-mono font-black text-emerald-900 bg-white px-3 py-1 rounded-lg border border-emerald-300 shadow-2xs text-xs flex items-center gap-1.5">
+                          <span>{finalDayName ? `${finalDayName} ` : ""}{finalDelivery}</span>
+                          <span className="text-[10px] text-emerald-600 font-normal font-cairo">(تراكمي متتابع)</span>
+                        </div>
+                      </div>
+                    ) : null;
+                  })()}
                 </div>
 
               </div>

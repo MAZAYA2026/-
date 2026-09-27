@@ -37,9 +37,21 @@ import {
   X,
   Calendar,
   CalendarCheck,
-  Database
+  Database,
+  RotateCcw,
+  ArrowRightLeft,
+  Clock,
+  Info
 } from "lucide-react";
-import { DEFAULT_OFFICIAL_HOLIDAYS, HolidayItem } from "../lib/businessDays";
+import { 
+  DEFAULT_OFFICIAL_HOLIDAYS, 
+  HolidayItem, 
+  getArabicDayName, 
+  shiftDateToThursday,
+  shiftDateToSunday,
+  shiftHolidayToDate,
+  revertHolidayShift
+} from "../lib/businessDays";
 
 interface SettingsConfigProps {
   settings: AppSettings;
@@ -74,9 +86,58 @@ export default function SettingsConfig({
 
   // Business days & Holidays config
   const [includeSaturdayAsWeekend, setIncludeSaturdayAsWeekend] = useState(settings.includeSaturdayAsWeekend !== false);
-  const [customHolidays, setCustomHolidays] = useState<HolidayItem[]>(settings.customHolidays || []);
+  const [customHolidays, setCustomHolidays] = useState<HolidayItem[]>(() => {
+    if (settings.customHolidays && settings.customHolidays.length > 0) {
+      return settings.customHolidays;
+    }
+    return DEFAULT_OFFICIAL_HOLIDAYS;
+  });
   const [newHolidayDate, setNewHolidayDate] = useState("");
   const [newHolidayName, setNewHolidayName] = useState("");
+  const [holidayYearFilter, setHolidayYearFilter] = useState("2026");
+  const [holidaySearch, setHolidaySearch] = useState("");
+  const [editingHolidayIdx, setEditingHolidayIdx] = useState<number | null>(null);
+  const [editHolidayDate, setEditHolidayDate] = useState("");
+  const [editHolidayName, setEditHolidayName] = useState("");
+  const [customShiftIdx, setCustomShiftIdx] = useState<number | null>(null);
+  const [customShiftDate, setCustomShiftDate] = useState("");
+  const [customShiftReason, setCustomShiftReason] = useState("");
+  const [holidaySaveLoading, setHolidaySaveLoading] = useState(false);
+  const [holidayFeedback, setHolidayFeedback] = useState("");
+
+  const handleSaveHolidaysDirectly = async (holidaysToSave: HolidayItem[] = customHolidays) => {
+    setHolidaySaveLoading(true);
+    setHolidayFeedback("");
+    try {
+      const payload: AppSettings = {
+        ...settings,
+        headerText: headerText.trim(),
+        subHeaderText: subHeaderText.trim(),
+        contactPhone: contactPhone.trim(),
+        welcomeMessage: welcomeMessage.trim(),
+        whatsappTemplate: whatsappTemplate.trim(),
+        readyMessage: readyMessage.trim(),
+        deliveryMessage: deliveryMessage.trim(),
+        googleSheetUrl: googleSheetUrl.trim(),
+        googleSheetWebhookUrl: googleSheetWebhookUrl.trim(),
+        footerText: footerText.trim(),
+        autoSyncWebhook: false,
+        googleSheetsConnected: !!(googleSheetWebhookUrl.trim() || googleSheetUrl.trim() || settings.googleSheetsConnected),
+        includeSaturdayAsWeekend: includeSaturdayAsWeekend,
+        customHolidays: holidaysToSave
+      };
+
+      const result = await updateSettingsOnServer(payload);
+      onSettingsUpdated(result);
+      setHolidayFeedback("تم حفظ وتثبيت قائمة العطلات الرسمية وترحيلاتها بالخادم وقاعدة البيانات بنجاح! 💾✅");
+      setTimeout(() => setHolidayFeedback(""), 4500);
+    } catch (err) {
+      console.error(err);
+      alert("حدث خطأ أثناء حفظ وتثبيت العطلات بالخادم.");
+    } finally {
+      setHolidaySaveLoading(false);
+    }
+  };
 
   const [saving, setSaving] = useState(false);
   const [showScriptGuide, setShowScriptGuide] = useState(false);
@@ -1564,30 +1625,67 @@ function formatHeader(sheet, numCols) {
           </div>
         </div>
 
-        {/* Card 6: Official Egyptian Holidays & Business Working Days Settings */}
+        {/* Card 6: Official Egyptian Holidays & Business Working Days Settings with Prime Minister Decree Shifting */}
         <div className="bg-white border border-slate-200 rounded-2xl shadow-xs overflow-hidden">
           <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <CalendarCheck className="w-5 h-5 text-indigo-600" />
               <div>
-                <h3 className="font-bold text-sm text-slate-800 font-cairo">احتساب أيام العمل والعطلات الرسمية لمواعيد الاستلام</h3>
-                <p className="text-[11px] text-slate-500 font-cairo">تجاوز أيام الجمعة والسبت والعطلات الحكومية والرسمية للدولة تلقائياً عند تحديد موعد تسليم المعاملات</p>
+                <h3 className="font-bold text-sm text-slate-800 font-cairo">إدارة وترحيل وتعديل العطلات الرسمية وأيام العمل</h3>
+                <p className="text-[11px] text-slate-500 font-cairo">
+                  إمكانية ترحيل العطلات للخميس أو الأحد أو أي يوم محدد بقرارات رئيس مجلس الوزراء، وتعديل التواريخ والمسميات فورياً
+                </p>
               </div>
             </div>
-            <span className="px-3 py-1.5 bg-indigo-50 text-indigo-700 font-bold rounded-lg text-xs font-mono border border-indigo-200/60">
-              {DEFAULT_OFFICIAL_HOLIDAYS.length + customHolidays.length} عطلة معتمدة
-            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => handleSaveHolidaysDirectly(customHolidays)}
+                disabled={holidaySaveLoading}
+                className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs font-cairo disabled:opacity-50"
+                title="تثبيت وحفظ جدول العطلات فوراً بالخادم وقاعدة البيانات"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>{holidaySaveLoading ? "جاري الحفظ..." : "تثبيت وحفظ العطلات الرسمية 💾"}</span>
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  const confirmed = window.confirm("هل تريد استعادة قائمة العطلات الرسمية الافتراضية المعتمدة لجمهورية مصر العربية (2025 - 2027)؟");
+                  if (confirmed) {
+                    setCustomHolidays(DEFAULT_OFFICIAL_HOLIDAYS);
+                    await handleSaveHolidaysDirectly(DEFAULT_OFFICIAL_HOLIDAYS);
+                  }
+                }}
+                className="px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 text-xs font-bold rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs font-cairo"
+                title="استعادة القائمة الرسمية لجميع العطلات"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+                <span>استعادة الافتراضية 🔄</span>
+              </button>
+              <span className="px-3 py-1.5 bg-indigo-50 text-indigo-700 font-bold rounded-lg text-xs font-mono border border-indigo-200/60">
+                {customHolidays.length} عطلة مسجلة
+              </span>
+            </div>
           </div>
+
+          {/* Feedback banner */}
+          {holidayFeedback && (
+            <div className="mx-6 mt-4 p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-bold font-cairo flex items-center gap-2">
+              <CheckCircle className="w-4 h-4 text-emerald-600" />
+              <span>{holidayFeedback}</span>
+            </div>
+          )}
 
           <div className="p-6 space-y-6">
             {/* Weekend Configuration */}
             <div className="bg-indigo-50/50 border border-indigo-100 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <h4 className="font-bold text-xs text-indigo-950 flex items-center gap-1.5">
+                <h4 className="font-bold text-xs text-indigo-950 flex items-center gap-1.5 font-cairo">
                   <Calendar className="w-4 h-4 text-indigo-600" />
                   قاعدة احتساب يوم السبت كعطلة أو يوم عمل
                 </h4>
-                <p className="text-[11px] text-indigo-700/80 mt-1">
+                <p className="text-[11px] text-indigo-700/80 mt-1 font-cairo">
                   • <strong>الخدمات التي تبدأ بـ (#)</strong>: يُحتسب يوم السبت <strong>يوم عمل رسمي</strong> دائماً (لا يُعتبر عطلة).<br />
                   • <strong>باقي الخدمات</strong>: يُعتبر يوم السبت <strong>عطلة رسمية</strong> بالإضافة ليوم الجمعة والعطلات الرسمية للدولة.
                 </p>
@@ -1599,110 +1697,468 @@ function formatHeader(sheet, numCols) {
                   onChange={(e) => setIncludeSaturdayAsWeekend(e.target.checked)}
                   className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4"
                 />
-                <span className="text-xs font-bold text-slate-800">تجاوز السبت لباقي الخدمات (عطلة)</span>
+                <span className="text-xs font-bold text-slate-800 font-cairo">تجاوز السبت لباقي الخدمات (عطلة)</span>
               </label>
             </div>
 
-            {/* Add Custom Holiday */}
-            <div className="space-y-3">
-              <h4 className="font-bold text-xs text-slate-800 flex items-center gap-1.5">
+            {/* Quick Add Custom or Decree Holiday */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+              <h4 className="font-bold text-xs text-slate-800 flex items-center gap-1.5 font-cairo">
                 <Plus className="w-4 h-4 text-indigo-600" />
-                إضافة عطلة استثنائية أو قرار حكومي جديد بإجازة:
+                إضافة عطلة استثنائية أو قرار إجازة جديد:
               </h4>
               <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
                 <div className="sm:col-span-4 space-y-1">
-                  <label className="text-[11px] font-bold text-slate-600">تاريخ العطلة (يوم-شهر-سنة):</label>
+                  <label className="text-[11px] font-bold text-slate-600 font-cairo">تاريخ العطلة:</label>
                   <input
                     type="date"
                     value={newHolidayDate}
                     onChange={(e) => setNewHolidayDate(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono"
+                    className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono"
                   />
                 </div>
                 <div className="sm:col-span-6 space-y-1">
-                  <label className="text-[11px] font-bold text-slate-600">اسم العطلة أو سبب الإغلاق الحكومي:</label>
+                  <label className="text-[11px] font-bold text-slate-600 font-cairo">اسم العطلة أو سبب الإغلاق الحكومي:</label>
                   <input
                     type="text"
                     value={newHolidayName}
                     onChange={(e) => setNewHolidayName(e.target.value)}
-                    placeholder="مثال: إجازة طارئة بقرار رئيس الوزراء..."
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs"
+                    placeholder="مثال: إجازة طارئة بقرار رئيس مجلس الوزراء..."
+                    className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-cairo"
                   />
                 </div>
                 <div className="sm:col-span-2">
                   <button
                     type="button"
-                    onClick={() => {
+                    onClick={async () => {
                       if (!newHolidayDate || !newHolidayName.trim()) {
                         alert("يرجى تحديد التاريخ واسم العطلة أولاً.");
                         return;
                       }
                       if (customHolidays.some(h => h.date === newHolidayDate)) {
-                        alert("هذا التاريخ مضاف بالفعل كعطلة.");
+                        alert("هذا التاريخ مسجل بالفعل كعطلة رسمية.");
                         return;
                       }
-                      setCustomHolidays([...customHolidays, { date: newHolidayDate, name: newHolidayName.trim() }]);
+                      const updated = [...customHolidays, { date: newHolidayDate, name: newHolidayName.trim() }];
+                      updated.sort((a, b) => a.date.localeCompare(b.date));
+                      setCustomHolidays(updated);
                       setNewHolidayDate("");
                       setNewHolidayName("");
+                      await handleSaveHolidaysDirectly(updated);
                     }}
-                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-3 rounded-lg text-xs flex items-center justify-center gap-1 transition-colors shadow-xs cursor-pointer"
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-3 rounded-lg text-xs flex items-center justify-center gap-1 transition-colors shadow-xs cursor-pointer font-cairo"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    <span>إضافة العطلة</span>
+                    <span>إضافة وتثبيت</span>
                   </button>
                 </div>
               </div>
             </div>
 
-            {/* Custom Holidays Table */}
-            {customHolidays.length > 0 && (
-              <div className="space-y-2">
-                <h5 className="font-bold text-xs text-slate-700">العطلات الإضافية المخصصة المسجلة:</h5>
-                <div className="border border-slate-200 rounded-xl overflow-hidden">
-                  <table className="w-full text-right text-xs">
-                    <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
-                      <tr>
-                        <th className="px-4 py-2">التاريخ</th>
-                        <th className="px-4 py-2">المناسبة</th>
-                        <th className="px-4 py-2 text-center w-20">حذف</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 bg-white">
-                      {customHolidays.map((item, idx) => (
-                        <tr key={idx} className="hover:bg-slate-50">
-                          <td className="px-4 py-2 font-mono font-bold text-slate-900">{item.date}</td>
-                          <td className="px-4 py-2 font-bold text-indigo-900">{item.name}</td>
-                          <td className="px-4 py-2 text-center">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setCustomHolidays(customHolidays.filter((_, i) => i !== idx));
-                              }}
-                              className="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+            {/* Filter and Search Bar for Holidays */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
+              <div className="flex items-center gap-1.5 w-full sm:w-auto">
+                <span className="text-xs font-bold text-slate-600 font-cairo ml-1">تصفية بالسنة:</span>
+                {["2026", "2025", "2027", "ALL"].map((yr) => (
+                  <button
+                    key={yr}
+                    type="button"
+                    onClick={() => setHolidayYearFilter(yr)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold font-mono transition-colors cursor-pointer ${
+                      holidayYearFilter === yr 
+                        ? "bg-indigo-600 text-white shadow-xs" 
+                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    }`}
+                  >
+                    {yr === "ALL" ? "الكل" : yr}
+                  </button>
+                ))}
+              </div>
+
+              <div className="relative w-full sm:w-64">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-2.5" />
+                <input
+                  type="text"
+                  value={holidaySearch}
+                  onChange={(e) => setHolidaySearch(e.target.value)}
+                  placeholder="بحث في اسم العطلة..."
+                  className="w-full pr-8 pl-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-hidden focus:bg-white font-cairo"
+                />
+              </div>
+            </div>
+
+            {/* Modal for Custom Shifting to Any Specific Date */}
+            {customShiftIdx !== null && customHolidays[customShiftIdx] && (
+              <div className="p-4 bg-amber-50/80 border-2 border-amber-300 rounded-xl space-y-3">
+                <div className="flex justify-between items-center">
+                  <h4 className="font-bold text-xs text-amber-950 flex items-center gap-1.5 font-cairo">
+                    <Calendar className="w-4 h-4 text-amber-600" />
+                    <span>ترحيل عطلة "{customHolidays[customShiftIdx].name}" إلى يوم آخر محدد:</span>
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={() => setCustomShiftIdx(null)}
+                    className="text-slate-400 hover:text-slate-600 p-1"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+                  <div className="sm:col-span-4 space-y-1">
+                    <label className="text-[11px] font-bold text-slate-700 font-cairo">التاريخ البديل الجديد:</label>
+                    <input
+                      type="date"
+                      value={customShiftDate}
+                      onChange={(e) => setCustomShiftDate(e.target.value)}
+                      className="w-full bg-white border border-amber-300 rounded-lg px-3 py-2 text-xs font-mono font-bold"
+                    />
+                    <span className="text-[10px] text-amber-800 font-bold block">
+                      يوافق يوم: {getArabicDayName(customShiftDate) || "غير محدد"}
+                    </span>
+                  </div>
+                  <div className="sm:col-span-5 space-y-1">
+                    <label className="text-[11px] font-bold text-slate-700 font-cairo">السبب أو بيان القرار الحكومي:</label>
+                    <input
+                      type="text"
+                      value={customShiftReason}
+                      onChange={(e) => setCustomShiftReason(e.target.value)}
+                      placeholder="مثال: بقرار رئيس مجلس الوزراء..."
+                      className="w-full bg-white border border-amber-300 rounded-lg px-3 py-2 text-xs font-cairo"
+                    />
+                  </div>
+                  <div className="sm:col-span-3 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!customShiftDate) {
+                          alert("يرجى تحديد التاريخ البديل.");
+                          return;
+                        }
+                        const target = customHolidays[customShiftIdx];
+                        const updated = [...customHolidays];
+                        updated[customShiftIdx] = shiftHolidayToDate(
+                          target, 
+                          customShiftDate, 
+                          customShiftReason.trim() ? `مرحّلة لـ ${getArabicDayName(customShiftDate)} ${customShiftReason.trim()}` : undefined
+                        );
+                        updated.sort((a, b) => a.date.localeCompare(b.date));
+                        setCustomHolidays(updated);
+                        setCustomShiftIdx(null);
+                        await handleSaveHolidaysDirectly(updated);
+                      }}
+                      className="flex-1 bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-3 rounded-lg text-xs transition-colors shadow-xs cursor-pointer font-cairo"
+                    >
+                      تأكيد الترحيل والحفظ 💾
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCustomShiftIdx(null)}
+                      className="px-3 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-bold font-cairo cursor-pointer"
+                    >
+                      إلغاء
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
 
-            {/* Built-in National Holidays Reference Collapsible */}
-            <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/50 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-xs text-slate-800 flex items-center gap-1.5">
-                  <CheckCircle className="w-4 h-4 text-emerald-600" />
-                  قائمة العطلات الرسمية المدمجة لجمهورية مصر العربية (2025 - 2027)
-                </span>
-                <span className="text-[11px] text-slate-500 font-mono">مفعلة تلقائياً ({DEFAULT_OFFICIAL_HOLIDAYS.length} مناسبة)</span>
+            {/* Comprehensive Holidays Table with Shifting to Thursday, Sunday, Custom Date, and Editing */}
+            <div className="space-y-2">
+              <div className="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
+                <table className="w-full text-right text-xs">
+                  <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200 font-cairo">
+                    <tr>
+                      <th className="px-3.5 py-2.5 w-44">التاريخ واليوم</th>
+                      <th className="px-3.5 py-2.5">المناسبة الرسمية</th>
+                      <th className="px-3.5 py-2.5 text-center w-64">ترحيل العطلة (قرار رئيس الوزراء) 🏛️</th>
+                      <th className="px-3.5 py-2.5 text-center w-20">تعديل</th>
+                      <th className="px-3.5 py-2.5 text-center w-16">حذف</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white font-cairo">
+                    {(() => {
+                      const filtered = customHolidays
+                        .map((h, idx) => ({ ...h, originalIndex: idx }))
+                        .filter((h) => {
+                          if (holidayYearFilter !== "ALL" && !h.date.startsWith(holidayYearFilter)) {
+                            return false;
+                          }
+                          if (holidaySearch.trim() && !h.name.includes(holidaySearch.trim())) {
+                            return false;
+                          }
+                          return true;
+                        });
+
+                      if (filtered.length === 0) {
+                        return (
+                          <tr>
+                            <td colSpan={5} className="py-8 text-center text-slate-400 text-xs">
+                              لا توجد عطلات تطابق خيارات التصفية الحالية.
+                            </td>
+                          </tr>
+                        );
+                      }
+
+                      return filtered.map((item) => {
+                        const dayName = getArabicDayName(item.date);
+                        const isThursday = dayName === "الخميس";
+                        const isSunday = dayName === "الأحد";
+                        const isWeekend = dayName === "الجمعة" || dayName === "السبت";
+                        const isEditing = editingHolidayIdx === item.originalIndex;
+
+                        if (isEditing) {
+                          return (
+                            <tr key={item.originalIndex} className="bg-amber-50/50">
+                              <td className="px-3.5 py-2">
+                                <input
+                                  type="date"
+                                  value={editHolidayDate}
+                                  onChange={(e) => setEditHolidayDate(e.target.value)}
+                                  className="w-full bg-white border border-amber-300 rounded px-2 py-1 text-xs font-mono font-bold"
+                                />
+                                <span className="text-[10px] text-amber-700 font-bold block mt-1">
+                                  {getArabicDayName(editHolidayDate)}
+                                </span>
+                              </td>
+                              <td className="px-3.5 py-2">
+                                <input
+                                  type="text"
+                                  value={editHolidayName}
+                                  onChange={(e) => setEditHolidayName(e.target.value)}
+                                  className="w-full bg-white border border-amber-300 rounded px-2 py-1 text-xs font-bold"
+                                />
+                              </td>
+                              <td colSpan={3} className="px-3.5 py-2 text-center">
+                                <div className="flex items-center justify-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      if (!editHolidayDate || !editHolidayName.trim()) {
+                                        alert("يرجى ملء التاريخ والاسم.");
+                                        return;
+                                      }
+                                      const updated = [...customHolidays];
+                                      updated[item.originalIndex] = {
+                                        ...updated[item.originalIndex],
+                                        date: editHolidayDate,
+                                        name: editHolidayName.trim()
+                                      };
+                                      updated.sort((a, b) => a.date.localeCompare(b.date));
+                                      setCustomHolidays(updated);
+                                      setEditingHolidayIdx(null);
+                                      await handleSaveHolidaysDirectly(updated);
+                                    }}
+                                    className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold flex items-center gap-1 shadow-2xs cursor-pointer"
+                                  >
+                                    <Check className="w-3.5 h-3.5" />
+                                    <span>حفظ التعديل 💾</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingHolidayIdx(null)}
+                                    className="px-2.5 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded text-xs font-bold cursor-pointer"
+                                  >
+                                    إلغاء
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        }
+
+                        return (
+                          <tr key={item.originalIndex} className="hover:bg-slate-50 transition-colors">
+                            {/* Date & Day Name */}
+                            <td className="px-3.5 py-2.5">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-mono font-bold text-slate-900">{item.date}</span>
+                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                  isThursday 
+                                    ? "bg-purple-50 text-purple-700 border border-purple-200" 
+                                    : isSunday
+                                    ? "bg-indigo-50 text-indigo-700 border border-indigo-200"
+                                    : isWeekend 
+                                    ? "bg-rose-50 text-rose-700 border border-rose-200"
+                                    : "bg-blue-50 text-blue-700 border border-blue-200"
+                                }`}>
+                                  {dayName}
+                                </span>
+                              </div>
+                              {item.originalDate && item.originalDate !== item.date && (
+                                <span className="text-[10px] text-slate-400 block font-mono mt-0.5">
+                                  مرحّلة من: {item.originalDate} ({getArabicDayName(item.originalDate)})
+                                </span>
+                              )}
+                            </td>
+
+                            {/* Holiday Name */}
+                            <td className="px-3.5 py-2.5">
+                              <span className="font-bold text-slate-800">{item.name}</span>
+                              {item.shifted && (
+                                <span className="mr-1.5 px-1.5 py-0.5 bg-amber-100 text-amber-800 text-[10px] font-bold rounded-sm border border-amber-200">
+                                  مرحّلة بقرار حكومي
+                                </span>
+                              )}
+                            </td>
+
+                            {/* Shifting Actions: Thursday, Sunday, Other Day, Revert */}
+                            <td className="px-3.5 py-2.5 text-center">
+                              <div className="flex flex-wrap items-center justify-center gap-1.5">
+                                {/* Shift to Thursday */}
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    const thursdayDate = shiftDateToThursday(item.date);
+                                    if (thursdayDate === item.date) {
+                                      alert("تاريخ هذه العطلة يوافق يوم الخميس بالفعل.");
+                                      return;
+                                    }
+                                    const confirmShift = window.confirm(
+                                      `هل تريد ترحيل عطلة "${item.name}" من يوم (${dayName} ${item.date}) إلى يوم (الخميس ${thursdayDate}) طبقاً لقرار مجلس الوزراء؟`
+                                    );
+                                    if (!confirmShift) return;
+
+                                    const updated = [...customHolidays];
+                                    updated[item.originalIndex] = shiftHolidayToDate(item, thursdayDate, "مرحّلة للخميس بقرار مجلس الوزراء");
+                                    updated.sort((a, b) => a.date.localeCompare(b.date));
+                                    setCustomHolidays(updated);
+                                    await handleSaveHolidaysDirectly(updated);
+                                  }}
+                                  disabled={isThursday}
+                                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold transition-all shadow-2xs cursor-pointer ${
+                                    isThursday 
+                                      ? "bg-purple-50 text-purple-600 border border-purple-200 opacity-60 cursor-not-allowed" 
+                                      : "bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200"
+                                  }`}
+                                  title="ترحيل الإجازة إلى يوم الخميس التالي بقرار مجلس الوزراء"
+                                >
+                                  <ArrowRightLeft className="w-3 h-3 text-amber-600" />
+                                  <span>للخميس 🗓️</span>
+                                </button>
+
+                                {/* Shift to Sunday */}
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    const sundayDate = shiftDateToSunday(item.date);
+                                    if (sundayDate === item.date) {
+                                      alert("تاريخ هذه العطلة يوافق يوم الأحد بالفعل.");
+                                      return;
+                                    }
+                                    const confirmShift = window.confirm(
+                                      `هل تريد ترحيل عطلة "${item.name}" من يوم (${dayName} ${item.date}) إلى يوم (الأحد ${sundayDate}) طبقاً لقرار مجلس الوزراء؟`
+                                    );
+                                    if (!confirmShift) return;
+
+                                    const updated = [...customHolidays];
+                                    updated[item.originalIndex] = shiftHolidayToDate(item, sundayDate, "مرحّلة للأحد بقرار مجلس الوزراء");
+                                    updated.sort((a, b) => a.date.localeCompare(b.date));
+                                    setCustomHolidays(updated);
+                                    await handleSaveHolidaysDirectly(updated);
+                                  }}
+                                  disabled={isSunday}
+                                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold transition-all shadow-2xs cursor-pointer ${
+                                    isSunday 
+                                      ? "bg-indigo-50 text-indigo-600 border border-indigo-200 opacity-60 cursor-not-allowed" 
+                                      : "bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-200"
+                                  }`}
+                                  title="ترحيل الإجازة إلى يوم الأحد بقرار مجلس الوزراء"
+                                >
+                                  <ArrowRightLeft className="w-3 h-3 text-indigo-600" />
+                                  <span>للأحد 🗓️</span>
+                                </button>
+
+                                {/* Shift to Custom Date / Other Day */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setCustomShiftIdx(item.originalIndex);
+                                    setCustomShiftDate(item.date);
+                                    setCustomShiftReason("بقرار رئيس مجلس الوزراء");
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-lg text-[10px] font-bold transition-all shadow-2xs cursor-pointer"
+                                  title="ترحيل الإجازة إلى أي يوم محدد بقرار مجلس الوزراء"
+                                >
+                                  <Calendar className="w-3 h-3 text-slate-500" />
+                                  <span>ليوم آخر 🏛️</span>
+                                </button>
+
+                                {/* Revert Shift if shifted */}
+                                {item.shifted && (
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      const confirmRevert = window.confirm(`هل تريد إلغاء ترحيل عطلة "${item.name}" واستعادة تاريخها الأصلي (${item.originalDate})؟`);
+                                      if (!confirmRevert) return;
+                                      const updated = [...customHolidays];
+                                      updated[item.originalIndex] = revertHolidayShift(item);
+                                      updated.sort((a, b) => a.date.localeCompare(b.date));
+                                      setCustomHolidays(updated);
+                                      await handleSaveHolidaysDirectly(updated);
+                                    }}
+                                    className="inline-flex items-center gap-1 px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-[10px] font-bold transition-all shadow-2xs cursor-pointer"
+                                    title="إلغاء الترحيل واستعادة التاريخ الأصلي"
+                                  >
+                                    <RotateCcw className="w-3 h-3 text-rose-500" />
+                                    <span>إلغاء الترحيل ↩️</span>
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+
+                            {/* Edit Action */}
+                            <td className="px-3.5 py-2.5 text-center">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingHolidayIdx(item.originalIndex);
+                                  setEditHolidayDate(item.date);
+                                  setEditHolidayName(item.name);
+                                }}
+                                className="p-1 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                                title="تعديل التاريخ أو المسمى يدوياً"
+                              >
+                                <Edit3 className="w-4 h-4" />
+                              </button>
+                            </td>
+
+                            {/* Delete Action */}
+                            <td className="px-3.5 py-2.5 text-center">
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  const confirmDelete = window.confirm(`هل أنت متأكد من حذف عطلة "${item.name}" من قائمة العطلات؟`);
+                                  if (!confirmDelete) return;
+                                  const updated = customHolidays.filter((_, i) => i !== item.originalIndex);
+                                  setCustomHolidays(updated);
+                                  await handleSaveHolidaysDirectly(updated);
+                                }}
+                                className="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                title="حذف العطلة"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      });
+                    })()}
+                  </tbody>
+                </table>
               </div>
-              <p className="text-[11px] text-slate-500 leading-relaxed">
-                تشمل: أعياد الفطر، الأضحى، وقفة عرفات، 6 أكتوبر، 25 يناير، 30 يونيو، 23 يوليو، المولد النبوي الشريف، رأس السنة الهجرية، شم النسيم، عيد العمال، تحرير سيناء، وعيد الميلاد المجيد. النظام يتجاوز هذه الأيام تلقائياً في حساب تاريخ التسليم.
-              </p>
+            </div>
+
+            {/* Explanatory Guide Box */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-xs text-slate-600 flex items-start gap-2.5 font-cairo leading-relaxed">
+              <Info className="w-4.5 h-4.5 text-blue-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold text-slate-800">
+                  ملاحظة هامة حول ترحيل وتعديل العطلات بقرارات رئيس مجلس الوزراء:
+                </p>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  بمجرد الضغط على زر <strong>(للخميس 🗓️)</strong> أو <strong>(للأحد 🗓️)</strong> أو <strong>(ليوم آخر 🏛️)</strong> أو تعديل تاريخ أي عطلة، يتم حفظها وتطبيق التاريخ الجديد فوراً وتجاوزه كعطلة رسمية عند حساب مواعيد استلام وتسليم الفواتير في النظام، وفي رسائل الواتساب والإيصالات المطبوعة. كما يتم احتساب مدة الخدمات المتعددة بالتتابع بحيث تبدأ الخدمة التالية بعد انتهاء الخدمة السابقة مباشرة.
+                </p>
+              </div>
             </div>
 
           </div>
@@ -1713,7 +2169,7 @@ function formatHeader(sheet, numCols) {
           <button
             type="submit"
             disabled={saving}
-            className="px-6 py-2.5 bg-slate-900 text-white hover:bg-slate-800 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors shadow-md disabled:opacity-50"
+            className="px-6 py-2.5 bg-slate-900 text-white hover:bg-slate-800 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors shadow-md disabled:opacity-50 cursor-pointer font-cairo"
           >
             <Save className="w-4 h-4" />
             {saving ? "جاري الحفظ والتهيئة..." : "حفظ جميع الإعدادات بالتكامل 💾"}
