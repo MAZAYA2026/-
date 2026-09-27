@@ -5,8 +5,6 @@ import {
   testGoogleWebhook,
   pushDataToGoogleWebhook,
   pullDataFromGoogleWebhook,
-  syncDictionaryToGoogleWebhook,
-  syncSettingsToGoogleWebhook,
   saveDictionaryWord,
   updateDictionaryWord,
   deleteDictionaryWord
@@ -38,7 +36,8 @@ import {
   Edit3,
   X,
   Calendar,
-  CalendarCheck
+  CalendarCheck,
+  Database
 } from "lucide-react";
 import { DEFAULT_OFFICIAL_HOLIDAYS, HolidayItem } from "../lib/businessDays";
 
@@ -91,132 +90,7 @@ export default function SettingsConfig({
   const [newEnWord, setNewEnWord] = useState("");
   const [dictLoading, setDictLoading] = useState(false);
   const [dictFeedback, setDictFeedback] = useState("");
-  const [dictSyncLoading, setDictSyncLoading] = useState(false);
-  const [dictSyncResult, setDictSyncResult] = useState<{ type: "success" | "warning" | "error"; message: string } | null>(null);
-  const [showDictScriptGuide, setShowDictScriptGuide] = useState(false);
   const [editingDictItem, setEditingDictItem] = useState<{ originalArabic: string; arabic: string; english: string } | null>(null);
-
-  // Settings sheet sync states
-  const [settingsSyncLoading, setSettingsSyncLoading] = useState(false);
-  const [settingsSyncResult, setSettingsSyncResult] = useState<{ type: "success" | "warning" | "error"; message: string } | null>(null);
-
-  const handleSyncSettingsToSheet = async () => {
-    const rawUrl = googleSheetWebhookUrl.trim();
-    if (!rawUrl) {
-      alert("الرجاء إدخال رابط سكربت Webhook الخاص بجوجل شيت أولاً.");
-      return;
-    }
-
-    setSettingsSyncLoading(true);
-    setSettingsSyncResult(null);
-    try {
-      // 1. Save settings locally first
-      const payload: AppSettings = {
-        headerText: headerText.trim(),
-        subHeaderText: subHeaderText.trim(),
-        contactPhone: contactPhone.trim(),
-        welcomeMessage: welcomeMessage.trim(),
-        whatsappTemplate: whatsappTemplate.trim(),
-        readyMessage: readyMessage.trim(),
-        deliveryMessage: deliveryMessage.trim(),
-        googleSheetId: settings.googleSheetId || "",
-        googleSheetUrl: googleSheetUrl.trim(),
-        googleSheetWebhookUrl: rawUrl,
-        autoSyncWebhook: autoSyncWebhook,
-        footerText: footerText.trim(),
-        googleSheetsConnected: true,
-        includeSaturdayAsWeekend: includeSaturdayAsWeekend,
-        customHolidays: customHolidays
-      };
-      const result = await updateSettingsOnServer(payload);
-      onSettingsUpdated(result);
-
-      // 2. Push settings directly to sheet
-      const res = await syncSettingsToGoogleWebhook(rawUrl);
-      setSettingsSyncResult({
-        type: res.savedInSheet ? "success" : "warning",
-        message: res.message || "تم حفظ وتصدير الإعدادات وبيانات المكتب إلى جوجل شيت بنجاح! 💾✅"
-      });
-      setTimeout(() => setSettingsSyncResult(null), 7000);
-    } catch (err: any) {
-      setSettingsSyncResult({
-        type: "error",
-        message: `فشل حفظ الإعدادات في جوجل شيت: ${err.message}`
-      });
-    } finally {
-      setSettingsSyncLoading(false);
-    }
-  };
-
-  const handlePullSettingsFromSheet = async () => {
-    const rawUrl = googleSheetWebhookUrl.trim();
-    if (!rawUrl) {
-      alert("الرجاء إدخال رابط سكربت Webhook الخاص بجوجل شيت أولاً.");
-      return;
-    }
-    const confirmPull = window.confirm("هل تريد استيراد وسحب بيانات الملف التعريفي والترويسة وقوالب الرسائل المسجلة في ملف جوجل شيت واعتمادها الآن؟");
-    if (!confirmPull) return;
-
-    setSettingsSyncLoading(true);
-    setSettingsSyncResult(null);
-    try {
-      const res = await pullDataFromGoogleWebhook(rawUrl);
-      if (res.db && res.db.settings) {
-        const s = res.db.settings;
-        if (s.headerText) setHeaderText(s.headerText);
-        if (s.subHeaderText !== undefined) setSubHeaderText(s.subHeaderText);
-        if (s.welcomeMessage) setWelcomeMessage(s.welcomeMessage);
-        if (s.whatsappTemplate) setWhatsappTemplate(s.whatsappTemplate);
-        if (s.readyMessage) setReadyMessage(s.readyMessage);
-        if (s.deliveryMessage) setDeliveryMessage(s.deliveryMessage);
-        if (s.footerText) setFooterText(s.footerText);
-        onSettingsUpdated(s);
-        setSettingsSyncResult({
-          type: "success",
-          message: "تم بنجاح استيراد بيانات الملف التعريفي والرسائل من ملف جوجل شيت! 📥✅"
-        });
-      } else {
-        setSettingsSyncResult({
-          type: "warning",
-          message: "لم يتم العثور على إعدادات مسجلة في ملف جوجل شيت."
-        });
-      }
-      setTimeout(() => setSettingsSyncResult(null), 7000);
-    } catch (err: any) {
-      setSettingsSyncResult({
-        type: "error",
-        message: `فشل الاستيراد من جوجل شيت: ${err.message}`
-      });
-    } finally {
-      setSettingsSyncLoading(false);
-    }
-  };
-
-  const handleSyncDictionaryToSheets = async () => {
-    setDictSyncLoading(true);
-    setDictSyncResult(null);
-    try {
-      const res = await syncDictionaryToGoogleWebhook(settings.googleSheetWebhookUrl);
-      if (res.savedInSheet) {
-        setDictSyncResult({
-          type: "success",
-          message: res.message || "تم تسجيل القاموس في ملف جوجل شيت بنجاح! 📖✅"
-        });
-      } else {
-        setDictSyncResult({
-          type: "warning",
-          message: res.message || "تم إرسال القاموس بنجاح، ولكن يلزم تحديث كود السكربت في ملف جوجل شيت لإنشاء ورقة القاموس."
-        });
-      }
-    } catch (err: any) {
-      setDictSyncResult({
-        type: "error",
-        message: err.message || "فشلت المزامنة مع جوجل شيت."
-      });
-    } finally {
-      setDictSyncLoading(false);
-    }
-  };
 
   const handleAddDictionaryWord = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -966,7 +840,7 @@ function formatHeader(sheet, numCols) {
         googleSheetId: settings.googleSheetId || "",
         googleSheetUrl: googleSheetUrl.trim(),
         googleSheetWebhookUrl: googleSheetWebhookUrl.trim(),
-        autoSyncWebhook: autoSyncWebhook,
+        autoSyncWebhook: false, // Strict manual mode: No auto sync
         footerText: footerText.trim(),
         googleSheetsConnected: !!(googleSheetWebhookUrl.trim() || googleSheetUrl.trim() || settings.googleSheetsConnected),
         includeSaturdayAsWeekend: includeSaturdayAsWeekend,
@@ -975,7 +849,7 @@ function formatHeader(sheet, numCols) {
 
       const result = await updateSettingsOnServer(payload);
       onSettingsUpdated(result);
-      alert("تم حفظ إعدادات النظام وتحديثها في ملف جوجل شيت بنجاح! 💾✅");
+      alert("تم حفظ جميع الإعدادات محلياً وحفظ كافة البيانات على جوجل درايف بنجاح! 💾✅");
     } catch (err) {
       console.error(err);
       alert("حدث خطأ أثناء حفظ الإعدادات بالخادم.");
@@ -999,48 +873,12 @@ function formatHeader(sheet, numCols) {
         
         {/* Core Office Profile Card */}
         <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
             <h3 className="font-bold text-sm text-slate-800 flex items-center gap-1.5">
               <Settings className="w-4.5 h-4.5 text-slate-500" />
               <span>الملف التعريفي للمكتب وترويسة الفاتورة:</span>
             </h3>
-            
-            {/* Quick Settings Sync Buttons */}
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handlePullSettingsFromSheet}
-                disabled={settingsSyncLoading}
-                className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-[11px] font-bold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                title="سحب أحدث بيانات الترويسة والرسائل من ملف جوجل شيت"
-              >
-                <span>استيراد الإعدادات من جوجل شيت 📥</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleSyncSettingsToSheet}
-                disabled={settingsSyncLoading}
-                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-xs"
-                title="حفظ وتصدير بيانات الترويسة والرسائل في ورقة Settings بجوجل شيت فوراً"
-              >
-                <span>{settingsSyncLoading ? "جاري الحفظ..." : "تصدير وحفظ في جوجل شيت 📤"}</span>
-              </button>
-            </div>
           </div>
-
-          {/* Sync status alert for settings */}
-          {settingsSyncResult && (
-            <div className={`p-3 rounded-xl text-xs font-bold flex items-center gap-2 ${
-              settingsSyncResult.type === "success" 
-                ? "bg-emerald-50 text-emerald-800 border border-emerald-200" 
-                : settingsSyncResult.type === "warning" 
-                ? "bg-amber-50 text-amber-800 border border-amber-200" 
-                : "bg-rose-50 text-rose-800 border border-rose-200"
-            }`}>
-              <span>{settingsSyncResult.message}</span>
-            </div>
-          )}
 
           <div className="grid md:grid-cols-2 gap-4">
             <div className="space-y-1">
@@ -1322,47 +1160,59 @@ function formatHeader(sheet, numCols) {
               )}
             </div>
 
-            {/* Protection Notice: Manual Sync Mode */}
-            <div className="bg-emerald-50/90 border border-emerald-200 rounded-xl p-3.5 text-xs text-emerald-950 flex items-start gap-3">
-              <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+            {/* Protection Notice: Manual Sync Mode Only */}
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 text-xs text-amber-950 flex items-start gap-3">
+              <ShieldCheck className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
               <div className="space-y-1">
                 <div className="font-bold flex items-center gap-2">
-                  <span>نمط المزامنة: تعامل يدوي فقط (حماية تامة لمسميات الخدمات والأسعار) 🛡️</span>
-                  <span className="px-2 py-0.5 bg-emerald-200/80 text-emerald-900 rounded-md text-[10px] font-bold">نشط</span>
+                  <span>المزامنة التلقائية معطلة نهائياً (الحفظ اليدوي فقط) 🛡️</span>
+                  <span className="px-2 py-0.5 bg-amber-200 text-amber-900 rounded-md text-[10px] font-bold">معطلة تلقائياً</span>
                 </div>
-                <p className="text-[11px] text-emerald-800 leading-relaxed">
-                  تم إيقاف التصدير والاستيراد التلقائي عند بداية فتح البرنامج أو عند تعديل البرمجة، لضمان عدم مسح مسميات الخدمات وأسعارها التي قمت بتخصيصها. يتم النقل والتبادل يدوياً بالكامل فقط عند ضغطك على أزرار الاستيراد أو التصدير أدناه.
+                <p className="text-[11px] text-amber-900 leading-relaxed font-cairo">
+                  لا يقوم النظام بأي مزامنة تلقائية في الخلفية عند إنشاء أو تعديل الفواتير أو الخدمات نهائياً. يتم حفظ وتحديث البيانات على جوجل درايف <strong>فقط عند الضغط على زر (حفظ جميع الإعدادات بالتكامل 💾)</strong> في أسفل الصفحة، أو عند استخدام زري التصدير والاستيراد الموحدين أدناه عند الحاجة.
                 </p>
               </div>
             </div>
 
-            {/* Sync Action Buttons */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-              <button
-                type="button"
-                disabled={syncLoading || !googleSheetWebhookUrl.trim()}
-                onClick={handlePullWebhook}
-                className="py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs flex flex-col items-center justify-center gap-1 transition-colors cursor-pointer disabled:opacity-40 shadow-xs"
-              >
-                <div className="flex items-center gap-2 text-sm">
-                  <Download className="w-4 h-4 text-blue-200" />
-                  <span>استيراد وسحب البيانات من جوجل شيت 📥</span>
-                </div>
-                <span className="text-[10px] text-blue-100 font-normal">سحب أحدث مسميات الخدمات والأسعار والفواتير والقاموس من الشيت</span>
-              </button>
+            {/* Unified Export & Import Panel for ALL Data */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                <span className="font-bold text-slate-800 text-xs flex items-center gap-1.5 font-cairo">
+                  <Database className="w-4 h-4 text-emerald-600" />
+                  لوحة التصدير والاستيراد الموحدة لكافة بيانات النظام:
+                </span>
+                <span className="text-[10px] text-slate-500 font-mono font-bold">شامل (الفواتير + الخدمات + القاموس + الإعدادات + التقفيلات)</span>
+              </div>
 
-              <button
-                type="button"
-                disabled={syncLoading || !googleSheetWebhookUrl.trim()}
-                onClick={handlePushWebhook}
-                className="py-3 px-4 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs flex flex-col items-center justify-center gap-1 transition-colors cursor-pointer disabled:opacity-40 shadow-xs"
-              >
-                <div className="flex items-center gap-2 text-sm">
-                  <Download className="w-4 h-4 rotate-180 text-emerald-400" />
-                  <span>تصدير وتحديث كافة البيانات في جوجل شيت 📤</span>
-                </div>
-                <span className="text-[10px] text-slate-300 font-normal">رفع وتحديث كافة البيانات الحالية في أوراق العمل بملف جوجل شيت</span>
-              </button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                {/* Unified Import Button */}
+                <button
+                  type="button"
+                  disabled={syncLoading || !googleSheetWebhookUrl.trim()}
+                  onClick={handlePullWebhook}
+                  className="py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs flex flex-col items-center justify-center gap-1 transition-colors cursor-pointer disabled:opacity-40 shadow-xs"
+                >
+                  <div className="flex items-center gap-2 text-sm">
+                    <Download className="w-4 h-4 text-blue-200" />
+                    <span>استيراد كافة البيانات من جوجل درايف 📥</span>
+                  </div>
+                  <span className="text-[10px] text-blue-100 font-normal">استرجاع شامل لكافة الفواتير، الخدمات، قاموس الأسماء، والإعدادات مرة واحدة</span>
+                </button>
+
+                {/* Unified Export Button */}
+                <button
+                  type="button"
+                  disabled={syncLoading || !googleSheetWebhookUrl.trim()}
+                  onClick={handlePushWebhook}
+                  className="py-3 px-4 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs flex flex-col items-center justify-center gap-1 transition-colors cursor-pointer disabled:opacity-40 shadow-xs"
+                >
+                  <div className="flex items-center gap-2 text-sm">
+                    <Download className="w-4 h-4 rotate-180 text-emerald-400" />
+                    <span>تصدير وحفظ كافة البيانات على جوجل درايف 📤</span>
+                  </div>
+                  <span className="text-[10px] text-slate-300 font-normal">رفع وحفظ شامل لكافة الفواتير، الخدمات، قاموس الأسماء، والإعدادات مرة واحدة</span>
+                </button>
+              </div>
             </div>
 
             {/* Script Setup Instructions Guide */}
@@ -1521,21 +1371,11 @@ function formatHeader(sheet, numCols) {
             <div className="flex items-center gap-2">
               <BookOpen className="w-5 h-5 text-blue-600" />
               <div>
-                <h3 className="font-bold text-sm text-slate-800 font-cairo">قاموس الترجمة المعتمد وأسماء الجوازات (Google Sheet Dictionary)</h3>
-                <p className="text-[11px] text-slate-500 font-cairo">تسجيل الأسماء المترجمة وحفظها في قاعدة البيانات وجوجل شيت لترجمتها فورياً بمجرد كتابة الاسم العربي</p>
+                <h3 className="font-bold text-sm text-slate-800 font-cairo">قاموس الترجمة المعتمد وأسماء الجوازات</h3>
+                <p className="text-[11px] text-slate-500 font-cairo">تسجيل الأسماء المترجمة واعتمادها لترجمتها فورياً بمجرد كتابة الاسم العربي في الفواتير</p>
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleSyncDictionaryToSheets}
-                disabled={dictSyncLoading}
-                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold rounded-lg text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs disabled:opacity-50 font-cairo"
-                title="تسجيل القاموس بالكامل إلى ملف جوجل شيت فوراً"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${dictSyncLoading ? "animate-spin" : ""}`} />
-                <span>{dictSyncLoading ? "جارِ التسجيل في الشيت..." : "⚡ تسجيل القاموس في جوجل شيت"}</span>
-              </button>
               <span className="px-3 py-1.5 bg-blue-50 text-blue-700 font-bold rounded-lg text-xs font-mono border border-blue-200/60">
                 {dictionary.length} اسم محفوظ
               </span>
@@ -1543,77 +1383,6 @@ function formatHeader(sheet, numCols) {
           </div>
 
           <div className="p-6 space-y-6">
-            
-            {/* Sync to Sheet Result Notice */}
-            {dictSyncResult && (
-              <div className={`p-4 rounded-xl border text-xs font-cairo ${
-                dictSyncResult.type === "success" 
-                  ? "bg-emerald-50 border-emerald-200 text-emerald-900" 
-                  : dictSyncResult.type === "warning"
-                  ? "bg-amber-50 border-amber-200 text-amber-900"
-                  : "bg-red-50 border-red-200 text-red-900"
-              }`}>
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-start gap-2.5">
-                    {dictSyncResult.type === "success" ? (
-                      <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
-                    ) : (
-                      <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-                    )}
-                    <div>
-                      <p className="font-bold text-sm whitespace-pre-line">{dictSyncResult.message}</p>
-                      {dictSyncResult.type === "warning" && (
-                        <div className="mt-2.5 flex flex-wrap items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              navigator.clipboard.writeText(appsScriptCode);
-                              alert("تم نسخ كود السكربت المحدث بنجاح! 📋\nالآن افتح ملف جوجل شيت > ملحقات (Extensions) > Apps Script > الصق الكود واضغط Deploy > Manage deployments > تعديل القلم > New version > نشر.");
-                            }}
-                            className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
-                          >
-                            <Copy className="w-3.5 h-3.5" />
-                            <span>نسخ كود السكربت المحدث الآن 📋</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setShowDictScriptGuide(!showDictScriptGuide)}
-                            className="px-3 py-1.5 bg-white border border-amber-300 text-amber-800 hover:bg-amber-100 font-bold rounded-lg text-xs transition-colors cursor-pointer"
-                          >
-                            {showDictScriptGuide ? "إخفاء الخطوات" : "عرض خطوات تحديث السكربت (دقيقة واحدة)"}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setDictSyncResult(null)}
-                    className="text-slate-400 hover:text-slate-600 text-xs px-1"
-                  >
-                    ✕
-                  </button>
-                </div>
-
-                {/* Collapsible Step-by-step Guide */}
-                {showDictScriptGuide && dictSyncResult.type === "warning" && (
-                  <div className="mt-3 pt-3 border-t border-amber-200 text-amber-950 space-y-2 text-xs">
-                    <p className="font-bold">خطوات تفعيل ورقة القاموس في ملف جوجل شيت لديك:</p>
-                    <ol className="list-decimal list-inside space-y-1 pr-1 text-slate-700">
-                      <li>افتح ملف جوجل شيت الخاص بك.</li>
-                      <li>من القائمة العلوية اضغط على <strong>ملحقات (Extensions)</strong> ثم <strong>Apps Script</strong>.</li>
-                      <li>امسح الكود القديم الموجود في المحرر، ثم الصق الكود الذي نسخته بالأعلى.</li>
-                      <li>اضغط على زر <strong>حفظ (Save 💾)</strong>.</li>
-                      <li>اضغط على <strong>نشر (Deploy)</strong> باللون الأزرق أعلى اليمين &gt; ثم <strong>إدارة عمليات النشر (Manage deployments)</strong>.</li>
-                      <li>اضغط على <strong>أيقونة القلم ✏️ (تعديل)</strong> بجانب النشر الحالي.</li>
-                      <li>في خانة <strong>الإصدار (Version)</strong> اختر <strong>New version (إصدار جديد)</strong>.</li>
-                      <li>اضغط <strong>نشر (Deploy)</strong> ثم <strong>تم (Done)</strong>.</li>
-                      <li>ارجع هنا واضغط على زر <strong>⚡ تسجيل القاموس في جوجل شيت</strong> وستظهر الورقة فوراً في ملفك!</li>
-                    </ol>
-                  </div>
-                )}
-              </div>
-            )}
 
             {/* Feedback alert */}
             {dictFeedback && (

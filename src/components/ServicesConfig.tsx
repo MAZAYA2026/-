@@ -4,13 +4,11 @@ import {
   createServiceOnServer, 
   updateServiceOnServer, 
   deleteServiceOnServer, 
-  reorderServicesOnServer,
-  pullDataFromGoogleWebhook
+  reorderServicesOnServer
 } from "../lib/api";
 import { 
   Plus, Edit3, Trash2, Check, X, ShieldAlert, Sparkles, FolderPlus, DollarSign, Clock, FileText,
-  ArrowUp, ArrowDown, ChevronsUp, ChevronsDown, ArrowUpDown, CheckCircle2, ArrowDownAZ, Hash, Loader2,
-  Download
+  ArrowUp, ArrowDown, ChevronsUp, ChevronsDown, ArrowUpDown, CheckCircle2, ArrowDownAZ, Hash, Loader2
 } from "lucide-react";
 
 interface ServicesConfigProps {
@@ -35,36 +33,6 @@ export default function ServicesConfig({
   onReloadDatabase
 }: ServicesConfigProps) {
   const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
-
-  // Sheet sync states (import only)
-  const [sheetLoading, setSheetLoading] = useState(false);
-  const [sheetFeedback, setSheetFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
-
-  const handlePullFromSheets = async () => {
-    const confirmPull = window.confirm("هل تريد استيراد وسحب أحدث الخدمات والأسعار من ملف جوجل شيت؟");
-    if (!confirmPull) return;
-
-    setSheetLoading(true);
-    setSheetFeedback(null);
-    try {
-      const res = await pullDataFromGoogleWebhook(googleSheetWebhookUrl);
-      if (onReloadDatabase) {
-        await onReloadDatabase();
-      }
-      setSheetFeedback({
-        type: "success",
-        message: `تم استيراد ${res.db?.services?.length || 0} خدمة بنجاح من ملف جوجل شيت! 📥`
-      });
-      setTimeout(() => setSheetFeedback(null), 4000);
-    } catch (err: any) {
-      setSheetFeedback({
-        type: "error",
-        message: `فشل الاستيراد: ${err.message}`
-      });
-    } finally {
-      setSheetLoading(false);
-    }
-  };
 
   // Form states for creating/editing
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -283,19 +251,6 @@ export default function ServicesConfig({
         </div>
         
         <div className="flex flex-wrap items-center gap-2">
-          {googleSheetWebhookUrl && (
-            <button
-              type="button"
-              onClick={handlePullFromSheets}
-              disabled={sheetLoading}
-              className="px-3.5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer disabled:opacity-50"
-              title="سحب واستيراد أحدث مسميات الخدمات والأسعار من ملف جوجل شيت"
-            >
-              <Download className={`w-4 h-4 ${sheetLoading ? "animate-spin" : ""}`} />
-              <span>استيراد الخدمات من جوجل شيت 📥</span>
-            </button>
-          )}
-
           {!showCreateForm && (
             <button
               onClick={() => {
@@ -310,24 +265,6 @@ export default function ServicesConfig({
           )}
         </div>
       </div>
-
-      {/* Sheet Feedback Alert */}
-      {sheetFeedback && (
-        <div className={`p-3.5 rounded-xl text-xs font-bold flex items-center justify-between shadow-xs ${
-          sheetFeedback.type === "success" 
-            ? "bg-emerald-50 text-emerald-900 border border-emerald-200" 
-            : "bg-rose-50 text-rose-900 border border-rose-200"
-        }`}>
-          <span>{sheetFeedback.message}</span>
-          <button 
-            type="button" 
-            onClick={() => setSheetFeedback(null)} 
-            className="text-slate-400 hover:text-slate-700 font-bold p-1 cursor-pointer"
-          >
-            ✕
-          </button>
-        </div>
-      )}
 
       {/* Permission guard info */}
       {!activeEmployee.permissions.canManageServices && (

@@ -383,8 +383,7 @@ app.post("/api/db/save", (req, res) => {
     return res.status(400).json({ error: "Invalid database payload" });
   }
   writeDB(updatedData);
-  triggerBackgroundWebhookSync(updatedData, "حفظ قاعدة البيانات بالكامل");
-  res.json({ status: "success", message: "Database saved successfully", sheetSynced: true });
+  res.json({ status: "success", message: "Database saved successfully" });
 });
 
 // 4. Create invoice endpoint to handle sequential number 100+
@@ -410,9 +409,8 @@ app.post("/api/db/invoices", (req, res) => {
   autoLearnCustomerNames(newInvoice.customers, db);
 
   writeDB(db);
-  triggerBackgroundWebhookSync(db, `فاتورة جديدة رقم #${newInvoice.invoiceId}`);
 
-  res.json({ status: "success", invoice: newInvoice, sheetSynced: true });
+  res.json({ status: "success", invoice: newInvoice });
 });
 
 // 5. Update invoice
@@ -436,8 +434,7 @@ app.put("/api/db/invoices/:id", (req, res) => {
   autoLearnCustomerNames(db.invoices[index].customers, db);
 
   writeDB(db);
-  triggerBackgroundWebhookSync(db, `تعديل فاتورة رقم #${invoiceId}`);
-  res.json({ status: "success", invoice: db.invoices[index], sheetSynced: true });
+  res.json({ status: "success", invoice: db.invoices[index] });
 });
 
 // 6. Delete invoice
@@ -452,8 +449,7 @@ app.delete("/api/db/invoices/:id", (req, res) => {
 
   db.invoices = filtered;
   writeDB(db);
-  triggerBackgroundWebhookSync(db, `حذف فاتورة رقم #${invoiceId}`);
-  res.json({ status: "success", message: "Invoice deleted", sheetSynced: true });
+  res.json({ status: "success", message: "Invoice deleted" });
 });
 
 // 7. Services CRUD endpoints
@@ -463,8 +459,7 @@ app.post("/api/db/services", (req, res) => {
   service.id = "srv-" + Date.now();
   db.services.push(service);
   writeDB(db);
-  triggerBackgroundWebhookSync(db, `إضافة خدمة جديدة: ${service.name}`);
-  res.json({ status: "success", service, sheetSynced: true });
+  res.json({ status: "success", service });
 });
 
 app.put("/api/db/services/:id", (req, res) => {
@@ -479,8 +474,7 @@ app.put("/api/db/services/:id", (req, res) => {
 
   db.services[index] = { ...db.services[index], ...updatedService, id };
   writeDB(db);
-  triggerBackgroundWebhookSync(db, `تعديل تفاصيل الخدمة: ${db.services[index].name}`);
-  res.json({ status: "success", service: db.services[index], sheetSynced: true });
+  res.json({ status: "success", service: db.services[index] });
 });
 
 app.delete("/api/db/services/:id", (req, res) => {
@@ -489,8 +483,7 @@ app.delete("/api/db/services/:id", (req, res) => {
   const deletedService = db.services.find((srv: any) => srv.id === id);
   db.services = db.services.filter((srv: any) => srv.id !== id);
   writeDB(db);
-  triggerBackgroundWebhookSync(db, `حذف خدمة: ${deletedService?.name || id}`);
-  res.json({ status: "success", message: "Service deleted", sheetSynced: true });
+  res.json({ status: "success", message: "Service deleted" });
 });
 
 // Reorder services endpoint
@@ -523,8 +516,7 @@ app.post("/api/db/services/reorder", (req, res) => {
   }
 
   writeDB(db);
-  triggerBackgroundWebhookSync(db, "إعادة ترتيب الخدمات");
-  res.json({ status: "success", services: db.services, sheetSynced: true });
+  res.json({ status: "success", services: db.services });
 });
 
 // 8. Collection Closings endpoint
@@ -535,8 +527,7 @@ app.post("/api/db/closings", (req, res) => {
   closing.closeDate = new Date().toISOString().split("T")[0];
   db.collectionClosings.push(closing);
   writeDB(db);
-  triggerBackgroundWebhookSync(db, "تقفيل خزينة يومي وحفظ الإيرادات");
-  res.json({ status: "success", closing, sheetSynced: true });
+  res.json({ status: "success", closing });
 });
 
 // 9. Dictionary updates
@@ -594,10 +585,8 @@ app.post("/api/db/dictionary", (req, res) => {
 
   if (updated) {
     writeDB(db);
-    // Sync dictionary changes to Google Sheets Excel immediately
-    triggerBackgroundWebhookSync(db, "تحديث قاموس الأسماء");
   }
-  res.json({ status: "success", dictionary: db.dictionary, sheetSynced: true });
+  res.json({ status: "success", dictionary: db.dictionary });
 });
 
 // Update an existing word in the dictionary
@@ -636,8 +625,7 @@ app.put("/api/db/dictionary", (req, res) => {
   }
 
   writeDB(db);
-  triggerBackgroundWebhookSync(db, `تعديل كلمة (${originalArabic} -> ${targetEnglish}) في قاموس الأسماء`);
-  res.json({ status: "success", dictionary: db.dictionary, sheetSynced: true });
+  res.json({ status: "success", dictionary: db.dictionary });
 });
 
 app.delete("/api/db/dictionary", (req, res) => {
@@ -657,8 +645,7 @@ app.delete("/api/db/dictionary", (req, res) => {
   const targetNorm = normalizeArabic(arabic);
   db.dictionary = (db.dictionary || []).filter((item: any) => normalizeArabic(item.arabic) !== targetNorm);
   writeDB(db);
-  triggerBackgroundWebhookSync(db, `حذف كلمة (${arabic}) من قاموس الأسماء`);
-  res.json({ status: "success", dictionary: db.dictionary, sheetSynced: true });
+  res.json({ status: "success", dictionary: db.dictionary });
 });
 
 // Helper to get Google OAuth2 client from request authorization header
@@ -1182,16 +1169,11 @@ async function pullFromGoogleWebhook(webhookUrl: string) {
   }
 }
 
-// Real-time synchronization to Google Sheets upon any explicit save or modification
-function triggerBackgroundWebhookSync(db: any, reason: string = "حفظ البيانات") {
-  const webhookUrl = db.settings?.googleSheetWebhookUrl || (db.settings?.googleSheetUrl?.includes("script.google.com") ? db.settings.googleSheetUrl : null);
-  if (webhookUrl && webhookUrl.startsWith("http")) {
-    pushToGoogleWebhook(webhookUrl, db).then((res) => {
-      console.log(`[Google Sheet Real-Time Sync] (${reason}) completed successfully:`, res?.message || "OK");
-    }).catch((err) => {
-      console.warn(`[Google Sheet Real-Time Sync] (${reason}) warning:`, err.message);
-    });
-  }
+// Real-time automatic background synchronization is strictly DISABLED per user request.
+// Data is ONLY pushed/saved to Google Drive / Sheets upon explicit manual "حفظ" or via the unified export button.
+function triggerBackgroundWebhookSync(_db: any, _reason: string = "حفظ البيانات") {
+  // STRICT NO-OP: Automatic background sync is completely turned off.
+  return;
 }
 
 // Webhook test connection endpoint
@@ -1537,31 +1519,23 @@ app.post("/api/sheets/sync", (req, res) => {
   });
 });
 
-// 11. Update settings endpoint
+// 11. Update settings endpoint: Manual Save only
 app.post("/api/db/settings", async (req, res) => {
   const newSettings = req.body;
   const db = readDB();
   db.settings = { ...db.settings, ...newSettings };
   writeDB(db);
 
-  // If webhook is configured, also push settings directly to Google Sheet
+  // User requested: "فقط عند الضغط على حفظ اعمل حفظ على جوجل درايف"
+  // When explicitly pressing Save, push all data (invoices, services, settings, dictionary) to Google Drive / Sheets
   const webhookUrl = db.settings?.googleSheetWebhookUrl;
   let sheetSyncMessage = "";
   if (webhookUrl && webhookUrl.startsWith("http")) {
     try {
-      await fetch(webhookUrl, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify({
-          action: "push_settings",
-          settings: db.settings,
-          db: { settings: db.settings }
-        }),
-        redirect: "follow",
-      });
-      sheetSyncMessage = "وتم حفظ وتحديث الإعدادات في ملف جوجل شيت أيضاً بنجاح! 📊✅";
+      await pushToGoogleWebhook(webhookUrl, db);
+      sheetSyncMessage = "وتم حفظ وتحديث كافة البيانات في جوجل درايف / شيت إكسيل بنجاح! 📊✅";
     } catch (err: any) {
-      console.warn("Could not push settings to Google Sheet:", err.message);
+      console.warn("Could not push to Google Drive/Sheet on explicit save:", err.message);
     }
   }
 
