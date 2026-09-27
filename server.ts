@@ -226,7 +226,6 @@ const initialData = {
 {الخاتمة}`,
     readyMessage: "عزيزنا {اسم_العميل}، نفيدكم علماً بأن أوراقكم الخاصة بالفاتورة رقم {رقم_الفاتورة} جاهزة للتسليم الآن.\nالخدمات: {الخدمات}\nمكان الحفظ: درج رقم ({رقم_الارشيف})\nبرجاء التوجه للمكتب للاستلام مع إحضار الفاتورة الحرارية.",
     deliveryMessage: "تم تسليم جواز السفر والأوراق الخاصة بك بنجاح يا {اسم_العميل}.\nرقم الفاتورة: {رقم_الفاتورة}\nنسعد بتقييمكم لخدمات مكتب مزايا للجوازات ونراكم قريباً في معاملات أخرى.",
-    whatsappTemplate: "مكتب مزايا للجوازات\n\nالعميل: {اسم_العميل}\n{الاسم_الانجليزي}\n{المهنة}\nالخدمات:\n{الخدمات}\n\nالإجمالي: {السعر} جنيه.\n\n{رسالة_الشكر}",
     googleSheetWebhookUrl: "https://script.google.com/macros/s/AKfycbzs-tNIvoZJQOwvb7FgYht4du96_QrDzqTXIiUMAV0iVfvvIkENhxuBXGYfDp-5snc/exec",
     autoSyncWebhook: false,
     googleSheetId: "",
@@ -1372,7 +1371,7 @@ app.post("/api/sheets/webhook/sync-settings", async (req, res) => {
     try {
       const pulledDB = await pullFromGoogleWebhook(targetUrl);
       const s = pulledDB?.settings || {};
-      if (s.headerText || s.subHeaderText || s.welcomeMessage || s.whatsappTemplate || s.readyMessage || s.footerText) {
+      if (s.headerText || s.subHeaderText || s.welcomeMessage || s.readyMessage || s.footerText) {
         savedInSheet = true;
       }
     } catch (e) {
@@ -1417,7 +1416,6 @@ app.post("/api/sheets/webhook/pull", async (req, res) => {
       pulledSettings.subHeaderText || 
       pulledSettings.footerText || 
       pulledSettings.welcomeMessage || 
-      pulledSettings.whatsappTemplate ||
       pulledSettings.readyMessage ||
       pulledSettings.deliveryMessage
     );

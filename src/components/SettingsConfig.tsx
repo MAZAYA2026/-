@@ -76,7 +76,6 @@ export default function SettingsConfig({
   const [subHeaderText, setSubHeaderText] = useState(settings.subHeaderText ?? "جوازات طنطا والمعاملات الحكومية");
   const [contactPhone, setContactPhone] = useState(settings.contactPhone || "01020304050");
   const [welcomeMessage, setWelcomeMessage] = useState(settings.welcomeMessage || "");
-  const [whatsappTemplate, setWhatsappTemplate] = useState(settings.whatsappTemplate || "");
   const [readyMessage, setReadyMessage] = useState(settings.readyMessage || "");
   const [deliveryMessage, setDeliveryMessage] = useState(settings.deliveryMessage || "");
   const [googleSheetUrl, setGoogleSheetUrl] = useState(settings.googleSheetUrl || "");
@@ -115,7 +114,6 @@ export default function SettingsConfig({
         subHeaderText: subHeaderText.trim(),
         contactPhone: contactPhone.trim(),
         welcomeMessage: welcomeMessage.trim(),
-        whatsappTemplate: whatsappTemplate.trim(),
         readyMessage: readyMessage.trim(),
         deliveryMessage: deliveryMessage.trim(),
         googleSheetUrl: googleSheetUrl.trim(),
@@ -370,7 +368,6 @@ function doPost(e) {
           ["اسم وبيانات المكتب بالترويسة", db.settings.headerText || "", "headerText"],
           ["الترويسة الفرعية", db.settings.subHeaderText || "", "subHeaderText"],
           ["رسالة الترحيب واستلام الطلب", db.settings.welcomeMessage || "", "welcomeMessage"],
-          ["قالب رسالة الفاتورة (واتساب)", db.settings.whatsappTemplate || "", "whatsappTemplate"],
           ["قالب رسالة جاهزية الأوراق للاستلام", db.settings.readyMessage || "", "readyMessage"],
           ["قالب رسالة تم التسليم بنجاح", db.settings.deliveryMessage || "", "deliveryMessage"],
           ["تذييل الفاتورة المطبوعة", db.settings.footerText || "", "footerText"],
@@ -430,7 +427,6 @@ function doPost(e) {
         ["اسم وبيانات المكتب بالترويسة", stData.headerText || "", "headerText"],
         ["الترويسة الفرعية", stData.subHeaderText || "", "subHeaderText"],
         ["رسالة الترحيب واستلام الطلب", stData.welcomeMessage || "", "welcomeMessage"],
-        ["قالب رسالة الفاتورة (واتساب)", stData.whatsappTemplate || "", "whatsappTemplate"],
         ["قالب رسالة جاهزية الأوراق للاستلام", stData.readyMessage || "", "readyMessage"],
         ["قالب رسالة تم التسليم بنجاح", stData.deliveryMessage || "", "deliveryMessage"],
         ["تذييل الفاتورة المطبوعة", stData.footerText || "", "footerText"],
@@ -609,8 +605,6 @@ function doGet(e) {
           db.settings.subHeaderText = val;
         } else if (label.indexOf("ترحيب") !== -1 || label.indexOf("استلام الطلب") !== -1 || label.indexOf("welcome") !== -1) {
           db.settings.welcomeMessage = val;
-        } else if (label.indexOf("واتساب") !== -1 || label.indexOf("whatsapp") !== -1) {
-          db.settings.whatsappTemplate = val;
         } else if (label.indexOf("جاهزية") !== -1 || label.indexOf("ready") !== -1) {
           db.settings.readyMessage = val;
         } else if (label.indexOf("التسليم بنجاح") !== -1 || label.indexOf("delivery") !== -1) {
@@ -696,7 +690,6 @@ function formatHeader(sheet, numCols) {
       setHeaderText(settings.headerText || "مكتب مزايا للجوازات والمعاملات");
       setSubHeaderText(settings.subHeaderText ?? "جوازات طنطا والمعاملات الحكومية");
       setWelcomeMessage(settings.welcomeMessage || "");
-      setWhatsappTemplate(settings.whatsappTemplate || "");
       setReadyMessage(settings.readyMessage || "");
       setDeliveryMessage(settings.deliveryMessage || "");
       setGoogleSheetUrl(settings.googleSheetUrl || "");
@@ -723,7 +716,6 @@ function formatHeader(sheet, numCols) {
           subHeaderText: subHeaderText.trim(),
           contactPhone: contactPhone.trim(),
           welcomeMessage: welcomeMessage.trim(),
-          whatsappTemplate: whatsappTemplate.trim(),
           readyMessage: readyMessage.trim(),
           deliveryMessage: deliveryMessage.trim(),
           googleSheetUrl: rawUrl,
@@ -749,7 +741,6 @@ function formatHeader(sheet, numCols) {
         subHeaderText: subHeaderText.trim(),
         contactPhone: contactPhone.trim(),
         welcomeMessage: welcomeMessage.trim(),
-        whatsappTemplate: whatsappTemplate.trim(),
         readyMessage: readyMessage.trim(),
         deliveryMessage: deliveryMessage.trim(),
         googleSheetWebhookUrl: rawUrl,
@@ -895,7 +886,6 @@ function formatHeader(sheet, numCols) {
         subHeaderText: subHeaderText.trim(),
         contactPhone: contactPhone.trim(),
         welcomeMessage: welcomeMessage.trim(),
-        whatsappTemplate: whatsappTemplate.trim(),
         readyMessage: readyMessage.trim(),
         deliveryMessage: deliveryMessage.trim(),
         googleSheetId: settings.googleSheetId || "",
@@ -987,18 +977,6 @@ function formatHeader(sheet, numCols) {
               onChange={(e) => setFooterText(e.target.value)}
               placeholder="يسعدنا خدمتكم - طنطا شارع الجلاء بجوار الجوازات"
               className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs"
-            />
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-xs font-bold text-slate-700 block">شروط وأحكام تسليم المعاملات الافتراضية:</label>
-            <textarea 
-              value={whatsappTemplate}
-              onChange={(e) => setWhatsappTemplate(e.target.value)}
-              placeholder="مثال: يرجى إحضار أصل البطاقة الشخصية لمطابقتها عند التسليم..."
-              rows={3}
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs"
-              required
             />
           </div>
         </div>

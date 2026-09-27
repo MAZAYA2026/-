@@ -91,7 +91,7 @@ export interface AppSettings {
   welcomeMessage: string; // رسالة ترحيب واستلام الطلب الأولى
   readyMessage: string; // رسالة جاهز للتسليم
   deliveryMessage: string; // رسالة تم التسليم
-  whatsappTemplate: string; // General template
+  whatsappTemplate?: string; // (ملغي - البديل عنه رسالة الترحيب واستلام الطلب منعاً لتكرار البيانات)
   googleSheetWebhookUrl?: string; // Web App Webhook URL (https://script.google.com/macros/s/.../exec)
   autoSyncWebhook?: boolean; // Automatic background sync on invoice create/edit
   googleSheetId?: string; // Spreadsheet ID for database integration
