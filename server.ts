@@ -383,6 +383,7 @@ app.post("/api/db/save", (req, res) => {
     return res.status(400).json({ error: "Invalid database payload" });
   }
   writeDB(updatedData);
+  triggerBackgroundWebhookSync(updatedData, "حفظ قاعدة البيانات بالكامل");
   res.json({ status: "success", message: "Database saved successfully" });
 });
 
@@ -409,6 +410,7 @@ app.post("/api/db/invoices", (req, res) => {
   autoLearnCustomerNames(newInvoice.customers, db);
 
   writeDB(db);
+  triggerBackgroundWebhookSync(db, `فاتورة جديدة رقم #${newInvoice.invoiceId} والأسماء الإنجليزية المترجمة`);
 
   res.json({ status: "success", invoice: newInvoice });
 });
@@ -434,6 +436,7 @@ app.put("/api/db/invoices/:id", (req, res) => {
   autoLearnCustomerNames(db.invoices[index].customers, db);
 
   writeDB(db);
+  triggerBackgroundWebhookSync(db, `تعديل فاتورة رقم #${invoiceId} والأسماء الإنجليزية`);
   res.json({ status: "success", invoice: db.invoices[index] });
 });
 
@@ -449,6 +452,7 @@ app.delete("/api/db/invoices/:id", (req, res) => {
 
   db.invoices = filtered;
   writeDB(db);
+  triggerBackgroundWebhookSync(db, `حذف فاتورة رقم #${invoiceId}`);
   res.json({ status: "success", message: "Invoice deleted" });
 });
 
@@ -459,6 +463,7 @@ app.post("/api/db/services", (req, res) => {
   service.id = "srv-" + Date.now();
   db.services.push(service);
   writeDB(db);
+  triggerBackgroundWebhookSync(db, `إضافة خدمة جديدة لكتالوج الخدمات: ${service.name}`);
   res.json({ status: "success", service });
 });
 
@@ -474,6 +479,7 @@ app.put("/api/db/services/:id", (req, res) => {
 
   db.services[index] = { ...db.services[index], ...updatedService, id };
   writeDB(db);
+  triggerBackgroundWebhookSync(db, `تعديل خدمة بالكتالوج: ${db.services[index].name}`);
   res.json({ status: "success", service: db.services[index] });
 });
 
@@ -483,6 +489,7 @@ app.delete("/api/db/services/:id", (req, res) => {
   const deletedService = db.services.find((srv: any) => srv.id === id);
   db.services = db.services.filter((srv: any) => srv.id !== id);
   writeDB(db);
+  triggerBackgroundWebhookSync(db, `حذف خدمة من الكتالوج: ${deletedService?.name || id}`);
   res.json({ status: "success", message: "Service deleted" });
 });
 
@@ -516,6 +523,7 @@ app.post("/api/db/services/reorder", (req, res) => {
   }
 
   writeDB(db);
+  triggerBackgroundWebhookSync(db, "إعادة ترتيب كتالوج الخدمات");
   res.json({ status: "success", services: db.services });
 });
 
@@ -527,6 +535,7 @@ app.post("/api/db/closings", (req, res) => {
   closing.closeDate = new Date().toISOString().split("T")[0];
   db.collectionClosings.push(closing);
   writeDB(db);
+  triggerBackgroundWebhookSync(db, "تقفيل خزينة وحفظ إيرادات");
   res.json({ status: "success", closing });
 });
 
@@ -585,6 +594,7 @@ app.post("/api/db/dictionary", (req, res) => {
 
   if (updated) {
     writeDB(db);
+    triggerBackgroundWebhookSync(db, "تحديث وحفظ قاموس الأسماء الإنجليزية");
   }
   res.json({ status: "success", dictionary: db.dictionary });
 });
@@ -625,6 +635,7 @@ app.put("/api/db/dictionary", (req, res) => {
   }
 
   writeDB(db);
+  triggerBackgroundWebhookSync(db, `تعديل اسم إنجليزي بالقاموس: ${targetArabic}`);
   res.json({ status: "success", dictionary: db.dictionary });
 });
 
@@ -645,6 +656,7 @@ app.delete("/api/db/dictionary", (req, res) => {
   const targetNorm = normalizeArabic(arabic);
   db.dictionary = (db.dictionary || []).filter((item: any) => normalizeArabic(item.arabic) !== targetNorm);
   writeDB(db);
+  triggerBackgroundWebhookSync(db, `حذف اسم من قاموس الأسماء: ${arabic}`);
   res.json({ status: "success", dictionary: db.dictionary });
 });
 
@@ -1169,11 +1181,37 @@ async function pullFromGoogleWebhook(webhookUrl: string) {
   }
 }
 
-// Real-time automatic background synchronization is strictly DISABLED per user request.
-// Data is ONLY pushed/saved to Google Drive / Sheets upon explicit manual "حفظ" or via the unified export button.
-function triggerBackgroundWebhookSync(_db: any, _reason: string = "حفظ البيانات") {
-  // STRICT NO-OP: Automatic background sync is completely turned off.
-  return;
+let syncTimeout: NodeJS.Timeout | null = null;
+let pendingReasons: string[] = [];
+
+// Real-time synchronization to Google Sheets as live central database
+// Automatically batches and persists Services, Invoices, English names (Dictionary), and Closings
+function triggerBackgroundWebhookSync(db: any, reason: string = "حفظ البيانات") {
+  const webhookUrl = db.settings?.googleSheetWebhookUrl || (db.settings?.googleSheetUrl?.includes("script.google.com") ? db.settings.googleSheetUrl : null);
+  if (!webhookUrl || !webhookUrl.startsWith("http")) return;
+
+  if (!pendingReasons.includes(reason)) {
+    pendingReasons.push(reason);
+  }
+
+  if (syncTimeout) {
+    clearTimeout(syncTimeout);
+  }
+
+  // 350ms debounce batches rapid consecutive mutations (e.g. invoice creation + auto-learn English names) into 1 atomic sync
+  syncTimeout = setTimeout(() => {
+    const reasonsStr = pendingReasons.join(" | ");
+    pendingReasons = [];
+    syncTimeout = null;
+
+    pushToGoogleWebhook(webhookUrl, db)
+      .then((res) => {
+        console.log(`[Google Sheet Live DB Sync] (${reasonsStr}) synced successfully:`, res?.message || "OK");
+      })
+      .catch((err) => {
+        console.warn(`[Google Sheet Live DB Sync] (${reasonsStr}) warning:`, err.message);
+      });
+  }, 350);
 }
 
 // Webhook test connection endpoint

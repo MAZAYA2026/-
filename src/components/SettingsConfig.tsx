@@ -1160,16 +1160,16 @@ function formatHeader(sheet, numCols) {
               )}
             </div>
 
-            {/* Protection Notice: Manual Sync Mode Only */}
-            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 text-xs text-amber-950 flex items-start gap-3">
-              <ShieldCheck className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+            {/* Live Database Mode Notice */}
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5 text-xs text-emerald-950 flex items-start gap-3">
+              <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
               <div className="space-y-1">
                 <div className="font-bold flex items-center gap-2">
-                  <span>المزامنة التلقائية معطلة نهائياً (الحفظ اليدوي فقط) 🛡️</span>
-                  <span className="px-2 py-0.5 bg-amber-200 text-amber-900 rounded-md text-[10px] font-bold">معطلة تلقائياً</span>
+                  <span>جوجل شيت يعمل كقاعدة بيانات حية مركزية 📊</span>
+                  <span className="px-2 py-0.5 bg-emerald-200 text-emerald-900 rounded-md text-[10px] font-bold">مزامنة فورية نشطة</span>
                 </div>
-                <p className="text-[11px] text-amber-900 leading-relaxed font-cairo">
-                  لا يقوم النظام بأي مزامنة تلقائية في الخلفية عند إنشاء أو تعديل الفواتير أو الخدمات نهائياً. يتم حفظ وتحديث البيانات على جوجل درايف <strong>فقط عند الضغط على زر (حفظ جميع الإعدادات بالتكامل 💾)</strong> في أسفل الصفحة، أو عند استخدام زري التصدير والاستيراد الموحدين أدناه عند الحاجة.
+                <p className="text-[11px] text-emerald-900 leading-relaxed font-cairo">
+                  يتم حفظ وتحديث كتالوج الخدمات، الفواتير الجديدة أو المعدلة، والأسماء المترجمة للإنجليزي في ملف جوجل شيت تلقائياً وفورياً عند أي تعديل أو إنشاء. كما يمكنك دائماً استخدام زري التصدير والاستيراد الموحدين بالأسفل لرفع أو سحب كافة البيانات دفعة واحدة عند الحاجة.
                 </p>
               </div>
             </div>

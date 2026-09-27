@@ -8,7 +8,7 @@
     "deliveryMessage": "تم تسليم جواز السفر والأوراق الخاصة بك بنجاح يا {اسم_العميل}.\nرقم الفاتورة: {رقم_الفاتورة}\nنسعد بتقييمكم لخدمات مكتب مزايا للجوازات ونراكم قريباً في معاملات أخرى.",
     "whatsappTemplate": "مكتب مزايا للجوازات\n\nالعميل: {اسم_العميل}\n{الاسم_الانجليزي}\n{المهنة}\nالخدمات:\n{الخدمات}\n\nالإجمالي: {السعر} جنيه.\n\n{رسالة_الشكر}",
     "googleSheetWebhookUrl": "https://script.google.com/macros/s/AKfycbzs-tNIvoZJQOwvb7FgYht4du96_QrDzqTXIiUMAV0iVfvvIkENhxuBXGYfDp-5snc/exec",
-    "autoSyncWebhook": false,
+    "autoSyncWebhook": true,
     "googleSheetId": "",
     "googleSheetUrl": "",
     "googleSheetsConnected": true,
