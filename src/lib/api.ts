@@ -1,4 +1,4 @@
-import { Invoice, Service, DictionaryItem, CollectionClosing, Employee, AppSettings } from "../types";
+import { Invoice, Service, DictionaryItem, CollectionClosing, Employee, AppSettings, GovernmentFine } from "../types";
 
 export interface DBPayload {
   services: Service[];
@@ -7,6 +7,7 @@ export interface DBPayload {
   collectionClosings: CollectionClosing[];
   employees: Employee[];
   settings: AppSettings;
+  governmentFines?: GovernmentFine[];
 }
 
 export async function fetchDB(): Promise<DBPayload> {
@@ -347,6 +348,27 @@ export async function importInvoicesFromGoogleSheet(webhookUrl?: string): Promis
     throw new Error(errData.error || "فشل استيراد الفواتير من جوجل شيت");
   }
   return response.json();
+}
+
+export async function fetchGovernmentFines(): Promise<GovernmentFine[]> {
+  const response = await fetch("/api/db/government-fines");
+  if (!response.ok) {
+    throw new Error("فشل استرجاع بنود الغرامات الحكومية من الخادم");
+  }
+  return response.json();
+}
+
+export async function saveGovernmentFines(fines: GovernmentFine[]): Promise<GovernmentFine[]> {
+  const response = await fetch("/api/db/government-fines", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(fines),
+  });
+  if (!response.ok) {
+    throw new Error("فشل حفظ بنود الغرامات الحكومية بالخادم");
+  }
+  const result = await response.json();
+  return result.governmentFines;
 }
 
 

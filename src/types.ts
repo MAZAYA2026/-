@@ -16,6 +16,13 @@ export interface Service {
   order?: number; // ترتيب ظهور الخدمة (1, 2, 3...)
 }
 
+export interface GovernmentFine {
+  id: string;
+  name: string; // اسم بند الغرامة الحكومية (مثل: غرامة فقد جواز سفر، غرامة تالف، غرامة تأخير...)
+  amount: number; // مبلغ الغرامة الافتراضي بالجنيه
+  notes?: string; // ملاحظات أو شروط تطبيق الغرامة
+}
+
 export interface CustomerInput {
   arabicName: string; // الاسم العربي (Mandatory)
   englishName: string; // الاسم الإنجليزي (Optional, mandatory if service starts with # or ##)
@@ -27,9 +34,11 @@ export interface CustomerInput {
   services: {
     serviceId: string;
     quantity: number;
-    price: number; // Total price = (govPrice + officeFee) * qty
+    price: number; // Total price = (govPrice + (fineAmount || 0) + officeFee) * qty
     deliveryDate: string; // Calculated delivery date
     notes?: string; // ملاحظات أو تعليمات خاصة بالخدمة
+    fineName?: string; // اسم الغرامة الحكومية إن وجدت (لخدمات #)
+    fineAmount?: number; // مبلغ الغرامة الحكومية للوحدة إن وجد
   }[];
 }
 

@@ -120,10 +120,13 @@ export function generateWhatsAppWelcomeMessage(
       const srvName = matched?.name || s.serviceId;
       const qtyStr = s.quantity > 1 ? ` (العدد: ${s.quantity})` : "";
       const priceStr = s.price > 0 ? ` - ${s.price} ج.م` : "";
+      const fineStr = (s.fineAmount && s.fineAmount > 0)
+        ? ` (تشمل ${s.fineName || "غرامة حكومية"}: ${s.fineAmount * s.quantity} ج.م)`
+        : "";
       const srvDeliveryStr = s.deliveryDate 
         ? ` [تسليم: ${getArabicDayName(s.deliveryDate) ? getArabicDayName(s.deliveryDate) + " " : ""}${s.deliveryDate}${sIdx > 0 ? " - يبدأ احتسابها بعد انتهاء الخدمة السابقة" : ""}]` 
         : "";
-      srvItems.push(`• ${srvName}${qtyStr}${priceStr}${srvDeliveryStr}`);
+      srvItems.push(`• ${srvName}${qtyStr}${priceStr}${fineStr}${srvDeliveryStr}`);
     });
     servicesOnly = srvItems.join("\n");
     srvSectionLines.push(cust.services.length > 1 ? `📋 *الخدمات المطلوبة:*` : `📋 *الخدمة المطلوبة:*`);
@@ -160,8 +163,11 @@ export function generateWhatsAppWelcomeMessage(
         const srvName = matched?.name || s.serviceId;
         const qtyStr = s.quantity > 1 ? ` (${s.quantity})` : "";
         const priceStr = s.price > 0 ? ` [${s.price} ج.م]` : "";
+        const fineStr = (s.fineAmount && s.fineAmount > 0)
+          ? ` (تشمل ${s.fineName || "غرامة"}: ${s.fineAmount * s.quantity} ج.م)`
+          : "";
         const delivStr = s.deliveryDate ? ` [تسليم: ${s.deliveryDate}${sIdx > 0 ? " - يبدأ بعد السابقة" : ""}]` : "";
-        const fullSrv = `${srvName}${qtyStr}${priceStr}${delivStr}`;
+        const fullSrv = `${srvName}${qtyStr}${priceStr}${fineStr}${delivStr}`;
         custSrvNames.push(fullSrv);
         allSrvs.push(`• (${arName}): ${fullSrv}`);
       });
@@ -174,49 +180,57 @@ export function generateWhatsAppWelcomeMessage(
     servicesOnly = allSrvs.join("\n");
   }
 
-  // ── Section 3: تعليمات هذه الخدمة ────────────────────────────
-  // Keep it concise and avoid repeating anything present in the closing
-  const instLines: string[] = [];
-  instLines.push(`📌 *تعليمات الاستلام:*`);
-  const collectedInstructions: string[] = [];
-
+  // ── Section 3: تعليمات الاستلام المأخوذة مباشرة من الخدمات المختارة ────────────────────────────
+  // Takes instructions directly from the chosen service(s) as requested by user
+  const serviceInstructionsList: { name: string; instructions: string }[] = [];
   inv.customers.forEach((cust) => {
     cust.services.forEach((s) => {
       const matched = services.find((srv) => srv.name === s.serviceId || srv.id === s.serviceId);
-      if (matched?.instructions && matched.instructions.trim()) {
-        const trimmed = matched.instructions.trim();
-        if (!collectedInstructions.includes(trimmed)) {
-          collectedInstructions.push(trimmed);
+      const srvName = matched?.name || s.serviceId;
+      const inst = matched?.instructions?.trim() || s.notes?.trim();
+      if (inst) {
+        if (!serviceInstructionsList.some(item => item.instructions === inst)) {
+          serviceInstructionsList.push({ name: srvName, instructions: inst });
         }
-      }
-      if (s.notes && s.notes.trim() && !collectedInstructions.includes(s.notes.trim())) {
-        collectedInstructions.push(s.notes.trim());
       }
     });
   });
 
-  if (collectedInstructions.length > 0) {
-    collectedInstructions.forEach((inst) => {
-      instLines.push(`• ${inst}`);
-    });
-    const alreadyMentionsId = collectedInstructions.some(
-      (inst) => inst.includes("الرقم القومي") || inst.includes("البطاقة") || inst.includes("أصل وصورة")
-    );
-    if (!alreadyMentionsId) {
-      instLines.push(`• يرجى إحضار أصل بطاقة الرقم القومي سارية أو المستندات الأصلية للمطابقة.`);
-    }
+  let serviceInstructionsBody = "";
+  if (serviceInstructionsList.length === 1) {
+    serviceInstructionsBody = serviceInstructionsList[0].instructions;
+  } else if (serviceInstructionsList.length > 1) {
+    serviceInstructionsBody = serviceInstructionsList
+      .map(item => `• *${item.name}:*\n${item.instructions}`)
+      .join("\n\n");
   } else {
-    // Official concise instructions
-    instLines.push(`• يرجى إحضار أصل بطاقة الرقم القومي سارية أو المستندات الأصلية للمطابقة عند الاستلام.`);
-    instLines.push(`• تسليم المعاملات يتم لصاحب الشأن شخصياً أو بموجب توكيل رسمي ساري.`);
+    serviceInstructionsBody = "يرجى إحضار أصل بطاقة الرقم القومي سارية أو المستندات الرسمية الأصلية للمطابقة عند الاستلام الشخصي.";
   }
 
-  // ── Section 4: التكلفة المالية ──────────────────────────────
+  const instLines: string[] = [
+    `📌 *تعليمات الاستلام:*`,
+    serviceInstructionsBody
+  ];
+
+  // ── Section 4: التكلفة المالية مع تفصيل الغرامات الحكومية إن وجدت ──────────────────────────────
+  let totalFines = 0;
+  inv.customers.forEach((cust) => {
+    cust.services.forEach((s) => {
+      if (s.fineAmount && s.fineAmount > 0) {
+        totalFines += s.fineAmount * s.quantity;
+      }
+    });
+  });
+
   const costLines: string[] = [];
   costLines.push(`💰 *التكلفة المالية:*`);
   costLines.push(`• إجمالي الفاتورة: ${inv.totalAmount} ج.م`);
   if (typeof inv.totalGov === "number" && inv.totalGov > 0 && typeof inv.totalOffice === "number" && inv.totalOffice > 0) {
-    costLines.push(`• تفصيل المبلغ: رسوم حكومية (${inv.totalGov} ج.م) + أتعاب المكتب (${inv.totalOffice} ج.م)`);
+    if (totalFines > 0) {
+      costLines.push(`• تفصيل المبلغ: رسوم حكومية (${inv.totalGov} ج.م تشمل غرامات بقيمة ${totalFines} ج.م) + أتعاب المكتب (${inv.totalOffice} ج.م)`);
+    } else {
+      costLines.push(`• تفصيل المبلغ: رسوم حكومية (${inv.totalGov} ج.م) + أتعاب المكتب (${inv.totalOffice} ج.م)`);
+    }
   }
 
   // ── Section 5: الميعاد النهائي للتسليم ───────────────────────
@@ -289,7 +303,8 @@ export function generateWhatsAppWelcomeMessage(
     .replace(/{المهنة}/g, professionOnly)
     .replace(/{الخدمات}/g, servicesOnly)
     .replace(/{الخدمة_المختارة}/g, servicesOnly)
-    .replace(/{تعليمات_الخدمة}/g, instLines.slice(1).join("\n"))
+    .replace(/{تعليمات_الاستلام}/g, serviceInstructionsBody)
+    .replace(/{تعليمات_الخدمة}/g, serviceInstructionsBody)
     .replace(/{السعر}/g, inv.totalAmount.toString())
     .replace(/{التكلفة}/g, costLines.slice(1).join("\n"))
     .replace(/{تاريخ_اليوم}/g, invDate)

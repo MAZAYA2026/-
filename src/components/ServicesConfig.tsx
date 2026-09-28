@@ -1,14 +1,16 @@
-import React, { useState } from "react";
-import { Service, Employee } from "../types";
+import React, { useState, useEffect } from "react";
+import { Service, Employee, GovernmentFine } from "../types";
 import { 
   createServiceOnServer, 
   updateServiceOnServer, 
   deleteServiceOnServer, 
-  reorderServicesOnServer
+  reorderServicesOnServer,
+  saveGovernmentFines
 } from "../lib/api";
 import { 
   Plus, Edit3, Trash2, Check, X, ShieldAlert, Sparkles, FolderPlus, DollarSign, Clock, FileText,
-  ArrowUp, ArrowDown, ChevronsUp, ChevronsDown, ArrowUpDown, CheckCircle2, ArrowDownAZ, Hash, Loader2
+  ArrowUp, ArrowDown, ChevronsUp, ChevronsDown, ArrowUpDown, CheckCircle2, ArrowDownAZ, Hash, Loader2,
+  AlertTriangle, Shield, CheckCircle
 } from "lucide-react";
 
 interface ServicesConfigProps {
@@ -18,6 +20,8 @@ interface ServicesConfigProps {
   onServiceUpdated: (srv: Service) => void;
   onServiceDeleted: (id: string) => void;
   onServicesReordered?: (services: Service[]) => void;
+  governmentFines?: GovernmentFine[];
+  onGovernmentFinesUpdated?: (fines: GovernmentFine[]) => void;
   googleSheetWebhookUrl?: string;
   onReloadDatabase?: () => Promise<void>;
 }
@@ -29,10 +33,140 @@ export default function ServicesConfig({
   onServiceUpdated, 
   onServiceDeleted,
   onServicesReordered,
+  governmentFines = [],
+  onGovernmentFinesUpdated,
   googleSheetWebhookUrl,
   onReloadDatabase
 }: ServicesConfigProps) {
   const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
+
+  // Government Fines states
+  const [finesList, setFinesList] = useState<GovernmentFine[]>(governmentFines || []);
+  const [showAddFineModal, setShowAddFineModal] = useState(false);
+  const [newFineName, setNewFineName] = useState("");
+  const [newFineAmount, setNewFineAmount] = useState(500);
+  const [newFineNotes, setNewFineNotes] = useState("");
+  const [editingFineId, setEditingFineId] = useState<string | null>(null);
+  const [editFineName, setEditFineName] = useState("");
+  const [editFineAmount, setEditFineAmount] = useState(0);
+  const [editFineNotes, setEditFineNotes] = useState("");
+  const [fineSaveLoading, setFineSaveLoading] = useState(false);
+  const [fineFeedback, setFineFeedback] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (governmentFines && governmentFines.length > 0) {
+      setFinesList(governmentFines);
+    }
+  }, [governmentFines]);
+
+  const showFineMessage = (msg: string) => {
+    setFineFeedback(msg);
+    setTimeout(() => setFineFeedback(null), 3500);
+  };
+
+  const handleCreateFine = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeEmployee.permissions.canManageServices) {
+      alert("عذراً، ليست لديك صلاحية لإدارة وتعديل الخدمات والغرامات.");
+      return;
+    }
+    if (!newFineName.trim()) {
+      alert("الرجاء إدخال اسم بند الغرامة.");
+      return;
+    }
+    const newFine: GovernmentFine = {
+      id: "fine-" + Date.now(),
+      name: newFineName.trim(),
+      amount: Math.max(0, newFineAmount),
+      notes: newFineNotes.trim()
+    };
+    const updated = [...finesList, newFine];
+    setFinesList(updated);
+    if (onGovernmentFinesUpdated) onGovernmentFinesUpdated(updated);
+    setNewFineName("");
+    setNewFineAmount(500);
+    setNewFineNotes("");
+    setShowAddFineModal(false);
+
+    try {
+      setFineSaveLoading(true);
+      await saveGovernmentFines(updated);
+      showFineMessage("تمت إضافة بند الغرامة بنجاح وحفظه بالنظام.");
+    } catch (err) {
+      console.error(err);
+      alert("حدث خطأ أثناء حفظ الغرامة بالخادم.");
+    } finally {
+      setFineSaveLoading(false);
+    }
+  };
+
+  const handleStartEditFine = (fine: GovernmentFine) => {
+    setEditingFineId(fine.id);
+    setEditFineName(fine.name);
+    setEditFineAmount(fine.amount);
+    setEditFineNotes(fine.notes || "");
+  };
+
+  const handleSaveEditFine = async () => {
+    if (!activeEmployee.permissions.canManageServices) {
+      alert("عذراً، ليست لديك صلاحية لإدارة وتعديل الغرامات.");
+      return;
+    }
+    if (!editFineName.trim()) {
+      alert("الرجاء إدخال اسم الغرامة.");
+      return;
+    }
+    const updated = finesList.map(f => {
+      if (f.id === editingFineId) {
+        return {
+          ...f,
+          name: editFineName.trim(),
+          amount: Math.max(0, editFineAmount),
+          notes: editFineNotes.trim()
+        };
+      }
+      return f;
+    });
+    setFinesList(updated);
+    if (onGovernmentFinesUpdated) onGovernmentFinesUpdated(updated);
+    setEditingFineId(null);
+
+    try {
+      setFineSaveLoading(true);
+      await saveGovernmentFines(updated);
+      showFineMessage("تم تحديث بند الغرامة بنجاح.");
+    } catch (err) {
+      console.error(err);
+      alert("حدث خطأ أثناء حفظ التعديل بالخادم.");
+    } finally {
+      setFineSaveLoading(false);
+    }
+  };
+
+  const handleDeleteFine = async (fineId: string) => {
+    if (!activeEmployee.permissions.canManageServices) {
+      alert("عذراً، ليست لديك صلاحية لإدارة وتعديل الغرامات.");
+      return;
+    }
+    const fineToDelete = finesList.find(f => f.id === fineId);
+    const confirmed = window.confirm(`⚠️ تأكيد الحذف:\nهل أنت متأكد من حذف بند "${fineToDelete?.name || 'هذه الغرامة'}"؟`);
+    if (!confirmed) return;
+
+    const updated = finesList.filter(f => f.id !== fineId);
+    setFinesList(updated);
+    if (onGovernmentFinesUpdated) onGovernmentFinesUpdated(updated);
+
+    try {
+      setFineSaveLoading(true);
+      await saveGovernmentFines(updated);
+      showFineMessage("تم حذف بند الغرامة بنجاح.");
+    } catch (err) {
+      console.error(err);
+      alert("حدث خطأ أثناء حذف الغرامة بالخادم.");
+    } finally {
+      setFineSaveLoading(false);
+    }
+  };
 
   // Form states for creating/editing
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -717,6 +851,236 @@ export default function ServicesConfig({
           </table>
         </div>
       </div>
+
+      {/* Government Fines Management Card for # Passport Services */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600">
+              <AlertTriangle className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-extrabold text-sm text-slate-800">
+                إدارة بنود الغرامات الحكومية (لخدمات الجوازات التي تبدأ بـ #):
+              </h3>
+              <p className="text-xs text-slate-500">
+                تُضاف هذه الغرامات كبنود اختيارية عند تسجيل الخدمات التي تبدأ بـ # (كبدل فاقد، تالف، أو تأخير) وتنعكس في الفاتورة والواتساب.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {fineFeedback && (
+              <span className="text-xs text-emerald-600 font-bold bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-100 animate-fade-in">
+                {fineFeedback}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => setShowAddFineModal(true)}
+              className="bg-amber-600 hover:bg-amber-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold font-cairo flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+            >
+              <Plus className="w-4 h-4" />
+              إضافة بند غرامة جديد
+            </button>
+          </div>
+        </div>
+
+        {/* Fines Table */}
+        <div className="border border-slate-200 rounded-xl overflow-hidden">
+          <table className="w-full text-right text-xs">
+            <thead className="bg-slate-50/80 text-slate-700 font-bold border-b border-slate-200">
+              <tr>
+                <th className="p-3 w-10 text-center">#</th>
+                <th className="p-3">اسم بند الغرامة</th>
+                <th className="p-3">المبلغ الافتراضي</th>
+                <th className="p-3">ملاحظات التطبيق</th>
+                <th className="p-3 text-left w-24">إجراءات</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-150">
+              {finesList.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="p-6 text-center text-slate-400">
+                    لا توجد بنود غرامات مسجلة حالياً. اضغط على "إضافة بند غرامة جديد" لإنشاء البنود.
+                  </td>
+                </tr>
+              ) : (
+                finesList.map((fine, fIdx) => {
+                  const isEditing = editingFineId === fine.id;
+                  return (
+                    <tr key={fine.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="p-3 text-center font-mono font-bold text-slate-400">{fIdx + 1}</td>
+                      <td className="p-3">
+                        {isEditing ? (
+                          <input
+                            type="text"
+                            value={editFineName}
+                            onChange={(e) => setEditFineName(e.target.value)}
+                            className="w-full bg-white border border-blue-300 rounded-lg px-2 py-1 text-xs font-bold"
+                          />
+                        ) : (
+                          <span className="font-bold text-slate-800">{fine.name}</span>
+                        )}
+                      </td>
+                      <td className="p-3">
+                        {isEditing ? (
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="number"
+                              min="0"
+                              value={editFineAmount}
+                              onChange={(e) => setEditFineAmount(parseFloat(e.target.value) || 0)}
+                              className="w-24 bg-white border border-blue-300 rounded-lg px-2 py-1 text-xs font-mono font-bold"
+                            />
+                            <span className="text-[10px] text-slate-400">ج.م</span>
+                          </div>
+                        ) : (
+                          <span className="font-mono font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                            {fine.amount.toFixed(2)} ج.م
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-3">
+                        {isEditing ? (
+                          <input
+                            type="text"
+                            value={editFineNotes}
+                            onChange={(e) => setEditFineNotes(e.target.value)}
+                            placeholder="ملاحظات..."
+                            className="w-full bg-white border border-blue-300 rounded-lg px-2 py-1 text-xs"
+                          />
+                        ) : (
+                          <span className="text-slate-500 text-[11px]">{fine.notes || "—"}</span>
+                        )}
+                      </td>
+                      <td className="p-3 text-left">
+                        {isEditing ? (
+                          <div className="inline-flex gap-1">
+                            <button
+                              type="button"
+                              onClick={handleSaveEditFine}
+                              disabled={fineSaveLoading}
+                              className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg"
+                              title="حفظ"
+                            >
+                              <Check className="w-4 h-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingFineId(null)}
+                              className="p-1.5 text-slate-400 hover:bg-slate-100 rounded-lg"
+                              title="إلغاء"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="inline-flex gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleStartEditFine(fine)}
+                              className="p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-900 rounded-lg transition-colors"
+                              title="تعديل بند الغرامة"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteFine(fine.id)}
+                              className="p-1.5 text-rose-500 hover:bg-rose-50 hover:text-rose-700 rounded-lg transition-colors"
+                              title="حذف بند الغرامة"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Add New Fine Modal */}
+      {showAddFineModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-slate-150 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-150 pb-3">
+              <h3 className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-600" />
+                إضافة بند غرامة حكومية جديد:
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowAddFineModal(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateFine} className="space-y-3.5">
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-700">اسم بند الغرامة (مثال: غرامة فقد جواز سفر):</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="مثال: غرامة فقد جواز، غرامة تالف، غرامة تأخير..."
+                  value={newFineName}
+                  onChange={(e) => setNewFineName(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-700">مبلغ الغرامة الافتراضي (بالجنيه):</label>
+                <input
+                  type="number"
+                  required
+                  min="0"
+                  step="50"
+                  value={newFineAmount}
+                  onChange={(e) => setNewFineAmount(parseFloat(e.target.value) || 0)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono font-bold"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-700">ملاحظات وشروط التطبيق (اختياري):</label>
+                <textarea
+                  rows={2}
+                  placeholder="تطبق في حالة فقدان الجواز القديم أو عدم إحضاره..."
+                  value={newFineNotes}
+                  onChange={(e) => setNewFineNotes(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowAddFineModal(false)}
+                  className="px-4 py-2 border border-slate-200 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-50"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={fineSaveLoading}
+                  className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
+                >
+                  {fineSaveLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                  إضافة وحفظ البند
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
     </div>
   );

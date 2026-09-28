@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Invoice, Service, AppSettings, Employee, CollectionClosing, DictionaryItem } from "./types";
+import { Invoice, Service, AppSettings, Employee, CollectionClosing, DictionaryItem, GovernmentFine } from "./types";
 import { fetchDB, saveDB } from "./lib/api";
 import EmployeeLogin from "./components/EmployeeLogin";
 import InvoiceCreator from "./components/InvoiceCreator";
@@ -35,6 +35,7 @@ export default function App() {
   const [closings, setClosings] = useState<CollectionClosing[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [dictionary, setDictionary] = useState<DictionaryItem[]>([]);
+  const [governmentFines, setGovernmentFines] = useState<GovernmentFine[]>([]);
   
   const [activeTab, setActiveTab] = useState<"create" | "query" | "aman" | "reminders" | "collection" | "services" | "settings">("create");
   const [loading, setLoading] = useState(true);
@@ -51,6 +52,7 @@ export default function App() {
       setClosings(data.collectionClosings || []);
       setEmployees(data.employees || []);
       setDictionary(data.dictionary || []);
+      setGovernmentFines(data.governmentFines || []);
     } catch (err) {
       console.error("Error syncing database:", err);
     } finally {
@@ -330,6 +332,7 @@ export default function App() {
               onInvoiceCreated={handleInvoiceCreated} 
               dictionary={dictionary}
               onDictionaryUpdated={(newDict) => setDictionary(newDict)}
+              governmentFines={governmentFines}
             />
           )}
 
@@ -342,6 +345,7 @@ export default function App() {
               onInvoiceUpdated={handleInvoiceUpdated} 
               onInvoiceDeleted={handleInvoiceDeleted} 
               onInvoicesLoaded={(loadedInvoices) => setInvoices(loadedInvoices)}
+              governmentFines={governmentFines}
             />
           )}
 
@@ -379,6 +383,8 @@ export default function App() {
               onServiceUpdated={handleServiceUpdated} 
               onServiceDeleted={handleServiceDeleted} 
               onServicesReordered={handleServicesReordered}
+              governmentFines={governmentFines}
+              onGovernmentFinesUpdated={(fines) => setGovernmentFines(fines)}
               googleSheetWebhookUrl={settings?.googleSheetWebhookUrl}
               onReloadDatabase={syncDatabase}
             />

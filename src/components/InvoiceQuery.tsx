@@ -1,9 +1,9 @@
 import React, { useState, useRef } from "react";
-import { Invoice, InvoiceStatus, AppSettings, Service, Employee, CustomerInput } from "../types";
+import { Invoice, InvoiceStatus, AppSettings, Service, Employee, CustomerInput, GovernmentFine } from "../types";
 import { updateInvoiceOnServer, deleteInvoiceOnServer } from "../lib/api";
 import { calculateWorkingDaysDeliveryDate, getArabicDayName, recalculateCustomerServicesDeliveryDates } from "../lib/businessDays";
 import { generateWhatsAppWelcomeMessage, getWhatsAppUrl } from "../lib/whatsapp";
-import { Search, Edit3, Trash2, Printer, Send, CheckCircle, PackageOpen, X, MapPin, Calendar, Info, RefreshCw, AlertCircle, Save } from "lucide-react";
+import { Search, Edit3, Trash2, Printer, Send, CheckCircle, PackageOpen, X, MapPin, Calendar, Info, RefreshCw, AlertCircle, Save, AlertTriangle } from "lucide-react";
 import ThermalReceipt from "./ThermalReceipt";
 
 interface InvoiceQueryProps {
@@ -14,6 +14,7 @@ interface InvoiceQueryProps {
   onInvoiceUpdated: (updated: Invoice) => void;
   onInvoiceDeleted: (invoiceId: number) => void;
   onInvoicesLoaded?: (invoices: Invoice[]) => void;
+  governmentFines?: GovernmentFine[];
 }
 
 export default function InvoiceQuery({ 
@@ -23,7 +24,8 @@ export default function InvoiceQuery({
   activeEmployee, 
   onInvoiceUpdated, 
   onInvoiceDeleted,
-  onInvoicesLoaded 
+  onInvoicesLoaded,
+  governmentFines = []
 }: InvoiceQueryProps) {
   // Search parameters
   const [searchId, setSearchId] = useState("");
@@ -232,10 +234,11 @@ export default function InvoiceQuery({
         cust.services.forEach((s) => {
           const matched = services.find(srv => srv.id === s.serviceId || srv.name === s.serviceId);
           if (matched) {
-            totalGov += matched.govPrice * s.quantity;
+            const fine = s.fineAmount || 0;
+            totalGov += (matched.govPrice + fine) * s.quantity;
             totalOffice += matched.officeFee * s.quantity;
-            totalAmount += (matched.govPrice + matched.officeFee) * s.quantity;
-            s.price = (matched.govPrice + matched.officeFee) * s.quantity;
+            totalAmount += (matched.govPrice + fine + matched.officeFee) * s.quantity;
+            s.price = (matched.govPrice + fine + matched.officeFee) * s.quantity;
           }
         });
 
@@ -510,20 +513,37 @@ export default function InvoiceQuery({
                       )}
 
                       {/* Customer services list */}
-                      <div className="mt-1.5 space-y-1 pl-1">
-                        {cust.services.map((s, sIdx) => (
-                          <div key={sIdx} className="flex justify-between items-center text-[11px] text-slate-600">
-                            <span>• {s.serviceId}</span>
-                            <div className="flex items-center gap-1.5 font-mono text-[10px]">
-                              {s.deliveryDate && (
-                                <span className="text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded-sm border border-amber-200">
-                                  {s.deliveryDate}
-                                </span>
+                      <div className="mt-1.5 space-y-1.5 pl-1">
+                        {cust.services.map((s, sIdx) => {
+                          const matched = services.find(srv => srv.id === s.serviceId || srv.name === s.serviceId);
+                          return (
+                            <div key={sIdx} className="space-y-1 border-b border-slate-100 last:border-b-0 pb-1">
+                              <div className="flex justify-between items-center text-[11px] text-slate-700">
+                                <span className="font-medium">• {s.serviceId}</span>
+                                <div className="flex items-center gap-1.5 font-mono text-[10px]">
+                                  {s.fineAmount && s.fineAmount > 0 ? (
+                                    <span className="text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded-sm border border-amber-200 font-cairo">
+                                      {s.fineName || "غرامة"}: +{s.fineAmount * s.quantity} ج.م
+                                    </span>
+                                  ) : null}
+                                  {s.deliveryDate && (
+                                    <span className="text-indigo-800 bg-indigo-50 px-1.5 py-0.5 rounded-sm border border-indigo-200">
+                                      {s.deliveryDate}
+                                    </span>
+                                  )}
+                                  <span className="text-slate-500 font-bold">x{s.quantity}</span>
+                                </div>
+                              </div>
+                              {/* Individual Delivery Instructions */}
+                              {matched?.instructions && (
+                                <div className="text-[10px] text-blue-800 bg-blue-50/60 px-2 py-0.5 rounded-md border border-blue-100/80 mr-2 leading-tight">
+                                  <span className="font-bold">📋 تعليمات التسليم: </span>
+                                  <span>{matched.instructions}</span>
+                                </div>
                               )}
-                              <span className="text-slate-400">x{s.quantity}</span>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   );
@@ -743,50 +763,113 @@ export default function InvoiceQuery({
                         + إضافة خدمة إضافية
                       </button>
                     </div>
-                    {cust.services.map((s, sIdx) => (
-                      <div key={sIdx} className="flex gap-2 items-center bg-slate-50 p-2.5 rounded-lg border border-slate-150">
-                        <select
-                          value={s.serviceId}
-                          onChange={(e) => {
-                            const updated = [...editCustomers];
-                            updated[cIdx].services[sIdx].serviceId = e.target.value;
-                            setEditCustomers(updated);
-                          }}
-                          className="flex-1 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-cairo"
-                        >
-                          {services.map((srv, idx) => (
-                            <option key={srv.id} value={srv.name}>
-                              {idx + 1}. {srv.name}
-                            </option>
-                          ))}
-                        </select>
-                        <input
-                          type="number"
-                          min="1"
-                          value={s.quantity}
-                          onChange={(e) => {
-                            const updated = [...editCustomers];
-                            updated[cIdx].services[sIdx].quantity = parseInt(e.target.value) || 1;
-                            setEditCustomers(updated);
-                          }}
-                          className="w-16 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono text-center"
-                        />
-                        {cust.services.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const updated = [...editCustomers];
-                              updated[cIdx].services = updated[cIdx].services.filter((_, i) => i !== sIdx);
-                              setEditCustomers(updated);
-                            }}
-                            className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                            title="حذف هذه الخدمة"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
-                    ))}
+                    {cust.services.map((s, sIdx) => {
+                      const isPass = s.serviceId.trim().startsWith("#");
+                      return (
+                        <div key={sIdx} className="space-y-1.5 bg-slate-50 p-2.5 rounded-lg border border-slate-150">
+                          <div className="flex gap-2 items-center">
+                            <select
+                              value={s.serviceId}
+                              onChange={(e) => {
+                                const updated = [...editCustomers];
+                                updated[cIdx].services[sIdx].serviceId = e.target.value;
+                                if (!e.target.value.trim().startsWith("#")) {
+                                  updated[cIdx].services[sIdx].fineName = "";
+                                  updated[cIdx].services[sIdx].fineAmount = 0;
+                                }
+                                setEditCustomers(updated);
+                              }}
+                              className="flex-1 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-cairo"
+                            >
+                              {services.map((srv, idx) => (
+                                <option key={srv.id} value={srv.name}>
+                                  {idx + 1}. {srv.name}
+                                </option>
+                              ))}
+                            </select>
+                            <div className="flex items-center gap-1">
+                              <span className="text-[10px] text-slate-400 font-cairo">الكمية:</span>
+                              <input
+                                type="number"
+                                min="1"
+                                value={s.quantity}
+                                onChange={(e) => {
+                                  const updated = [...editCustomers];
+                                  updated[cIdx].services[sIdx].quantity = parseInt(e.target.value) || 1;
+                                  setEditCustomers(updated);
+                                }}
+                                className="w-14 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono text-center font-bold"
+                              />
+                            </div>
+                            {cust.services.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const updated = [...editCustomers];
+                                  updated[cIdx].services = updated[cIdx].services.filter((_, i) => i !== sIdx);
+                                  setEditCustomers(updated);
+                                }}
+                                className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                title="حذف هذه الخدمة"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Government fine selection when service starts with # */}
+                          {isPass && (
+                            <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-200/60 text-[11px]">
+                              <span className="text-amber-800 font-bold flex items-center gap-1">
+                                <AlertTriangle className="w-3 h-3 text-amber-600" />
+                                غرامة حكومية:
+                              </span>
+                              <select
+                                value={s.fineName || ""}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  const updated = [...editCustomers];
+                                  if (!val) {
+                                    updated[cIdx].services[sIdx].fineName = "";
+                                    updated[cIdx].services[sIdx].fineAmount = 0;
+                                  } else {
+                                    const found = governmentFines.find(f => f.name === val);
+                                    updated[cIdx].services[sIdx].fineName = val;
+                                    updated[cIdx].services[sIdx].fineAmount = found ? found.amount : (updated[cIdx].services[sIdx].fineAmount || 500);
+                                  }
+                                  setEditCustomers(updated);
+                                }}
+                                className="bg-white border border-amber-300 rounded-md px-2 py-1 text-xs text-amber-950 font-cairo"
+                              >
+                                <option value="">-- بدون غرامة --</option>
+                                {governmentFines.map(f => (
+                                  <option key={f.id} value={f.name}>
+                                    {f.name} (+{f.amount} ج.م)
+                                  </option>
+                                ))}
+                                <option value="__custom__">غرامة مخصصة...</option>
+                              </select>
+                              {s.fineName && (
+                                <div className="flex items-center gap-1">
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    value={s.fineAmount || 0}
+                                    onChange={(e) => {
+                                      const updated = [...editCustomers];
+                                      updated[cIdx].services[sIdx].fineAmount = parseFloat(e.target.value) || 0;
+                                      setEditCustomers(updated);
+                                    }}
+                                    className="w-16 bg-white border border-amber-300 rounded-md px-1.5 py-1 text-xs font-mono font-bold text-amber-950"
+                                  />
+                                  <span className="text-[10px] text-slate-400">ج.م</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
 
                 </div>

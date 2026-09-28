@@ -328,6 +328,9 @@ export function recalculateCustomerServicesDeliveryDates<T extends {
   deliveryDate?: string; 
   price?: number; 
   quantity?: number;
+  fineName?: string;
+  fineAmount?: number;
+  notes?: string;
 }>(
   servicesList: T[],
   startDateStr: string | Date,

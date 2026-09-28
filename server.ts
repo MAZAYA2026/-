@@ -182,6 +182,11 @@ const initialData = {
       }
     }
   ],
+  governmentFines: [
+    { id: "fine-1", name: "غرامة فقد جواز سفر", amount: 500, notes: "تطبق في حالة فقدان جواز السفر السابق" },
+    { id: "fine-2", name: "غرامة تالف جواز سفر", amount: 500, notes: "تطبق في حالة تلف الجواز القديم أو عدم وضوح بياناته" },
+    { id: "fine-3", name: "غرامة تأخير تجديد / عدم استلام سابق", amount: 300, notes: "تطبق في حالات التأخير الرسمية المقررة" }
+  ],
   settings: {
     headerText: "مكتب مزايا للخدمات الحكومية والجوازات E.G",
     subHeaderText: "جوازات طنطا والمعاملات الحكومية",
@@ -245,7 +250,11 @@ function readDB() {
   }
   try {
     const data = fs.readFileSync(DB_FILE, "utf8");
-    return JSON.parse(data);
+    const parsed = JSON.parse(data);
+    if (!parsed.governmentFines || !Array.isArray(parsed.governmentFines) || parsed.governmentFines.length === 0) {
+      parsed.governmentFines = initialData.governmentFines;
+    }
+    return parsed;
   } catch (err) {
     console.error("Error reading database file, returning defaults:", err);
     return initialData;
@@ -524,6 +533,24 @@ app.post("/api/db/services/reorder", (req, res) => {
   writeDB(db);
   triggerBackgroundWebhookSync(db, "إعادة ترتيب كتالوج الخدمات");
   res.json({ status: "success", services: db.services });
+});
+
+// Government Fines endpoints (for passport services #)
+app.get("/api/db/government-fines", (req, res) => {
+  const db = readDB();
+  res.json(db.governmentFines || initialData.governmentFines);
+});
+
+app.post("/api/db/government-fines", (req, res) => {
+  const fines = req.body;
+  if (!Array.isArray(fines)) {
+    return res.status(400).json({ error: "Invalid fines data, expected array" });
+  }
+  const db = readDB();
+  db.governmentFines = fines;
+  writeDB(db);
+  triggerBackgroundWebhookSync(db, "تحديث بنود الغرامات الحكومية لخدمات الجوازات");
+  res.json({ status: "success", governmentFines: db.governmentFines });
 });
 
 // 8. Collection Closings endpoint

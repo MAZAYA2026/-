@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Service, CustomerInput, Invoice, InvoiceStatus, AppSettings, Employee, DictionaryItem } from "../types";
+import { Service, CustomerInput, Invoice, InvoiceStatus, AppSettings, Employee, DictionaryItem, GovernmentFine } from "../types";
 import { createInvoiceOnServer, saveDictionaryWord } from "../lib/api";
 import { calculateWorkingDaysDeliveryDate, getArabicDayName, isNonWorkingDay, recalculateCustomerServicesDeliveryDates } from "../lib/businessDays";
 import { generateWhatsAppWelcomeMessage, getWhatsAppUrl } from "../lib/whatsapp";
 import { breakdownArabicName, extractAtomicWordTokens, normalizeArabic } from "../lib/dictionary";
-import { Plus, Trash2, FileText, UserPlus, Sparkles, Printer, Send, Check, AlertCircle, Info, Calendar, BookOpen, ShieldAlert, CalendarCheck } from "lucide-react";
+import { Plus, Trash2, FileText, UserPlus, Sparkles, Printer, Send, Check, AlertCircle, Info, Calendar, BookOpen, ShieldAlert, CalendarCheck, AlertTriangle } from "lucide-react";
 import ThermalReceipt from "./ThermalReceipt";
 
 interface InvoiceCreatorProps {
@@ -14,9 +14,18 @@ interface InvoiceCreatorProps {
   onInvoiceCreated: (invoice: Invoice) => void;
   dictionary?: DictionaryItem[];
   onDictionaryUpdated?: (newDict: DictionaryItem[]) => void;
+  governmentFines?: GovernmentFine[];
 }
 
-export default function InvoiceCreator({ services, settings, activeEmployee, onInvoiceCreated, dictionary = [], onDictionaryUpdated }: InvoiceCreatorProps) {
+export default function InvoiceCreator({ 
+  services, 
+  settings, 
+  activeEmployee, 
+  onInvoiceCreated, 
+  dictionary = [], 
+  onDictionaryUpdated,
+  governmentFines = []
+}: InvoiceCreatorProps) {
   // Master form state: list of customers on this invoice
   const [customers, setCustomers] = useState<CustomerInput[]>([createEmptyCustomer()]);
   const [loading, setLoading] = useState(false);
@@ -101,8 +110,14 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
     item.serviceId = val;
 
     const matched = services.find(s => s.id === val || s.name === val);
+    const isPass = matched?.name?.trim().startsWith("#");
+    if (!isPass) {
+      item.fineName = "";
+      item.fineAmount = 0;
+    }
+
     if (matched) {
-      item.price = (matched.govPrice + matched.officeFee) * item.quantity;
+      item.price = (matched.govPrice + (item.fineAmount || 0) + matched.officeFee) * item.quantity;
     } else {
       item.price = 0;
       item.deliveryDate = "";
@@ -129,7 +144,7 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
 
     const matched = services.find(s => s.id === item.serviceId || s.name === item.serviceId);
     if (matched) {
-      item.price = (matched.govPrice + matched.officeFee) * item.quantity;
+      item.price = (matched.govPrice + (item.fineAmount || 0) + matched.officeFee) * item.quantity;
     }
 
     // Recalculate sequential delivery dates for all services of this customer
@@ -142,6 +157,57 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
       settings.includeSaturdayAsWeekend !== false
     );
 
+    setCustomers(updated);
+  };
+
+  const handleFineSelect = (cIdx: number, sIdx: number, fineNameVal: string) => {
+    const updated = [...customers];
+    const item = updated[cIdx].services[sIdx];
+    if (!fineNameVal) {
+      item.fineName = "";
+      item.fineAmount = 0;
+    } else if (fineNameVal === "__custom__") {
+      item.fineName = "غرامة حكومية مخصصة";
+      item.fineAmount = 500;
+    } else {
+      const found = governmentFines.find(f => f.name === fineNameVal);
+      item.fineName = fineNameVal;
+      item.fineAmount = found ? found.amount : 0;
+    }
+
+    const matched = services.find(s => s.id === item.serviceId || s.name === item.serviceId);
+    if (matched) {
+      item.price = (matched.govPrice + (item.fineAmount || 0) + matched.officeFee) * item.quantity;
+    }
+    setCustomers(updated);
+  };
+
+  const handleFineNameChange = (cIdx: number, sIdx: number, val: string) => {
+    const updated = [...customers];
+    updated[cIdx].services[sIdx].fineName = val;
+    setCustomers(updated);
+  };
+
+  const handleFineAmountChange = (cIdx: number, sIdx: number, val: number) => {
+    const updated = [...customers];
+    const item = updated[cIdx].services[sIdx];
+    item.fineAmount = Math.max(0, val);
+    const matched = services.find(s => s.id === item.serviceId || s.name === item.serviceId);
+    if (matched) {
+      item.price = (matched.govPrice + (item.fineAmount || 0) + matched.officeFee) * item.quantity;
+    }
+    setCustomers(updated);
+  };
+
+  const handleRemoveFine = (cIdx: number, sIdx: number) => {
+    const updated = [...customers];
+    const item = updated[cIdx].services[sIdx];
+    item.fineName = "";
+    item.fineAmount = 0;
+    const matched = services.find(s => s.id === item.serviceId || s.name === item.serviceId);
+    if (matched) {
+      item.price = (matched.govPrice + matched.officeFee) * item.quantity;
+    }
     setCustomers(updated);
   };
 
@@ -393,16 +459,19 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
           const serviceName = matched ? matched.name : s.serviceId;
           
           if (matched) {
-            totalGov += matched.govPrice * s.quantity;
+            const fine = s.fineAmount || 0;
+            totalGov += (matched.govPrice + fine) * s.quantity;
             totalOffice += matched.officeFee * s.quantity;
-            totalAmount += (matched.govPrice + matched.officeFee) * s.quantity;
+            totalAmount += (matched.govPrice + fine + matched.officeFee) * s.quantity;
           }
 
           return {
             serviceId: serviceName, // save full name for printing/archiving
             quantity: s.quantity,
             price: s.price,
-            deliveryDate: s.deliveryDate
+            deliveryDate: s.deliveryDate,
+            fineName: s.fineName,
+            fineAmount: s.fineAmount
           };
         });
 
@@ -1010,7 +1079,7 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
 
                         {/* Embedded Service metadata details when selected */}
                         {selectedServiceObj && (
-                          <div className="bg-white p-3 rounded-lg border border-slate-200 text-[11px] space-y-1.5 leading-relaxed text-slate-600">
+                          <div className="bg-white p-3 rounded-lg border border-slate-200 text-[11px] space-y-2 leading-relaxed text-slate-600">
                             <div className="grid md:grid-cols-2 gap-2 text-slate-700">
                               <div>
                                 <span className="font-bold text-slate-800">مدة تنفيذ الخدمة:</span> {selectedServiceObj.duration}
@@ -1027,9 +1096,85 @@ export default function InvoiceCreator({ services, settings, activeEmployee, onI
                                 )}
                               </div>
                             </div>
-                            <div>
-                              <span className="font-bold text-slate-800">تعليمات التسليم:</span> {selectedServiceObj.instructions}
+
+                            {/* Prominent individual delivery instructions */}
+                            <div className="bg-blue-50/80 border border-blue-200 rounded-lg p-2.5 text-blue-950">
+                              <div className="font-bold text-xs flex items-center gap-1.5 text-blue-900 mb-0.5">
+                                <Info className="w-3.5 h-3.5 text-blue-600" />
+                                <span>📋 تعليمات تسليم واستلام هذه الخدمة:</span>
+                              </div>
+                              <div className="text-[11.5px] leading-relaxed pr-5">
+                                {selectedServiceObj.instructions || "يرجى إحضار أصل بطاقة الرقم القومي سارية أو المستندات الأصلية للمطابقة عند الاستلام."}
+                              </div>
                             </div>
+
+                            {/* Government Fines option for passport services starting with # */}
+                            {selectedServiceObj.name.trim().startsWith("#") && (
+                              <div className="bg-amber-50/80 border border-amber-200 rounded-lg p-2.5 space-y-2 text-xs">
+                                <div className="flex items-center justify-between">
+                                  <span className="font-bold text-amber-900 flex items-center gap-1.5">
+                                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                                    <span>إضافة غرامة حكومية للخدمة (اختياري: فقد / تالف / تأخير...):</span>
+                                  </span>
+                                  {((srv.fineAmount && srv.fineAmount > 0) || srv.fineName) ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveFine(cIdx, sIdx)}
+                                      className="text-[10px] text-red-600 hover:text-red-800 font-bold cursor-pointer"
+                                    >
+                                      إلغاء الغرامة ✕
+                                    </button>
+                                  ) : null}
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                  <select
+                                    value={srv.fineName || ""}
+                                    onChange={(e) => handleFineSelect(cIdx, sIdx, e.target.value)}
+                                    className="w-full bg-white border border-amber-300 rounded-lg px-2.5 py-1.5 text-xs text-amber-950 font-cairo"
+                                  >
+                                    <option value="">-- بدون غرامة حكومية --</option>
+                                    {governmentFines.map(f => (
+                                      <option key={f.id} value={f.name}>
+                                        {f.name} (+{f.amount} ج.م)
+                                      </option>
+                                    ))}
+                                    <option value="__custom__">غرامة أخرى بمبلغ مخصص...</option>
+                                  </select>
+
+                                  {((srv.fineName && srv.fineName !== "") || (srv.fineAmount && srv.fineAmount > 0)) && (
+                                    <div className="flex items-center gap-2">
+                                      <input
+                                        type="text"
+                                        placeholder="مسمى الغرامة..."
+                                        value={srv.fineName || ""}
+                                        onChange={(e) => handleFineNameChange(cIdx, sIdx, e.target.value)}
+                                        className="flex-1 bg-white border border-amber-300 rounded-lg px-2 py-1 text-xs text-amber-950 font-cairo"
+                                      />
+                                      <div className="relative w-24">
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          placeholder="المبلغ"
+                                          value={srv.fineAmount || 0}
+                                          onChange={(e) => handleFineAmountChange(cIdx, sIdx, parseFloat(e.target.value) || 0)}
+                                          className="w-full bg-white border border-amber-300 rounded-lg px-2 py-1 text-xs font-mono text-amber-950 font-bold"
+                                        />
+                                        <span className="absolute left-1.5 top-1.5 text-[9px] text-slate-400">ج.م</span>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                                {srv.fineAmount && srv.fineAmount > 0 ? (
+                                  <div className="text-[10px] text-amber-800 font-bold flex items-center gap-1">
+                                    <Check className="w-3 h-3 text-amber-600" />
+                                    <span>
+                                      سيتم احتساب {srv.fineAmount * srv.quantity} ج.م كغرامة حكومية ({srv.fineAmount} ج.م × {srv.quantity}) تضاف لتكلفة الخدمة بالسعر الحكومي والإجمالي والواتساب.
+                                    </span>
+                                  </div>
+                                ) : null}
+                              </div>
+                            )}
+
                             {selectedServiceObj.notes && (
                               <div className="text-slate-500 bg-slate-50 p-1.5 rounded-sm">
                                 <span className="font-bold">ملاحظات:</span> {selectedServiceObj.notes}

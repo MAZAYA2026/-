@@ -263,44 +263,76 @@ export default function ThermalReceipt({ invoice, settings, services, onClose, o
                             const matchedSrv = services.find(s => s.id === item.serviceId || s.name === item.serviceId);
                             const govPrice = matchedSrv ? matchedSrv.govPrice : 0;
                             const officeFee = matchedSrv ? matchedSrv.officeFee : 0;
-                            const singleGovTotal = govPrice * item.quantity;
-                            const singleOfficeTotal = officeFee * item.quantity;
+                            const fineAmount = item.fineAmount || 0;
+                            const unitPrice = govPrice + fineAmount + officeFee; // سعر الخدمة الواحدة شامل الغرامة إن وجدت
+                            const serviceTotal = item.price || (unitPrice * item.quantity); // إجمالي الخدمة = سعر المفرد × العدد
                             const srvDeliveryDate = item.deliveryDate && item.deliveryDate.trim() ? item.deliveryDate.trim() : "";
                             const srvDayName = srvDeliveryDate ? getArabicDayName(srvDeliveryDate) : "";
 
                             return (
                               <div key={sIdx} className="space-y-1.5">
-                                {/* Service header with name on right and quantity on left */}
+                                {/* Service header with name on right and quantity badge on left */}
                                 <div className="flex justify-between items-center text-[12px] font-bold text-black px-0.5">
-                                  <span className="font-mono text-black font-black text-sm">x{item.quantity}</span>
-                                  <span className="text-right text-black font-bold">{matchedSrv?.name || item.serviceId}</span>
+                                  <span className="font-mono text-black font-black text-sm bg-black text-white px-1.5 py-0.2 rounded-xs">
+                                    العدد: {item.quantity}
+                                  </span>
+                                  <span className="text-right text-black font-bold text-[12.5px]">{matchedSrv?.name || item.serviceId}</span>
                                 </div>
 
                                 {/* Detailed financial breakdown table */}
                                 <div className="border-2 border-black rounded-xs overflow-hidden bg-white">
-                                  <table className="w-full text-center text-[11px] border-collapse text-black">
+                                  <table className="w-full text-center text-[10.5px] border-collapse text-black">
                                     <thead>
                                       <tr className="bg-white text-black font-bold border-b-2 border-black">
-                                        <th className="py-1.5 border-l-2 border-black w-1/3 text-center text-black font-bold">المجموع</th>
-                                        <th className="py-1.5 border-l-2 border-black w-1/3 text-center text-black font-bold">رسوم المكتب</th>
-                                        <th className="py-1.5 w-1/3 text-center text-black font-bold">السعر الحكومي</th>
+                                        <th className="py-1 border-l-2 border-black w-[28%] text-center text-black font-bold">إجمالي الخدمة</th>
+                                        <th className="py-1 border-l-2 border-black w-[18%] text-center text-black font-bold">العدد</th>
+                                        <th className="py-1 border-l-2 border-black w-[27%] text-center text-black font-bold">أجر الخدمة (مفرد)</th>
+                                        <th className="py-1 w-[27%] text-center text-black font-bold">السعر الحكومي (مفرد)</th>
                                       </tr>
                                     </thead>
                                     <tbody>
                                       <tr className="text-black font-bold bg-white">
-                                        <td className="py-1.5 border-l-2 border-black font-mono font-bold text-center text-black">
-                                          {item.price.toFixed(2)} <span className="text-[9px] text-black font-cairo">ج.م</span>
+                                        <td className="py-1.5 border-l-2 border-black font-mono font-black text-center text-black text-[11.5px]">
+                                          {serviceTotal.toFixed(2)} <span className="text-[8.5px] text-black font-cairo">ج.م</span>
+                                        </td>
+                                        <td className="py-1.5 border-l-2 border-black font-mono font-black text-center text-black text-xs">
+                                          {item.quantity}
                                         </td>
                                         <td className="py-1.5 border-l-2 border-black font-mono font-bold text-center text-black">
-                                          {singleOfficeTotal.toFixed(2)} <span className="text-[9px] text-black font-cairo">ج.م</span>
+                                          {officeFee.toFixed(2)} <span className="text-[8.5px] text-black font-cairo">ج.م</span>
                                         </td>
                                         <td className="py-1.5 font-mono font-bold text-center text-black">
-                                          {singleGovTotal.toFixed(2)} <span className="text-[9px] text-black font-cairo">ج.م</span>
+                                          {govPrice.toFixed(2)} <span className="text-[8.5px] text-black font-cairo">ج.م</span>
                                         </td>
                                       </tr>
                                     </tbody>
                                   </table>
+
+                                  {/* Government fine row if applicable */}
+                                  {fineAmount > 0 && (
+                                    <div className="border-t-2 border-black px-2 py-1 bg-white text-[10px] text-black flex justify-between items-center font-bold">
+                                      <span>⚠️ تشمل غرامة حكومية ({item.fineName || "غرامة"}):</span>
+                                      <span className="font-mono font-black">+{fineAmount.toFixed(2)} ج.م (للوحدة)</span>
+                                    </div>
+                                  )}
+
+                                  {/* Subtotal calculation note for clarity when quantity > 1 or fine exists */}
+                                  {(item.quantity > 1 || fineAmount > 0) && (
+                                    <div className="border-t border-black px-2 py-0.5 bg-white text-[9.5px] text-black text-center font-mono font-bold">
+                                      [سعر المفرد {unitPrice.toFixed(2)} ج.م × {item.quantity} = {serviceTotal.toFixed(2)} ج.م]
+                                    </div>
+                                  )}
                                   
+                                  {/* Delivery instructions shown individually for each service */}
+                                  {matchedSrv?.instructions && (
+                                    <div className="border-t-2 border-black px-2 py-1 text-right text-black bg-white">
+                                      <span className="font-bold text-[10px] block">📋 تعليمات تسليم الخدمة:</span>
+                                      <span className="text-[9.5px] leading-tight block mt-0.5 text-black font-normal">
+                                        {matchedSrv.instructions}
+                                      </span>
+                                    </div>
+                                  )}
+
                                   {/* Expected delivery date bar - prominent */}
                                   <div className="border-t-2 border-black px-2 py-1.5 text-center text-[11px] text-black font-bold bg-white flex items-center justify-between">
                                     <span>
@@ -327,9 +359,15 @@ export default function ThermalReceipt({ invoice, settings, services, onClose, o
             {/* Total Summary */}
             <div className="space-y-1">
               <div className="flex justify-between items-center text-[13px] font-bold text-black pt-1">
-                <span>المبلغ الإجمالي الكلي:</span>
+                <span>المبلغ الإجمالي الكلي للفاتورة:</span>
                 <span className="font-mono text-black text-lg font-black">{invoice.totalAmount.toFixed(2)} ج.م</span>
               </div>
+              {typeof invoice.totalGov === "number" && typeof invoice.totalOffice === "number" && (
+                <div className="flex justify-between items-center text-[10px] text-black font-bold pt-0.5 border-t border-dashed border-black font-mono">
+                  <span>(رسوم حكومية وغرامات: {invoice.totalGov.toFixed(2)} ج.م)</span>
+                  <span>(أتعاب المكتب: {invoice.totalOffice.toFixed(2)} ج.م)</span>
+                </div>
+              )}
             </div>
 
             <div className="border-t-2 border-dashed border-black my-2"></div>
