@@ -362,12 +362,6 @@ export default function ThermalReceipt({ invoice, settings, services, onClose, o
                 <span>المبلغ الإجمالي الكلي للفاتورة:</span>
                 <span className="font-mono text-black text-lg font-black">{invoice.totalAmount.toFixed(2)} ج.م</span>
               </div>
-              {typeof invoice.totalGov === "number" && typeof invoice.totalOffice === "number" && (
-                <div className="flex justify-between items-center text-[10px] text-black font-bold pt-0.5 border-t border-dashed border-black font-mono">
-                  <span>(رسوم حكومية وغرامات: {invoice.totalGov.toFixed(2)} ج.م)</span>
-                  <span>(أتعاب المكتب: {invoice.totalOffice.toFixed(2)} ج.م)</span>
-                </div>
-              )}
             </div>
 
             <div className="border-t-2 border-dashed border-black my-2"></div>

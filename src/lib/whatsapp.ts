@@ -225,13 +225,6 @@ export function generateWhatsAppWelcomeMessage(
   const costLines: string[] = [];
   costLines.push(`💰 *التكلفة المالية:*`);
   costLines.push(`• إجمالي الفاتورة: ${inv.totalAmount} ج.م`);
-  if (typeof inv.totalGov === "number" && inv.totalGov > 0 && typeof inv.totalOffice === "number" && inv.totalOffice > 0) {
-    if (totalFines > 0) {
-      costLines.push(`• تفصيل المبلغ: رسوم حكومية (${inv.totalGov} ج.م تشمل غرامات بقيمة ${totalFines} ج.م) + أتعاب المكتب (${inv.totalOffice} ج.م)`);
-    } else {
-      costLines.push(`• تفصيل المبلغ: رسوم حكومية (${inv.totalGov} ج.م) + أتعاب المكتب (${inv.totalOffice} ج.م)`);
-    }
-  }
 
   // ── Section 5: الميعاد النهائي للتسليم ───────────────────────
   const deliveryLines: string[] = [
