@@ -7,7 +7,8 @@ import {
   pullDataFromGoogleWebhook,
   saveDictionaryWord,
   updateDictionaryWord,
-  deleteDictionaryWord
+  deleteDictionaryWord,
+  syncGovernmentFinesWithSheets
 } from "../lib/api";
 import { 
   Save, 
@@ -410,6 +411,33 @@ function doPost(e) {
         }
       }
 
+      // --- Sheet 6: GovernmentFines_الغرامات_الحكومية ---
+      var finesData = db.governmentFines || contents.governmentFines;
+      if (finesData && Array.isArray(finesData)) {
+        var fineSheet = getOrCreateSheet(ss, "GovernmentFines_الغرامات_الحكومية");
+        fineSheet.clearContents();
+        var fineHeaders = ["المعرف ID", "اسم بند الغرامة الحكومية", "المبلغ الافتراضي (ج.م)", "شروط وملاحظات التطبيق"];
+        var fineRows = [fineHeaders];
+        for (var f = 0; f < finesData.length; f++) {
+          fineRows.push([
+            finesData[f].id || ("fine-" + (f + 1)),
+            finesData[f].name || "",
+            Number(finesData[f].amount) || 0,
+            finesData[f].notes || ""
+          ]);
+        }
+        if (fineRows.length > 0) {
+          fineSheet.getRange(1, 1, fineRows.length, fineRows[0].length).setValues(fineRows);
+          formatHeader(fineSheet, fineHeaders.length);
+          try {
+            fineSheet.setColumnWidth(1, 100);
+            fineSheet.setColumnWidth(2, 250);
+            fineSheet.setColumnWidth(3, 160);
+            fineSheet.setColumnWidth(4, 350);
+          } catch(cwErr) {}
+        }
+      }
+
       return ContentService.createTextOutput(JSON.stringify({ 
         status: "success", 
         message: "تم تحديث وحفظ كافة البيانات في ملف جوجل شيت بنجاح! 🚀" 
@@ -480,6 +508,39 @@ function doPost(e) {
       }
     }
 
+    // 4. Direct Specific Government Fines Push
+    if (action === "push_fines") {
+      var finesList = contents.governmentFines || (contents.db && contents.db.governmentFines) || [];
+      if (Array.isArray(finesList)) {
+        var fSheet = getOrCreateSheet(ss, "GovernmentFines_الغرامات_الحكومية");
+        fSheet.clearContents();
+        var fHeaders = ["المعرف ID", "اسم بند الغرامة الحكومية", "المبلغ الافتراضي (ج.م)", "شروط وملاحظات التطبيق"];
+        var fRows = [fHeaders];
+        for (var fi = 0; fi < finesList.length; fi++) {
+          fRows.push([
+            finesList[fi].id || ("fine-" + (fi + 1)),
+            finesList[fi].name || "",
+            Number(finesList[fi].amount) || 0,
+            finesList[fi].notes || ""
+          ]);
+        }
+        if (fRows.length > 0) {
+          fSheet.getRange(1, 1, fRows.length, fRows[0].length).setValues(fRows);
+          formatHeader(fSheet, fHeaders.length);
+          try {
+            fSheet.setColumnWidth(1, 100);
+            fSheet.setColumnWidth(2, 250);
+            fSheet.setColumnWidth(3, 160);
+            fSheet.setColumnWidth(4, 350);
+          } catch(cwErr) {}
+        }
+        return ContentService.createTextOutput(JSON.stringify({ 
+          status: "success", 
+          message: "تم تسجيل وتحديث ورقة الغرامات الحكومية (" + finesList.length + " بند) بملف جوجل شيت بنجاح! ⚖️✅" 
+        })).setMimeType(ContentService.MimeType.JSON);
+      }
+    }
+
     return ContentService.createTextOutput(JSON.stringify({ error: "إجراء غير معروف" }))
       .setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
@@ -503,7 +564,8 @@ function doGet(e) {
       services: [],
       invoices: [],
       collectionClosings: [],
-      dictionary: []
+      dictionary: [],
+      governmentFines: []
     };
 
     // 1. Read Services
@@ -645,6 +707,27 @@ function doGet(e) {
             db.dictionary.push({
               arabic: String(ar).trim(),
               english: String(en).trim().toUpperCase()
+            });
+          }
+        }
+      }
+    }
+
+    // 6. Read Government Fines
+    var fineSheet = ss.getSheetByName("GovernmentFines_الغرامات_الحكومية") || 
+                    ss.getSheetByName("GovernmentFines") || 
+                    ss.getSheetByName("الغرامات_الحكومية");
+    if (fineSheet) {
+      var fineValues = fineSheet.getDataRange().getValues();
+      if (fineValues && fineValues.length > 1) {
+        for (var f = 1; f < fineValues.length; f++) {
+          var fRow = fineValues[f];
+          if (fRow[1] || fRow[0]) {
+            db.governmentFines.push({
+              id: String(fRow[0] || ("fine-" + f)),
+              name: String(fRow[1] || ""),
+              amount: Number(fRow[2]) || 0,
+              notes: String(fRow[3] || "")
             });
           }
         }
@@ -811,6 +894,28 @@ function formatHeader(sheet, numCols) {
       alert(`فشل الاستيراد: ${err.message}`);
     } finally {
       setSyncLoading(false);
+    }
+  };
+
+  const [finesSyncLoading, setFinesSyncLoading] = useState(false);
+  const handleSyncFines = async () => {
+    const rawUrl = googleSheetWebhookUrl.trim();
+    if (!rawUrl) {
+      alert("الرجاء إدخال رابط سكربت Webhook الخاص بجوجل شيت أولاً.");
+      return;
+    }
+    setFinesSyncLoading(true);
+    setSyncMessage("جاري مزامنة بنود الغرامات الحكومية مع جوجل شيت...");
+    try {
+      const res = await syncGovernmentFinesWithSheets(rawUrl);
+      setSyncMessage(res.message);
+      alert(res.message);
+    } catch (err: any) {
+      console.error(err);
+      setSyncMessage(`فشل مزامنة الغرامات: ${err.message}`);
+      alert(`فشل مزامنة الغرامات: ${err.message}`);
+    } finally {
+      setFinesSyncLoading(false);
     }
   };
 
@@ -998,51 +1103,38 @@ function formatHeader(sheet, numCols) {
                 <button
                   type="button"
                   onClick={() => {
-                    setWelcomeMessage(`*مكتب مزايا للخدمات الحكومية والجوازات*
-📄 *فاتورة استلام طلب رقم:* #{رقم_الفاتورة}
-📅 *تاريخ المعاملة:* {تاريخ_اليوم}
+                    setWelcomeMessage(`🧾 *{اسم_المكتب}*
+_{الترويسة_الفرعية}_
 
-───────
+────────────────────────────
 
-👤 *الاسم:* {الاسم}
-{الاسم_الانجليزي}
-
-───────
-
-💼 *المهنة:* {المهنة}
-
-───────
-
-📋 *الخدمة المطلوبة:*
-{الخدمات}
-
-───────
-
-📌 *تعليمات الاستلام:*
-{تعليمات_الخدمة}
-
-───────
-
-💰 *التكلفة المالية:*
-• إجمالي الفاتورة: {السعر} ج.م
-
-───────
-
-🕒 *الميعاد النهائي للتسليم:*
+📄 *رقم الفاتورة:* #{رقم_الفاتورة}
+📅 *تاريخ الفاتورة:* {تاريخ_اليوم}
+👤 *الموظف المسؤول:* {الموظف}
+📌 *حالة الفاتورة:* {حالة_الفاتورة}
+🕒 *موعد استلام المعاملة النهائي الفعلي (أيام عمل رسمية):*
 📅 {موعد_التسليم}
 
-───────
+────────────────────────────
 
-✨ *نسعد دائماً بخدمتكم وتسهيل معاملاتكم*
+{تفاصيل_الفاتورة}
+
+────────────────────────────
+
+💰 *المبلغ الإجمالي الكلي للفاتورة:*
+*{السعر} ج.م*
+
+────────────────────────────
+
 {الخاتمة}`);
                   }}
-                  className="text-[10px] font-bold text-blue-700 hover:text-blue-900 bg-white border border-blue-200 px-2 py-1 rounded-lg hover:bg-blue-50 transition-colors shadow-2xs self-start sm:self-auto"
+                  className="text-[10px] font-bold text-blue-700 hover:text-blue-900 bg-white border border-blue-200 px-2 py-1 rounded-lg hover:bg-blue-50 transition-colors shadow-2xs self-start sm:self-auto cursor-pointer"
                 >
-                  استعادة القالب الأنيق الافتراضي (مع الفواصل الجمالية) 🔄
+                  استعادة قالب الفاتورة الحرارية المطابق للطباعة 🔄
                 </button>
               </div>
               <p className="text-[11px] text-slate-600">
-                هذه هي الرسالة الأولى التي تُرسل للعميل عبر الواتساب فور تسجيل الفاتورة، ومزودة بفواصل جمالية قصيرة وأنيقة (───────) بين كل معلومة والأخرى بدون تكرار للبيانات.
+                هذه هي الرسالة الأولى التي تُرسل للعميل عبر الواتساب فور تسجيل الفاتورة، ومصممة لتكون متطابقة تماماً مع محتويات وشكل الفاتورة الحرارية المطبوعة (مع كافة تفاصيل الأسعار، الغرامات الحكومية، تعليمات كل خدمة ومواعيدها).
               </p>
               <textarea 
                 value={welcomeMessage}
@@ -1056,27 +1148,30 @@ function formatHeader(sheet, numCols) {
                 <div className="font-bold text-slate-600">المتغيرات الصالحة للإدراج السريع:</div>
                 <div className="flex flex-wrap gap-1.5 font-mono">
                   {[
+                    "{تفاصيل_الفاتورة}",
+                    "{محتوى_الفاتورة}",
+                    "{اسم_المكتب}",
+                    "{الترويسة_الفرعية}",
+                    "{رقم_الفاتورة}",
+                    "{تاريخ_اليوم}",
+                    "{الموظف}",
+                    "{حالة_الفاتورة}",
+                    "{موعد_التسليم}",
+                    "{السعر}",
+                    "{الخاتمة}",
                     "{اسم_العميل}",
                     "{الاسم}",
                     "{الاسم_الانجليزي}",
                     "{المهنة}",
                     "{الخدمات}",
                     "{تعليمات_الاستلام}",
-                    "{تعليمات_الخدمة}",
-                    "{التكلفة}",
-                    "{السعر}",
-                    "{موعد_التسليم}",
-                    "{الميعاد_النهائي}",
-                    "{الخاتمة}",
-                    "{رقم_الفاتورة}",
-                    "{تاريخ_اليوم}",
                     "{فاصل}"
                   ].map((tag) => (
                     <button
                       key={tag}
                       type="button"
                       onClick={() => setWelcomeMessage((prev) => prev + " " + tag)}
-                      className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-blue-800 font-bold hover:bg-blue-50 transition-colors"
+                      className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-blue-800 font-bold hover:bg-blue-50 transition-colors cursor-pointer"
                     >
                       {tag}
                     </button>
@@ -1251,6 +1346,20 @@ function formatHeader(sheet, numCols) {
                     <span>تصدير وحفظ كافة البيانات على جوجل درايف 📤</span>
                   </div>
                   <span className="text-[10px] text-slate-300 font-normal">رفع وحفظ شامل لكافة الفواتير، الخدمات، قاموس الأسماء، والإعدادات مرة واحدة</span>
+                </button>
+              </div>
+
+              <div className="pt-2.5 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                <span className="text-[11px] text-slate-600 font-bold">مزامنة مخصصة لأوراق العمل الفردية:</span>
+                <button
+                  type="button"
+                  disabled={finesSyncLoading || !googleSheetWebhookUrl.trim()}
+                  onClick={handleSyncFines}
+                  className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-40 shadow-2xs"
+                  title="مزامنة وتحديث ورقة بنود الغرامات الحكومية (GovernmentFines_الغرامات_الحكومية) بملف الشيت"
+                >
+                  <Database className="w-3.5 h-3.5" />
+                  <span>{finesSyncLoading ? "جاري المزامنة..." : "مزامنة بنود الغرامات الحكومية مع الشيت ⚖️"}</span>
                 </button>
               </div>
             </div>

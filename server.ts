@@ -192,42 +192,29 @@ const initialData = {
     subHeaderText: "جوازات طنطا والمعاملات الحكومية",
     contactPhone: "01020304050",
     footerText: "شكراً لتعاملكم مع مكتب مزايا للجوازات.\nالرجاء الاحتفاظ بالفاتورة لتقديمها عند الاستلام.\nالاستلام شخصياً .",
-    welcomeMessage: `*مكتب مزايا للخدمات الحكومية والجوازات*
-📄 *فاتورة استلام طلب رقم:* #{رقم_الفاتورة}
-📅 *تاريخ المعاملة:* {تاريخ_اليوم}
+    welcomeMessage: `🧾 *{اسم_المكتب}*
+_{الترويسة_الفرعية}_
 
-───────
+────────────────────────────
 
-👤 *الاسم:* {الاسم}
-{الاسم_الانجليزي}
-
-───────
-
-💼 *المهنة:* {المهنة}
-
-───────
-
-📋 *الخدمة المطلوبة:*
-{الخدمات}
-
-───────
-
-📌 *تعليمات الاستلام:*
-{تعليمات_الخدمة}
-
-───────
-
-💰 *التكلفة المالية:*
-• إجمالي الفاتورة: {السعر} ج.م
-
-───────
-
-🕒 *الميعاد النهائي للتسليم:*
+📄 *رقم الفاتورة:* #{رقم_الفاتورة}
+📅 *تاريخ الفاتورة:* {تاريخ_اليوم}
+👤 *الموظف المسؤول:* {الموظف}
+📌 *حالة الفاتورة:* {حالة_الفاتورة}
+🕒 *موعد استلام المعاملة النهائي الفعلي (أيام عمل رسمية):*
 📅 {موعد_التسليم}
 
-───────
+────────────────────────────
 
-✨ *نسعد دائماً بخدمتكم وتسهيل معاملاتكم*
+{تفاصيل_الفاتورة}
+
+────────────────────────────
+
+💰 *المبلغ الإجمالي الكلي للفاتورة:*
+*{السعر} ج.م*
+
+────────────────────────────
+
 {الخاتمة}`,
     readyMessage: "عزيزنا {اسم_العميل}، نفيدكم علماً بأن أوراقكم الخاصة بالفاتورة رقم {رقم_الفاتورة} جاهزة للتسليم الآن.\nالخدمات: {الخدمات}\nمكان الحفظ: درج رقم ({رقم_الارشيف})\nبرجاء التوجه للمكتب للاستلام مع إحضار الفاتورة الحرارية.",
     deliveryMessage: "تم تسليم جواز السفر والأوراق الخاصة بك بنجاح يا {اسم_العميل}.\nرقم الفاتورة: {رقم_الفاتورة}\nنسعد بتقييمكم لخدمات مكتب مزايا للجوازات ونراكم قريباً في معاملات أخرى.",
@@ -1144,7 +1131,8 @@ async function pushToGoogleWebhook(webhookUrl: string, db: any) {
         settings: db.settings || {},
         dictionary: db.dictionary || [],
         invoices: db.invoices || [],
-        collectionClosings: db.collectionClosings || []
+        collectionClosings: db.collectionClosings || [],
+        governmentFines: db.governmentFines || []
       }),
       redirect: "follow",
     });
@@ -1423,6 +1411,61 @@ app.post("/api/sheets/webhook/sync-settings", async (req, res) => {
   }
 });
 
+// Dedicated Webhook Sync Government Fines Endpoint
+app.post("/api/sheets/webhook/sync-fines", async (req, res) => {
+  const { webhookUrl } = req.body;
+  const db = readDB();
+  const targetUrl = webhookUrl || db.settings.googleSheetWebhookUrl;
+
+  if (!targetUrl || !targetUrl.startsWith("http")) {
+    return res.status(400).json({ error: "الرجاء إدخال رابط سكربت Webhook صالح أولاً في قسم إعدادات جوجل شيت." });
+  }
+
+  try {
+    const fines = db.governmentFines || initialData.governmentFines;
+    await fetch(targetUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        action: "push_fines",
+        governmentFines: fines,
+        db: { governmentFines: fines }
+      }),
+      redirect: "follow",
+    });
+
+    let savedInSheet = false;
+    let sheetFinesCount = 0;
+    try {
+      const pulledDB = await pullFromGoogleWebhook(targetUrl);
+      sheetFinesCount = Array.isArray(pulledDB?.governmentFines) ? pulledDB.governmentFines.length : 0;
+      if (sheetFinesCount > 0) {
+        savedInSheet = true;
+      }
+    } catch (e) {
+      console.log("Could not pull to verify sheet fines:", e);
+    }
+
+    if (savedInSheet) {
+      return res.json({
+        status: "success",
+        savedInSheet: true,
+        count: sheetFinesCount,
+        message: `تم تسجيل وتأكيد حفظ ${sheetFinesCount} بند غرامة في ورقة (GovernmentFines_الغرامات_الحكومية) بملف جوجل شيت بنجاح! ⚖️✅`
+      });
+    } else {
+      return res.json({
+        status: "warning",
+        savedInSheet: false,
+        count: fines.length,
+        message: `تم إرسال بنود الغرامات بنجاح (${fines.length} بند)، ولكن ملف جوجل شيت لديك يحتاج لتحديث كود Apps Script لإنشاء ورقة الغرامات.\nيرجى فتح ملف جوجل شيت > Apps Script > ولصق الكود البرمجي المحدث، ثم اختيار (Deploy > New version).`
+      });
+    }
+  } catch (err: any) {
+    res.status(500).json({ error: "فشل إرسال بنود الغرامات إلى السكربت: " + err.message });
+  }
+});
+
 // Webhook Pull DB Endpoint
 app.post("/api/sheets/webhook/pull", async (req, res) => {
   const { webhookUrl } = req.body;
@@ -1465,6 +1508,11 @@ app.post("/api/sheets/webhook/pull", async (req, res) => {
     // Retain local employees
     if (!pulledDB.employees || pulledDB.employees.length === 0) {
       pulledDB.employees = db.employees || [];
+    }
+
+    // If pulledDB has governmentFines, retain them, otherwise fallback to local db
+    if (!pulledDB.governmentFines || !Array.isArray(pulledDB.governmentFines) || pulledDB.governmentFines.length === 0) {
+      pulledDB.governmentFines = db.governmentFines || initialData.governmentFines;
     }
 
     // Save to local file

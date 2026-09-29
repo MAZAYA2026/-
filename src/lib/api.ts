@@ -371,4 +371,22 @@ export async function saveGovernmentFines(fines: GovernmentFine[]): Promise<Gove
   return result.governmentFines;
 }
 
+export async function syncGovernmentFinesWithSheets(webhookUrl?: string): Promise<{
+  status: string;
+  savedInSheet: boolean;
+  count: number;
+  message: string;
+}> {
+  const response = await fetch("/api/sheets/webhook/sync-fines", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ webhookUrl }),
+  });
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || "فشل مزامنة بنود الغرامات الحكومية مع جوجل شيت");
+  }
+  return response.json();
+}
+
 

@@ -5,12 +5,13 @@ import {
   updateServiceOnServer, 
   deleteServiceOnServer, 
   reorderServicesOnServer,
-  saveGovernmentFines
+  saveGovernmentFines,
+  syncGovernmentFinesWithSheets
 } from "../lib/api";
 import { 
   Plus, Edit3, Trash2, Check, X, ShieldAlert, Sparkles, FolderPlus, DollarSign, Clock, FileText,
   ArrowUp, ArrowDown, ChevronsUp, ChevronsDown, ArrowUpDown, CheckCircle2, ArrowDownAZ, Hash, Loader2,
-  AlertTriangle, Shield, CheckCircle
+  AlertTriangle, Shield, CheckCircle, Database
 } from "lucide-react";
 
 interface ServicesConfigProps {
@@ -62,6 +63,21 @@ export default function ServicesConfig({
   const showFineMessage = (msg: string) => {
     setFineFeedback(msg);
     setTimeout(() => setFineFeedback(null), 3500);
+  };
+
+  const [syncingFinesWithSheet, setSyncingFinesWithSheet] = useState(false);
+  const handleSyncFinesToSheet = async () => {
+    setSyncingFinesWithSheet(true);
+    try {
+      const res = await syncGovernmentFinesWithSheets(googleSheetWebhookUrl);
+      showFineMessage(res.message || "تم حفظ ومزامنة بنود الغرامات مع جوجل شيت بنجاح! ⚖️📊");
+      alert(res.message || "تم تسجيل وتأكيد حفظ بنود الغرامات في ورقة (GovernmentFines_الغرامات_الحكومية) بملف جوجل شيت بنجاح! ⚖️✅");
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || "حدث خطأ أثناء مزامنة الغرامات مع جوجل شيت");
+    } finally {
+      setSyncingFinesWithSheet(false);
+    }
   };
 
   const handleCreateFine = async (e: React.FormEvent) => {
@@ -875,6 +891,16 @@ export default function ServicesConfig({
                 {fineFeedback}
               </span>
             )}
+            <button
+              type="button"
+              disabled={syncingFinesWithSheet}
+              onClick={handleSyncFinesToSheet}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold font-cairo flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs disabled:opacity-50"
+              title="مزامنة وحفظ بنود الغرامات الحكومية في شيت GovernmentFines_الغرامات_الحكومية بجوجل شيت"
+            >
+              <Database className="w-4 h-4" />
+              {syncingFinesWithSheet ? "جاري المزامنة..." : "مزامنة مع جوجل شيت 📊"}
+            </button>
             <button
               type="button"
               onClick={() => setShowAddFineModal(true)}
