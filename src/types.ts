@@ -98,7 +98,8 @@ export interface AppSettings {
   footerText: string; // خاتمة الفاتورة
   contactPhone?: string; // رقم هاتف التواصل والشكاوى
   welcomeMessage: string; // رسالة ترحيب واستلام الطلب الأولى
-  readyMessage: string; // رسالة جاهز للتسليم
+  readyMessage: string; // رسالة جاهز للتسليم (للمعاملات العامة)
+  readyPassportMessage?: string; // رسالة جاهز للتسليم الخاصة بمعاملات جوازات السفر (التي تبدأ بـ #)
   deliveryMessage: string; // رسالة تم التسليم
   whatsappTemplate?: string; // (ملغي - البديل عنه رسالة الترحيب واستلام الطلب منعاً لتكرار البيانات)
   googleSheetWebhookUrl?: string; // Web App Webhook URL (https://script.google.com/macros/s/.../exec)

@@ -2,7 +2,7 @@ import React, { useState, useRef } from "react";
 import { Invoice, InvoiceStatus, AppSettings, Service, Employee, CustomerInput, GovernmentFine } from "../types";
 import { updateInvoiceOnServer, deleteInvoiceOnServer } from "../lib/api";
 import { calculateWorkingDaysDeliveryDate, getArabicDayName, recalculateCustomerServicesDeliveryDates } from "../lib/businessDays";
-import { generateWhatsAppWelcomeMessage, getWhatsAppUrl } from "../lib/whatsapp";
+import { generateWhatsAppWelcomeMessage, generateWhatsAppReadyMessage, getWhatsAppUrl } from "../lib/whatsapp";
 import { Search, Edit3, Trash2, Printer, Send, CheckCircle, PackageOpen, X, MapPin, Calendar, Info, RefreshCw, AlertCircle, Save, AlertTriangle } from "lucide-react";
 import ThermalReceipt from "./ThermalReceipt";
 
@@ -168,25 +168,7 @@ export default function InvoiceQuery({
   };
 
   const handleSendWhatsAppReady = (inv: Invoice) => {
-    const servicesText = inv.customers.map(c => {
-      const sList = c.services.map(s => {
-        const matched = services.find(srv => srv.name === s.serviceId || srv.id === s.serviceId);
-        return matched?.name || s.serviceId;
-      }).join(", ");
-      return inv.customers.length > 1 ? `${c.arabicName}: (${sList})` : sList;
-    }).join(" | ");
-
-    const readyTemplate = settings.readyMessage || "عزيزنا {اسم_العميل}، طلباتك بالفاتورة {رقم_الفاتورة} جاهزة في الدرج {رقم_الارشيف}.";
-    
-    const customerNames = inv.customers.length > 1
-      ? inv.customers.map(c => c.arabicName).join(" و ")
-      : (inv.customers[0]?.arabicName || "");
-
-    const msg = readyTemplate
-      .replace(/{اسم_العميل}/g, customerNames)
-      .replace(/{رقم_الفاتورة}/g, inv.invoiceId.toString())
-      .replace(/{رقم_الارشيف}/g, inv.archiveDrawer || "")
-      .replace(/{الخدمات}/g, servicesText);
+    const { message: msg } = generateWhatsAppReadyMessage(inv, services, settings);
 
     const targetCustomer = inv.customers.find(c => c.phone && c.phone.trim().length > 0) || inv.customers[0];
     const rawPhone = targetCustomer?.phone ? targetCustomer.phone.trim() : "";
@@ -196,7 +178,7 @@ export default function InvoiceQuery({
       const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`;
       window.open(waUrl, "_blank");
     } else {
-      alert("رقم هاتف العميل غير متوفر.");
+      alert("رقم هاتف العميل غير متوفر في هذه الفاتورة.");
     }
   };
 

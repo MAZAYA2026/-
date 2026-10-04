@@ -229,10 +229,122 @@ export function buildReceiptFormattedWhatsAppMessage(
   return sections.join(`\n\n${WHATSAPP_DIVIDER}\n\n`);
 }
 
+export const DEFAULT_READY_PASSPORT_MESSAGE = `🛂 *{اسم_المكتب}*
+_{الترويسة_الفرعية}_
+
+────────────────────────────
+
+عزيزنا {اسم_العميل}،
+نفيدكم علماً بأن جواز السفر الخاص بكم بالفاتورة رقم #{رقم_الفاتورة} جاهز للاستلام الآن بالمكتب 📑✨
+
+📋 *الخدمات:* {الخدمات}
+🗄️ *مكان الحفظ:* درج رقم ({رقم_الارشيف})
+
+⚠️ *تنبيهات هامة جداً لاستلام جواز السفر:*
+• إحضار أصل بطاقة الرقم القومي سارية للمطابقة.
+• إحضار جواز السفر السابق (إن وجد) للتخريم والإلغاء.
+• إحضار أصل الفاتورة الحرارية للمطابقة.
+• استلام الجواز لصاحب الشأن شخصياً أو لمن له الصفة القانونية المباشرة (الأب للأبناء القصر / الزوج بموجب وثيقة الزواج).
+
+────────────────────────────
+
+📍 {اسم_المكتب}
+📞 للاستفسار والمتابعة: {هاتف_التواصل}`;
+
+export const DEFAULT_READY_GENERAL_MESSAGE = `📑 *{اسم_المكتب}*
+_{الترويسة_الفرعية}_
+
+────────────────────────────
+
+عزيزنا {اسم_العميل}،
+نفيدكم علماً بأن أوراقكم ومعاملاتكم الخاصة بالفاتورة رقم #{رقم_الفاتورة} جاهزة للتسليم الآن بالمكتب ✨
+
+📋 *الخدمات:* {الخدمات}
+🗄️ *مكان الحفظ:* درج رقم ({رقم_الارشيف})
+
+برجاء التوجه للمكتب للاستلام مع إحضار أصل الفاتورة الحرارية والبطاقة الشخصية سارية.
+
+────────────────────────────
+
+📍 {اسم_المكتب}
+📞 للاستفسار والمتابعة: {هاتف_التواصل}`;
+
+/**
+ * Checks if a service name represents a passport service (starts with #).
+ */
+export function isPassportServiceName(serviceName: string): boolean {
+  if (!serviceName) return false;
+  return serviceName.trim().startsWith("#");
+}
+
+/**
+ * Checks if any service in the invoice is a passport service (starts with #).
+ */
+export function invoiceHasPassportService(inv: Invoice, services: Service[]): boolean {
+  if (!inv || !inv.customers) return false;
+  return inv.customers.some((c) =>
+    c.services.some((s) => {
+      const matched = services.find((srv) => srv.id === s.serviceId || srv.name === s.serviceId);
+      const name = matched?.name || s.serviceId || "";
+      return isPassportServiceName(name);
+    })
+  );
+}
+
+/**
+ * Generates the appropriate WhatsApp Ready Notification (جاهز للتسليم):
+ * Automatically detects whether the invoice includes passport services (starting with #)
+ * and uses the dedicated passport ready template with its specific requirements,
+ * or uses the general services template for all other government services.
+ */
+export function generateWhatsAppReadyMessage(
+  inv: Invoice,
+  services: Service[],
+  settings: AppSettings
+): { message: string; isPassport: boolean } {
+  const isPassport = invoiceHasPassportService(inv, services);
+  
+  // Pick the configured template or fallback to dedicated default
+  const template = isPassport 
+    ? (settings.readyPassportMessage?.trim() || DEFAULT_READY_PASSPORT_MESSAGE)
+    : (settings.readyMessage?.trim() || DEFAULT_READY_GENERAL_MESSAGE);
+
+  const customerNames = inv.customers.length > 1
+    ? inv.customers.map(c => c.arabicName).join(" و ")
+    : (inv.customers[0]?.arabicName || "");
+
+  const servicesText = inv.customers.map(c => {
+    const sList = c.services.map(s => {
+      const matched = services.find(srv => srv.name === s.serviceId || srv.id === s.serviceId);
+      return matched?.name || s.serviceId;
+    }).join(", ");
+    return inv.customers.length > 1 ? `${c.arabicName}: (${sList})` : sList;
+  }).join(" | ");
+
+  const contact = (settings.contactPhone || "").trim();
+  const header = (settings.headerText || "مكتب مزايا للجوازات").trim();
+  const subHeader = (settings.subHeaderText !== undefined ? settings.subHeaderText : "جوازات طنطا والمعاملات الحكومية").trim();
+
+  let msg = template
+    .replace(/{اسم_المكتب}/g, header)
+    .replace(/{الترويسة_الفرعية}/g, subHeader)
+    .replace(/{اسم_العميل}/g, customerNames)
+    .replace(/{رقم_الفاتورة}/g, inv.invoiceId.toString())
+    .replace(/{رقم_الارشيف}/g, inv.archiveDrawer || "درج الحفظ المخصص")
+    .replace(/{الخدمات}/g, servicesText)
+    .replace(/{هاتف_التواصل}/g, contact)
+    .replace(/{رقم_التواصل}/g, contact)
+    .replace(/{فاصل}/g, WHATSAPP_DIVIDER);
+
+  msg = msg.replace(/\n{3,}/g, "\n\n");
+  return { message: msg, isPassport };
+}
+
 /**
  * Generates the first WhatsApp welcome message sent to the customer.
  * Directly formats the message to match the contents and layout of the printed thermal invoice,
  * ensuring all customers in the family and their individual services are completely included.
+ * Allows full customization from the system settings page while preserving live data substitution.
  */
 export function generateWhatsAppWelcomeMessage(
   inv: Invoice, 
@@ -246,25 +358,27 @@ export function generateWhatsAppWelcomeMessage(
 
   const userTemplate = settings.welcomeMessage?.trim();
 
-  // If user has not modified the template or uses the standard invoice structure,
-  // return the pristine thermal receipt format directly.
-  if (!userTemplate || 
-      userTemplate === "{محتوى_الفاتورة}" ||
-      userTemplate.includes("{تفاصيل_الفاتورة}") ||
-      userTemplate.startsWith("🧾 *{اسم_المكتب}*") ||
-      userTemplate.includes("عزيزنا {اسم_العميل}") ||
-      userTemplate.includes("━━━━━")) {
+  // If user has not entered a template or specifically wants the pristine full receipt
+  if (!userTemplate || userTemplate === "{محتوى_الفاتورة}") {
     return receiptMessage;
   }
 
-  // If user has a fully custom template:
+  // The customer & services detailed block matching ThermalReceipt (all family members)
   const detailsBlock = buildCustomersAndServicesWhatsAppBlock(inv, services, settings);
 
   // When there are multiple customers in the family, represent all of them
   const arabicNames = inv.customers.map((c, i) => `${i + 1}. ${c.arabicName}`).join(" | ");
+  const simpleArabicNames = inv.customers.length > 1
+    ? inv.customers.map(c => c.arabicName).join(" و ")
+    : (inv.customers[0]?.arabicName || "");
+
   const englishNames = inv.customers
     .filter(c => c.englishName && c.englishName.trim())
     .map((c, i) => `${i + 1}. ${c.englishName.toUpperCase()}`)
+    .join(" | ");
+  const nationalIds = inv.customers
+    .filter(c => c.nationalId && c.nationalId.trim())
+    .map((c, i) => `${i + 1}. ${c.nationalId}`)
     .join(" | ");
   const professions = inv.customers
     .filter(c => c.profession && c.profession.trim())
@@ -329,33 +443,48 @@ export function generateWhatsAppWelcomeMessage(
     ? settings.footerText.trim()
     : "شكراً لكم على ثقتكم الغالية بـ مكتب مزايا للجوازات.";
 
+  const contact = (settings.contactPhone || "").trim();
+
   let formatted = userTemplate
     .replace(/{محتوى_الفاتورة}/g, receiptMessage)
     .replace(/{تفاصيل_الفاتورة}/g, detailsBlock)
     .replace(/{اسم_المكتب}/g, settings.headerText || "مكتب مزايا للجوازات")
     .replace(/{الترويسة_الفرعية}/g, settings.subHeaderText !== undefined ? settings.subHeaderText : "جوازات طنطا والمعاملات الحكومية")
-    .replace(/{الموظف}/g, inv.employeeName || "شريف")
+    .replace(/{الموظف}/g, inv.employeeName || "الموظف المسؤول")
     .replace(/{حالة_الفاتورة}/g, statusText)
     .replace(/{فاصل}/g, WHATSAPP_DIVIDER)
-    .replace(/{اسم_العميل}/g, inv.customers.length > 1 ? arabicNames : (inv.customers[0]?.arabicName || ""))
-    .replace(/{الاسم}/g, inv.customers.length > 1 ? arabicNames : (inv.customers[0]?.arabicName || ""))
+    .replace(/{اسم_العميل}/g, simpleArabicNames)
+    .replace(/{الاسم}/g, simpleArabicNames)
+    .replace(/{اسماء_العملاء}/g, arabicNames)
     .replace(/{الاسم_الانجليزي}/g, englishNames ? `🔤 *بالإنجليزي:* ${englishNames}` : "")
+    .replace(/{الرقم_القومي}/g, nationalIds)
+    .replace(/{رقم_القومي}/g, nationalIds)
     .replace(/{المهنة}/g, professions)
     .replace(/{الخدمات}/g, detailsBlock)
     .replace(/{الخدمة_المختارة}/g, detailsBlock)
     .replace(/{تعليمات_الاستلام}/g, serviceInstructionsBody)
     .replace(/{تعليمات_الخدمة}/g, serviceInstructionsBody)
     .replace(/{السعر}/g, inv.totalAmount.toFixed(2))
+    .replace(/{المبلغ_الاجمالي}/g, `${inv.totalAmount.toFixed(2)} ج.م`)
+    .replace(/{الاجمالي}/g, `${inv.totalAmount.toFixed(2)} ج.م`)
     .replace(/{التكلفة}/g, `• إجمالي الفاتورة: ${inv.totalAmount.toFixed(2)} ج.م`)
     .replace(/{تاريخ_اليوم}/g, invDate)
     .replace(/{تاريخ_الفاتورة}/g, invDate)
     .replace(/{موعد_التسليم}/g, deliveryDisplay)
     .replace(/{الميعاد_النهائي}/g, deliveryDisplay)
     .replace(/{الخاتمة}/g, footerTextDisplay)
-    .replace(/{رقم_الفاتورة}/g, inv.invoiceId.toString());
+    .replace(/{رقم_الفاتورة}/g, inv.invoiceId.toString())
+    .replace(/{هاتف_التواصل}/g, contact)
+    .replace(/{رقم_التواصل}/g, contact);
 
-  // If the user's custom template omitted the full details block, append it so no family member is missing
-  if (!userTemplate.includes("{تفاصيل_الفاتورة}") && !userTemplate.includes("{محتوى_الفاتورة}") && !formatted.includes(detailsBlock)) {
+  // If the user's custom template omitted the full details block and receipt block,
+  // append it so that customer and pricing breakdown is never completely omitted
+  if (
+    !userTemplate.includes("{تفاصيل_الفاتورة}") && 
+    !userTemplate.includes("{محتوى_الفاتورة}") && 
+    !userTemplate.includes("{الخدمات}") && 
+    !formatted.includes(detailsBlock)
+  ) {
     formatted = `${formatted}\n\n${WHATSAPP_DIVIDER}\n\n${detailsBlock}`;
   }
 

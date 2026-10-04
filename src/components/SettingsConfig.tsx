@@ -55,6 +55,7 @@ import {
 } from "../lib/businessDays";
 
 import { GovernmentFine } from "../types";
+import { DEFAULT_READY_PASSPORT_MESSAGE, DEFAULT_READY_GENERAL_MESSAGE } from "../lib/whatsapp";
 
 interface SettingsConfigProps {
   settings: AppSettings;
@@ -85,7 +86,8 @@ export default function SettingsConfig({
   const [subHeaderText, setSubHeaderText] = useState(settings.subHeaderText ?? "جوازات طنطا والمعاملات الحكومية");
   const [contactPhone, setContactPhone] = useState(settings.contactPhone || "01020304050");
   const [welcomeMessage, setWelcomeMessage] = useState(settings.welcomeMessage || "");
-  const [readyMessage, setReadyMessage] = useState(settings.readyMessage || "");
+  const [readyMessage, setReadyMessage] = useState(settings.readyMessage || DEFAULT_READY_GENERAL_MESSAGE);
+  const [readyPassportMessage, setReadyPassportMessage] = useState(settings.readyPassportMessage || DEFAULT_READY_PASSPORT_MESSAGE);
   const [deliveryMessage, setDeliveryMessage] = useState(settings.deliveryMessage || "");
   const [googleSheetUrl, setGoogleSheetUrl] = useState(settings.googleSheetUrl || "");
   const [googleSheetWebhookUrl, setGoogleSheetWebhookUrl] = useState(settings.googleSheetWebhookUrl || settings.googleSheetUrl || "");
@@ -124,6 +126,7 @@ export default function SettingsConfig({
         contactPhone: contactPhone.trim(),
         welcomeMessage: welcomeMessage.trim(),
         readyMessage: readyMessage.trim(),
+        readyPassportMessage: readyPassportMessage.trim(),
         deliveryMessage: deliveryMessage.trim(),
         googleSheetUrl: googleSheetUrl.trim(),
         googleSheetWebhookUrl: googleSheetWebhookUrl.trim(),
@@ -377,7 +380,8 @@ function doPost(e) {
           ["اسم وبيانات المكتب بالترويسة", db.settings.headerText || "", "headerText"],
           ["الترويسة الفرعية", db.settings.subHeaderText || "", "subHeaderText"],
           ["رسالة الترحيب واستلام الطلب", db.settings.welcomeMessage || "", "welcomeMessage"],
-          ["قالب رسالة جاهزية الأوراق للاستلام", db.settings.readyMessage || "", "readyMessage"],
+          ["قالب رسالة جاهزية الأوراق للاستلام (العامة)", db.settings.readyMessage || "", "readyMessage"],
+          ["قالب رسالة جاهزية جوازات السفر (#)", db.settings.readyPassportMessage || "", "readyPassportMessage"],
           ["قالب رسالة تم التسليم بنجاح", db.settings.deliveryMessage || "", "deliveryMessage"],
           ["تذييل الفاتورة المطبوعة", db.settings.footerText || "", "footerText"],
           ["إعدادات النظام كاملة (JSON)", JSON.stringify(db.settings || {}), "settings_json"]
@@ -463,7 +467,8 @@ function doPost(e) {
         ["اسم وبيانات المكتب بالترويسة", stData.headerText || "", "headerText"],
         ["الترويسة الفرعية", stData.subHeaderText || "", "subHeaderText"],
         ["رسالة الترحيب واستلام الطلب", stData.welcomeMessage || "", "welcomeMessage"],
-        ["قالب رسالة جاهزية الأوراق للاستلام", stData.readyMessage || "", "readyMessage"],
+        ["قالب رسالة جاهزية الأوراق للاستلام (العامة)", stData.readyMessage || "", "readyMessage"],
+        ["قالب رسالة جاهزية جوازات السفر (#)", stData.readyPassportMessage || "", "readyPassportMessage"],
         ["قالب رسالة تم التسليم بنجاح", stData.deliveryMessage || "", "deliveryMessage"],
         ["تذييل الفاتورة المطبوعة", stData.footerText || "", "footerText"],
         ["إعدادات النظام كاملة (JSON)", JSON.stringify(stData || {}), "settings_json"]
@@ -675,6 +680,8 @@ function doGet(e) {
           db.settings.subHeaderText = val;
         } else if (label.indexOf("ترحيب") !== -1 || label.indexOf("استلام الطلب") !== -1 || label.indexOf("welcome") !== -1) {
           db.settings.welcomeMessage = val;
+        } else if (label.indexOf("جوازات") !== -1 || key === "readyPassportMessage") {
+          db.settings.readyPassportMessage = val;
         } else if (label.indexOf("جاهزية") !== -1 || label.indexOf("ready") !== -1) {
           db.settings.readyMessage = val;
         } else if (label.indexOf("التسليم بنجاح") !== -1 || label.indexOf("delivery") !== -1) {
@@ -805,7 +812,8 @@ function formatHeader(sheet, numCols) {
       setHeaderText(settings.headerText || "مكتب مزايا للجوازات والمعاملات");
       setSubHeaderText(settings.subHeaderText ?? "جوازات طنطا والمعاملات الحكومية");
       setWelcomeMessage(settings.welcomeMessage || "");
-      setReadyMessage(settings.readyMessage || "");
+      setReadyMessage(settings.readyMessage || DEFAULT_READY_GENERAL_MESSAGE);
+      setReadyPassportMessage(settings.readyPassportMessage || DEFAULT_READY_PASSPORT_MESSAGE);
       setDeliveryMessage(settings.deliveryMessage || "");
       setGoogleSheetUrl(settings.googleSheetUrl || "");
       setGoogleSheetWebhookUrl(settings.googleSheetWebhookUrl || settings.googleSheetUrl || "");
@@ -832,6 +840,7 @@ function formatHeader(sheet, numCols) {
           contactPhone: contactPhone.trim(),
           welcomeMessage: welcomeMessage.trim(),
           readyMessage: readyMessage.trim(),
+          readyPassportMessage: readyPassportMessage.trim(),
           deliveryMessage: deliveryMessage.trim(),
           googleSheetUrl: rawUrl,
           googleSheetWebhookUrl: googleSheetWebhookUrl.trim(),
@@ -857,6 +866,7 @@ function formatHeader(sheet, numCols) {
         contactPhone: contactPhone.trim(),
         welcomeMessage: welcomeMessage.trim(),
         readyMessage: readyMessage.trim(),
+        readyPassportMessage: readyPassportMessage.trim(),
         deliveryMessage: deliveryMessage.trim(),
         googleSheetWebhookUrl: rawUrl,
         googleSheetUrl: googleSheetUrl || "",
@@ -1032,6 +1042,7 @@ function formatHeader(sheet, numCols) {
         contactPhone: contactPhone.trim(),
         welcomeMessage: welcomeMessage.trim(),
         readyMessage: readyMessage.trim(),
+        readyPassportMessage: readyPassportMessage.trim(),
         deliveryMessage: deliveryMessage.trim(),
         googleSheetId: settings.googleSheetId || "",
         googleSheetUrl: googleSheetUrl.trim(),
@@ -1220,21 +1231,107 @@ _{الترويسة_الفرعية}_
               </div>
             </div>
 
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-700 block">قالب الإخطار بجاهزية الأوراق (مرحلة Ready):</label>
+            {/* Ready WhatsApp Message for Passport Services (#) */}
+            <div className="space-y-2 border border-amber-200 bg-amber-50/40 rounded-xl p-3.5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <label className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
+                  <span>🛂</span>
+                  <span>قالب رسالة جاهزية معاملات جوازات السفر (للخدمات التي تبدأ بـ #):</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setReadyPassportMessage(DEFAULT_READY_PASSPORT_MESSAGE)}
+                  className="text-[10px] font-bold text-amber-800 hover:text-amber-950 bg-white border border-amber-300 px-2 py-1 rounded-lg hover:bg-amber-100/50 transition-colors shadow-2xs self-start sm:self-auto cursor-pointer"
+                >
+                  استعادة قالب جوازات السفر الافتراضي 🔄
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-600">
+                هذا القالب يُرسل تلقائياً عند جاهزية أي فاتورة تشتمل على خدمات جوازات السفر (التي تبدأ أسمائها بـ #). تم تخصيص محتواه ليتضمن تعليمات استلام الجواز وحضور صاحب الشأن أو الأب/الزوج وأصل الفاتورة والبطاقة.
+              </p>
+              <textarea 
+                value={readyPassportMessage}
+                onChange={(e) => setReadyPassportMessage(e.target.value)}
+                placeholder="قالب جاهزية جوازات السفر..."
+                rows={6}
+                className="w-full bg-white border border-amber-200 rounded-xl p-3 text-xs font-mono leading-relaxed"
+                dir="rtl"
+              />
+              <div className="space-y-1 text-[10px]">
+                <div className="font-bold text-slate-600">المتغيرات الصالحة للإدراج:</div>
+                <div className="flex flex-wrap gap-1.5 font-mono">
+                  {[
+                    "{اسم_العميل}",
+                    "{رقم_الفاتورة}",
+                    "{رقم_الارشيف}",
+                    "{الخدمات}",
+                    "{اسم_المكتب}",
+                    "{الترويسة_الفرعية}",
+                    "{هاتف_التواصل}",
+                    "{فاصل}"
+                  ].map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => setReadyPassportMessage((prev) => prev + " " + tag)}
+                      className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-amber-800 font-bold hover:bg-amber-50 transition-colors cursor-pointer"
+                    >
+                      {tag}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Ready WhatsApp Message for General Government Services (Other) */}
+            <div className="space-y-2 border border-slate-200 bg-slate-50/70 rounded-xl p-3.5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                  <span>📑</span>
+                  <span>قالب رسالة جاهزية المعاملات والخدمات الحكومية العامة (لباقي الخدمات):</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setReadyMessage(DEFAULT_READY_GENERAL_MESSAGE)}
+                  className="text-[10px] font-bold text-slate-700 hover:text-slate-900 bg-white border border-slate-300 px-2 py-1 rounded-lg hover:bg-slate-100 transition-colors shadow-2xs self-start sm:self-auto cursor-pointer"
+                >
+                  استعادة قالب المعاملات العامة الافتراضي 🔄
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-600">
+                هذا القالب يُرسل تلقائياً لباقي المعاملات الحكومية العادية (كالشهادات، القيد العائلي، التوثيق، إلخ) التي لا تشتمل على خدمات جوازات السفر (#).
+              </p>
               <textarea 
                 value={readyMessage}
                 onChange={(e) => setReadyMessage(e.target.value)}
-                placeholder="أهلاً {اسم_العميل}، طلبك {الخدمات} جاهز للتسليم في مكتب مزايا بالدرج {رقم_الارشيف}."
-                rows={3}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs"
+                placeholder="قالب جاهزية المعاملات العامة..."
+                rows={5}
+                className="w-full bg-white border border-slate-200 rounded-xl p-3 text-xs font-mono leading-relaxed"
+                dir="rtl"
               />
-              <div className="flex flex-wrap gap-1.5 text-[9px] text-slate-400 font-mono">
-                <span>متغيرات صالحة:</span>
-                <span className="bg-slate-100 px-1 py-0.5 rounded text-slate-700 font-bold">{"{اسم_العميل}"}</span>
-                <span className="bg-slate-100 px-1 py-0.5 rounded text-slate-700 font-bold">{"{رقم_الفاتورة}"}</span>
-                <span className="bg-slate-100 px-1 py-0.5 rounded text-slate-700 font-bold">{"{رقم_الارشيف}"}</span>
-                <span className="bg-slate-100 px-1 py-0.5 rounded text-slate-700 font-bold">{"{الخدمات}"}</span>
+              <div className="space-y-1 text-[10px]">
+                <div className="font-bold text-slate-600">المتغيرات الصالحة للإدراج:</div>
+                <div className="flex flex-wrap gap-1.5 font-mono">
+                  {[
+                    "{اسم_العميل}",
+                    "{رقم_الفاتورة}",
+                    "{رقم_الارشيف}",
+                    "{الخدمات}",
+                    "{اسم_المكتب}",
+                    "{الترويسة_الفرعية}",
+                    "{هاتف_التواصل}",
+                    "{فاصل}"
+                  ].map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => setReadyMessage((prev) => prev + " " + tag)}
+                      className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-slate-800 font-bold hover:bg-slate-100 transition-colors cursor-pointer"
+                    >
+                      {tag}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 
@@ -1367,14 +1464,14 @@ _{الترويسة_الفرعية}_
                   type="button"
                   disabled={syncLoading || !googleSheetWebhookUrl.trim()}
                   onClick={handlePullWebhook}
-                  className="py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs flex flex-col items-center justify-center gap-1 transition-colors cursor-pointer disabled:opacity-40 shadow-xs"
+                  className="py-3.5 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs flex flex-col items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-40 shadow-xs text-center"
                 >
-                  <div className="flex items-center gap-2 text-sm">
+                  <div className="flex items-center gap-2 text-sm font-extrabold">
                     <Download className="w-4 h-4 text-blue-200" />
-                    <span>استيراد كافة البيانات وبنود الغرامات من جوجل درايف 📥</span>
+                    <span>استيراد كافة البيانات وبنود الغرامات من جوجل شيت 📥</span>
                   </div>
-                  <span className="text-[10px] text-blue-100 font-normal">
-                    استرجاع شامل بزر واحد لكل البيانات: الفواتير، الخدمات، بنود الغرامات الحكومية، قاموس الأسماء، والإعدادات دفعة واحدة
+                  <span className="text-[10px] text-blue-100 font-normal leading-relaxed">
+                    زر واحد موحد يجلب كل شيء: كتالوج الخدمات، بنود الغرامات الحكومية، الفواتير، قاموس الأسماء، وقوالب رسائل الواتساب
                   </span>
                 </button>
 
@@ -1383,31 +1480,15 @@ _{الترويسة_الفرعية}_
                   type="button"
                   disabled={syncLoading || !googleSheetWebhookUrl.trim()}
                   onClick={handlePushWebhook}
-                  className="py-3 px-4 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs flex flex-col items-center justify-center gap-1 transition-colors cursor-pointer disabled:opacity-40 shadow-xs"
+                  className="py-3.5 px-4 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs flex flex-col items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-40 shadow-xs text-center"
                 >
-                  <div className="flex items-center gap-2 text-sm">
+                  <div className="flex items-center gap-2 text-sm font-extrabold">
                     <Download className="w-4 h-4 rotate-180 text-emerald-400" />
-                    <span>تصدير وحفظ كافة البيانات وبنود الغرامات على جوجل درايف 📤</span>
+                    <span>تصدير وحفظ كافة البيانات وبنود الغرامات على جوجل شيت 📤</span>
                   </div>
-                  <span className="text-[10px] text-slate-300 font-normal">
-                    رفع وحفظ شامل لكل البيانات: الفواتير، الخدمات، بنود الغرامات الحكومية، قاموس الأسماء، والإعدادات دفعة واحدة
+                  <span className="text-[10px] text-slate-300 font-normal leading-relaxed">
+                    حفظ شامل لكل البيانات: كتالوج الخدمات، بنود الغرامات الحكومية، الفواتير، قاموس الأسماء، وقوالب رسائل الواتساب
                   </span>
-                </button>
-              </div>
-
-              <div className="pt-2.5 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2">
-                <span className="text-[11px] text-slate-500">
-                  * تنبيه: زر الاستيراد الأزرق أعلاه يجلب كل البيانات بما في ذلك الغرامات دفعة واحدة. ويمكنك أيضاً مزامنة ورقة الغرامات وحدها عند الحاجة:
-                </span>
-                <button
-                  type="button"
-                  disabled={finesSyncLoading || !googleSheetWebhookUrl.trim()}
-                  onClick={handleSyncFines}
-                  className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-40 shadow-2xs"
-                  title="مزامنة وتحديث ورقة بنود الغرامات الحكومية (GovernmentFines_الغرامات_الحكومية) بملف الشيت فقط"
-                >
-                  <Database className="w-3.5 h-3.5" />
-                  <span>{finesSyncLoading ? "جاري المزامنة..." : "مزامنة بنود الغرامات فقط ⚖️"}</span>
                 </button>
               </div>
             </div>

@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Invoice, AppSettings } from "../types";
 import { updateInvoiceOnServer } from "../lib/api";
 import { getArabicDayName } from "../lib/businessDays";
+import { DEFAULT_READY_PASSPORT_MESSAGE, DEFAULT_READY_GENERAL_MESSAGE, WHATSAPP_DIVIDER } from "../lib/whatsapp";
 import { Bell, Send, CheckCircle, Clock, Calendar, Search, Filter, AlertTriangle, MessageSquare, RefreshCw } from "lucide-react";
 
 interface NotificationsPanelProps {
@@ -102,16 +103,25 @@ export default function NotificationsPanel({ invoices, settings, onInvoiceUpdate
 
   // Handle WhatsApp Reminder click
   const handleSendReminder = async (record: typeof notifications[0]) => {
-    // Composition of custom reminder message
-    let reminderText = `عزيزنا العميل ${record.customerName}، نفيدكم علماً بأن طلبكم رقم (${record.invoice.invoiceId}) لخدمة: (${record.servicesDue.join(", ")}) قد حان موعد تسليمها اليوم (${record.deliveryDate}).\n\nيسعدنا حضورك لمكتب مزايا للجوازات لاستلام أوراقك. شكراً لتعاملك معنا.`;
-    
-    if (settings.readyMessage) {
-      reminderText = settings.readyMessage
-        .replace(/{اسم_العميل}/g, record.customerName)
-        .replace(/{رقم_الفاتورة}/g, record.invoice.invoiceId.toString())
-        .replace(/{الخدمات}/g, record.servicesDue.join(", "))
-        .replace(/{رقم_الارشيف}/g, record.invoice.archiveDrawer || "درج الحفظ المخصص");
-    }
+    const isPassport = record.servicesDue.some(s => s.trim().startsWith("#"));
+    const template = isPassport
+      ? (settings.readyPassportMessage?.trim() || DEFAULT_READY_PASSPORT_MESSAGE)
+      : (settings.readyMessage?.trim() || DEFAULT_READY_GENERAL_MESSAGE);
+
+    const header = (settings.headerText || "مكتب مزايا للجوازات").trim();
+    const subHeader = (settings.subHeaderText !== undefined ? settings.subHeaderText : "جوازات طنطا والمعاملات الحكومية").trim();
+    const contact = (settings.contactPhone || "").trim();
+
+    const reminderText = template
+      .replace(/{اسم_المكتب}/g, header)
+      .replace(/{الترويسة_الفرعية}/g, subHeader)
+      .replace(/{اسم_العميل}/g, record.customerName)
+      .replace(/{رقم_الفاتورة}/g, record.invoice.invoiceId.toString())
+      .replace(/{الخدمات}/g, record.servicesDue.join(", "))
+      .replace(/{رقم_الارشيف}/g, record.invoice.archiveDrawer || "درج الحفظ المخصص")
+      .replace(/{هاتف_التواصل}/g, contact)
+      .replace(/{رقم_التواصل}/g, contact)
+      .replace(/{فاصل}/g, WHATSAPP_DIVIDER);
 
     const waUrl = `https://wa.me/${record.phone.startsWith('0') ? '2' : ''}${record.phone}?text=${encodeURIComponent(reminderText)}`;
     window.open(waUrl, "_blank");
