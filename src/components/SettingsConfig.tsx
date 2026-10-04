@@ -54,6 +54,8 @@ import {
   revertHolidayShift
 } from "../lib/businessDays";
 
+import { GovernmentFine } from "../types";
+
 interface SettingsConfigProps {
   settings: AppSettings;
   activeEmployee: Employee;
@@ -62,6 +64,9 @@ interface SettingsConfigProps {
   onEmployeesUpdated: (employees: Employee[]) => void;
   dictionary?: DictionaryItem[];
   onDictionaryUpdated?: (newDict: DictionaryItem[]) => void;
+  governmentFines?: GovernmentFine[];
+  onGovernmentFinesUpdated?: (fines: GovernmentFine[]) => void;
+  onReloadDatabase?: () => Promise<void>;
 }
 
 export default function SettingsConfig({ 
@@ -71,7 +76,10 @@ export default function SettingsConfig({
   employees, 
   onEmployeesUpdated,
   dictionary = [],
-  onDictionaryUpdated
+  onDictionaryUpdated,
+  governmentFines = [],
+  onGovernmentFinesUpdated,
+  onReloadDatabase
 }: SettingsConfigProps) {
   const [headerText, setHeaderText] = useState(settings.headerText || "مكتب مزايا للجوازات والمعاملات");
   const [subHeaderText, setSubHeaderText] = useState(settings.subHeaderText ?? "جوازات طنطا والمعاملات الحكومية");
@@ -716,18 +724,42 @@ function doGet(e) {
     // 6. Read Government Fines
     var fineSheet = ss.getSheetByName("GovernmentFines_الغرامات_الحكومية") || 
                     ss.getSheetByName("GovernmentFines") || 
-                    ss.getSheetByName("الغرامات_الحكومية");
+                    ss.getSheetByName("الغرامات_الحكومية") ||
+                    ss.getSheetByName("الغرامات") ||
+                    ss.getSheetByName("بنود_الغرامات") ||
+                    ss.getSheetByName("Government_Fines");
     if (fineSheet) {
       var fineValues = fineSheet.getDataRange().getValues();
       if (fineValues && fineValues.length > 1) {
+        var headerRow = fineValues[0];
+        var hasIdCol = String(headerRow[0] || "").toLowerCase().indexOf("id") !== -1 || 
+                       String(headerRow[0] || "").indexOf("معرف") !== -1 || 
+                       String(headerRow[0] || "").indexOf("المعرف") !== -1;
+
         for (var f = 1; f < fineValues.length; f++) {
           var fRow = fineValues[f];
-          if (fRow[1] || fRow[0]) {
+          var fName = "";
+          var fAmount = 0;
+          var fNotes = "";
+          var fId = "fine-" + f;
+
+          if (hasIdCol) {
+            fId = String(fRow[0] || ("fine-" + f)).trim();
+            fName = String(fRow[1] || "").trim();
+            fAmount = Number(fRow[2]) || 0;
+            fNotes = String(fRow[3] || "").trim();
+          } else {
+            fName = String(fRow[0] || "").trim();
+            fAmount = Number(fRow[1]) || 0;
+            fNotes = String(fRow[2] || "").trim();
+          }
+
+          if (fName && fName !== "" && fName !== "اسم بند الغرامة" && fName !== "اسم الغرامة" && fName !== "اسم بند الغرامة الحكومية") {
             db.governmentFines.push({
-              id: String(fRow[0] || ("fine-" + f)),
-              name: String(fRow[1] || ""),
-              amount: Number(fRow[2]) || 0,
-              notes: String(fRow[3] || "")
+              id: fId || ("fine-" + f),
+              name: fName,
+              amount: fAmount,
+              notes: fNotes
             });
           }
         }
@@ -877,16 +909,24 @@ function formatHeader(sheet, numCols) {
       alert("الرجاء إدخال رابط قاعدة بيانات جوجل شيت أولاً.");
       return;
     }
-    const confirmPull = window.confirm("تحذير: هل أنت متأكد من استيراد البيانات من جوجل شيت؟ سيتم تحديث قاعدة البيانات بالبيانات الواردة من شيت.");
+    const confirmPull = window.confirm("تحذير: هل أنت متأكد من استيراد كافة البيانات من جوجل شيت؟\nسيتم تحديث قاعدة البيانات الشاملة بنقرة واحدة (كتالوج الخدمات + بنود الغرامات الحكومية + الفواتير + قاموس الأسماء + الإعدادات).");
     if (!confirmPull) return;
 
     setSyncLoading(true);
-    setSyncMessage("جاري سحب واستيراد البيانات من جوجل شيت...");
+    setSyncMessage("جاري استيراد كافة البيانات الشاملة (الخدمات، الغرامات الحكومية، الفواتير، الإعدادات) من جوجل شيت...");
     try {
       const res = await pullDataFromGoogleWebhook(rawUrl);
-      onSettingsUpdated(res.db.settings);
-      setSyncMessage(res.message || "تم استيراد البيانات بنجاح!");
-      alert("تم استيراد كافة البيانات بنجاح من جوجل شيت! 📥 سيتم إعادة تحميل الصفحة الآن لتطبيق التحديثات.");
+      if (res.db && res.db.settings) {
+        onSettingsUpdated(res.db.settings);
+      }
+      if (onGovernmentFinesUpdated && res.db && res.db.governmentFines) {
+        onGovernmentFinesUpdated(res.db.governmentFines);
+      }
+      if (onReloadDatabase) {
+        await onReloadDatabase();
+      }
+      setSyncMessage(res.message || "تم استيراد البيانات وبنود الغرامات بنجاح!");
+      alert(res.message || "تم استيراد كافة البيانات بنجاح من جوجل شيت! 📥 (شامل: كتالوج الخدمات، بنود الغرامات الحكومية، الفواتير، قاموس الأسماء، والإعدادات). سيتم تحديث الصفحة الآن.");
       window.location.reload();
     } catch (err: any) {
       console.error(err);
@@ -1311,12 +1351,14 @@ _{الترويسة_الفرعية}_
 
             {/* Unified Export & Import Panel for ALL Data */}
             <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
-              <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 border-b border-slate-200 pb-2">
                 <span className="font-bold text-slate-800 text-xs flex items-center gap-1.5 font-cairo">
                   <Database className="w-4 h-4 text-emerald-600" />
-                  لوحة التصدير والاستيراد الموحدة لكافة بيانات النظام:
+                  لوحة التصدير والاستيراد الموحدة الشاملة لكافة بيانات النظام:
                 </span>
-                <span className="text-[10px] text-slate-500 font-mono font-bold">شامل (الفواتير + الخدمات + القاموس + الإعدادات + التقفيلات)</span>
+                <span className="text-[10px] text-emerald-800 bg-emerald-100/70 border border-emerald-200 px-2 py-0.5 rounded-md font-mono font-bold">
+                  زر واحد موحد يجلب كل شيء (الخدمات + الغرامات + الفواتير + القاموس + الإعدادات)
+                </span>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
@@ -1329,9 +1371,11 @@ _{الترويسة_الفرعية}_
                 >
                   <div className="flex items-center gap-2 text-sm">
                     <Download className="w-4 h-4 text-blue-200" />
-                    <span>استيراد كافة البيانات من جوجل درايف 📥</span>
+                    <span>استيراد كافة البيانات وبنود الغرامات من جوجل درايف 📥</span>
                   </div>
-                  <span className="text-[10px] text-blue-100 font-normal">استرجاع شامل لكافة الفواتير، الخدمات، قاموس الأسماء، والإعدادات مرة واحدة</span>
+                  <span className="text-[10px] text-blue-100 font-normal">
+                    استرجاع شامل بزر واحد لكل البيانات: الفواتير، الخدمات، بنود الغرامات الحكومية، قاموس الأسماء، والإعدادات دفعة واحدة
+                  </span>
                 </button>
 
                 {/* Unified Export Button */}
@@ -1343,23 +1387,27 @@ _{الترويسة_الفرعية}_
                 >
                   <div className="flex items-center gap-2 text-sm">
                     <Download className="w-4 h-4 rotate-180 text-emerald-400" />
-                    <span>تصدير وحفظ كافة البيانات على جوجل درايف 📤</span>
+                    <span>تصدير وحفظ كافة البيانات وبنود الغرامات على جوجل درايف 📤</span>
                   </div>
-                  <span className="text-[10px] text-slate-300 font-normal">رفع وحفظ شامل لكافة الفواتير، الخدمات، قاموس الأسماء، والإعدادات مرة واحدة</span>
+                  <span className="text-[10px] text-slate-300 font-normal">
+                    رفع وحفظ شامل لكل البيانات: الفواتير، الخدمات، بنود الغرامات الحكومية، قاموس الأسماء، والإعدادات دفعة واحدة
+                  </span>
                 </button>
               </div>
 
               <div className="pt-2.5 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2">
-                <span className="text-[11px] text-slate-600 font-bold">مزامنة مخصصة لأوراق العمل الفردية:</span>
+                <span className="text-[11px] text-slate-500">
+                  * تنبيه: زر الاستيراد الأزرق أعلاه يجلب كل البيانات بما في ذلك الغرامات دفعة واحدة. ويمكنك أيضاً مزامنة ورقة الغرامات وحدها عند الحاجة:
+                </span>
                 <button
                   type="button"
                   disabled={finesSyncLoading || !googleSheetWebhookUrl.trim()}
                   onClick={handleSyncFines}
-                  className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-40 shadow-2xs"
-                  title="مزامنة وتحديث ورقة بنود الغرامات الحكومية (GovernmentFines_الغرامات_الحكومية) بملف الشيت"
+                  className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-40 shadow-2xs"
+                  title="مزامنة وتحديث ورقة بنود الغرامات الحكومية (GovernmentFines_الغرامات_الحكومية) بملف الشيت فقط"
                 >
                   <Database className="w-3.5 h-3.5" />
-                  <span>{finesSyncLoading ? "جاري المزامنة..." : "مزامنة بنود الغرامات الحكومية مع الشيت ⚖️"}</span>
+                  <span>{finesSyncLoading ? "جاري المزامنة..." : "مزامنة بنود الغرامات فقط ⚖️"}</span>
                 </button>
               </div>
             </div>

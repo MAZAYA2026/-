@@ -1518,9 +1518,14 @@ app.post("/api/sheets/webhook/pull", async (req, res) => {
     // Save to local file
     writeDB(pulledDB);
 
+    const servicesCount = pulledDB.services?.length || 0;
+    const finesCount = pulledDB.governmentFines?.length || 0;
+    const invoicesCount = pulledDB.invoices?.length || 0;
+    const dictionaryCount = pulledDB.dictionary?.length || 0;
+
     res.json({
       status: "success",
-      message: `تم استيراد كافة البيانات بنجاح من جوجل شيت واعتمادها كقاعدة بيانات نشطة! 📥 (${pulledDB.services?.length || 0} خدمة، ${pulledDB.invoices?.length || 0} فاتورة)`,
+      message: `تم استيراد كافة البيانات بنجاح من جوجل شيت واعتمادها كقاعدة بيانات نشطة! 📥 (${servicesCount} خدمة، ${finesCount} بند غرامة حكومية، ${invoicesCount} فاتورة، ${dictionaryCount} اسم مترجم)`,
       db: pulledDB,
     });
   } catch (err: any) {

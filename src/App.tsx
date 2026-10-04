@@ -399,6 +399,9 @@ export default function App() {
               onEmployeesUpdated={handleUpdateEmployees}
               dictionary={dictionary}
               onDictionaryUpdated={(newDict) => setDictionary(newDict)}
+              governmentFines={governmentFines}
+              onGovernmentFinesUpdated={(fines) => setGovernmentFines(fines)}
+              onReloadDatabase={syncDatabase}
             />
           )}
         </main>
