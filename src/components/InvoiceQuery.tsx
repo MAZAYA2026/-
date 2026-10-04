@@ -168,17 +168,28 @@ export default function InvoiceQuery({
   };
 
   const handleSendWhatsAppReady = (inv: Invoice) => {
-    let servicesText = inv.customers.map(c => c.services.map(s => s.serviceId).join(", ")).join(" - ");
-    let readyTemplate = settings.readyMessage || "عزيزنا {اسم_العميل}، طلباتك بالفاتورة {رقم_الفاتورة} جاهزة في الدرج {رقم_الارشيف}.";
+    const servicesText = inv.customers.map(c => {
+      const sList = c.services.map(s => {
+        const matched = services.find(srv => srv.name === s.serviceId || srv.id === s.serviceId);
+        return matched?.name || s.serviceId;
+      }).join(", ");
+      return inv.customers.length > 1 ? `${c.arabicName}: (${sList})` : sList;
+    }).join(" | ");
+
+    const readyTemplate = settings.readyMessage || "عزيزنا {اسم_العميل}، طلباتك بالفاتورة {رقم_الفاتورة} جاهزة في الدرج {رقم_الارشيف}.";
     
-    const primaryCustomer = inv.customers[0];
-    let msg = readyTemplate
-      .replace(/{اسم_العميل}/g, primaryCustomer.arabicName)
+    const customerNames = inv.customers.length > 1
+      ? inv.customers.map(c => c.arabicName).join(" و ")
+      : (inv.customers[0]?.arabicName || "");
+
+    const msg = readyTemplate
+      .replace(/{اسم_العميل}/g, customerNames)
       .replace(/{رقم_الفاتورة}/g, inv.invoiceId.toString())
       .replace(/{رقم_الارشيف}/g, inv.archiveDrawer || "")
       .replace(/{الخدمات}/g, servicesText);
 
-    const rawPhone = primaryCustomer.phone ? primaryCustomer.phone.trim() : "";
+    const targetCustomer = inv.customers.find(c => c.phone && c.phone.trim().length > 0) || inv.customers[0];
+    const rawPhone = targetCustomer?.phone ? targetCustomer.phone.trim() : "";
     if (rawPhone) {
       let cleanPhone = rawPhone.replace(/\D/g, "");
       if (cleanPhone.startsWith("0")) cleanPhone = "2" + cleanPhone;
@@ -190,13 +201,17 @@ export default function InvoiceQuery({
   };
 
   const handleSendWhatsAppDelivered = (inv: Invoice) => {
-    let deliveryTemplate = settings.deliveryMessage || "تم تسليم أوراقك بنجاح يا {اسم_العميل} الفاتورة {رقم_الفاتورة}.";
-    const primaryCustomer = inv.customers[0];
-    let msg = deliveryTemplate
-      .replace(/{اسم_العميل}/g, primaryCustomer.arabicName)
+    const deliveryTemplate = settings.deliveryMessage || "تم تسليم أوراقك بنجاح يا {اسم_العميل} الفاتورة {رقم_الفاتورة}.";
+    const customerNames = inv.customers.length > 1
+      ? inv.customers.map(c => c.arabicName).join(" و ")
+      : (inv.customers[0]?.arabicName || "");
+
+    const msg = deliveryTemplate
+      .replace(/{اسم_العميل}/g, customerNames)
       .replace(/{رقم_الفاتورة}/g, inv.invoiceId.toString());
 
-    const rawPhone = primaryCustomer.phone ? primaryCustomer.phone.trim() : "";
+    const targetCustomer = inv.customers.find(c => c.phone && c.phone.trim().length > 0) || inv.customers[0];
+    const rawPhone = targetCustomer?.phone ? targetCustomer.phone.trim() : "";
     if (rawPhone) {
       let cleanPhone = rawPhone.replace(/\D/g, "");
       if (cleanPhone.startsWith("0")) cleanPhone = "2" + cleanPhone;

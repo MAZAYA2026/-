@@ -6,7 +6,7 @@ export const WHATSAPP_SUB_DIVIDER = "┈┈┈┈┈┈┈┈┈┈┈┈┈┈�
 
 /**
  * Builds the customers and services block matching the exact format of the thermal receipt.
- * Includes customer info, per-unit government price, office fee, quantity, service total,
+ * Includes all customers in the family, per-unit government price, office fee, quantity, service total,
  * government fine if applicable, unit multiplier note, delivery instructions, and service delivery date.
  */
 export function buildCustomersAndServicesWhatsAppBlock(
@@ -38,7 +38,9 @@ export function buildCustomersAndServicesWhatsAppBlock(
 
   resolvedCustomers.forEach((cust, cIdx) => {
     const custLines: string[] = [];
-    const custNumbering = resolvedCustomers.length > 1 ? `${cIdx + 1}. ` : "";
+    const custNumbering = resolvedCustomers.length > 1 
+      ? `العميل (${cIdx + 1} من ${resolvedCustomers.length}): ` 
+      : "1. ";
     custLines.push(`👤 *${custNumbering}${cust.arabicName}*`);
 
     if (cust.englishName && cust.englishName.trim() && cust.englishName !== "N/A" && cust.englishName !== "نفس ترجمة الجواز السابق") {
@@ -62,19 +64,20 @@ export function buildCustomersAndServicesWhatsAppBlock(
     cust.services.forEach((s, sIdx) => {
       const matched = services.find((srv) => srv.name === s.serviceId || srv.id === s.serviceId);
       const srvName = matched?.name || s.serviceId;
-      const govPrice = matched ? matched.govPrice : 0;
-      const officeFee = matched ? matched.officeFee : 0;
+      const qty = Math.max(1, s.quantity || 1);
+      const serviceTotal = s.price || 0;
       const fineAmount = s.fineAmount || 0;
-      const unitPrice = govPrice + fineAmount + officeFee;
-      const serviceTotal = s.price || (unitPrice * s.quantity);
+      const unitPrice = serviceTotal > 0 ? (serviceTotal / qty) : ((matched?.govPrice || 0) + fineAmount + (matched?.officeFee || 0));
+      const govPrice = matched ? matched.govPrice : 0;
+      const officeFee = Math.max(0, unitPrice - govPrice - fineAmount);
       const srvDeliveryDate = s.deliveryDate && s.deliveryDate.trim() ? s.deliveryDate.trim() : "";
       const srvDayName = srvDeliveryDate ? getArabicDayName(srvDeliveryDate) : "";
 
       const sBlock: string[] = [
-        `▫️ *${srvName}* [العدد: ${s.quantity}]`,
+        `▫️ *${srvName}* [العدد: ${qty}]`,
         `  • السعر الحكومي (مفرد): ${govPrice.toFixed(2)} ج.م`,
         `  • أجر الخدمة (مفرد): ${officeFee.toFixed(2)} ج.م`,
-        `  • العدد: ${s.quantity}`,
+        `  • العدد: ${qty}`,
         `  • إجمالي الخدمة: *${serviceTotal.toFixed(2)} ج.م*`
       ];
 
@@ -84,8 +87,8 @@ export function buildCustomersAndServicesWhatsAppBlock(
       }
 
       // Single unit multiplication note when quantity > 1 or fine exists
-      if (s.quantity > 1 || fineAmount > 0) {
-        sBlock.push(`  🔢 [سعر المفرد ${unitPrice.toFixed(2)} ج.م × ${s.quantity} = ${serviceTotal.toFixed(2)} ج.م]`);
+      if (qty > 1 || fineAmount > 0) {
+        sBlock.push(`  🔢 [سعر المفرد ${unitPrice.toFixed(2)} ج.م × ${qty} = ${serviceTotal.toFixed(2)} ج.م]`);
       }
 
       // Delivery instructions shown individually for this service
@@ -115,7 +118,7 @@ export function buildCustomersAndServicesWhatsAppBlock(
 
 /**
  * Builds a WhatsApp message containing the exact structure and content
- * of the printed thermal receipt (ThermalReceipt).
+ * of the printed thermal receipt (ThermalReceipt), including all family members.
  */
 export function buildReceiptFormattedWhatsAppMessage(
   inv: Invoice,
@@ -198,10 +201,14 @@ export function buildReceiptFormattedWhatsAppMessage(
   }
   sections.push(metaLines.join("\n"));
 
-  // 3. Customers & Services (matches ThermalReceipt)
+  // 3. Customers & Services (matches ThermalReceipt, handles 1 or multiple family customers)
   const customersAndServicesBlock = buildCustomersAndServicesWhatsAppBlock(inv, services, settings);
   if (customersAndServicesBlock) {
-    sections.push(customersAndServicesBlock);
+    if (inv.customers.length > 1) {
+      sections.push(`👥 *بيانات أفراد الأسرة / العملاء بالفاتورة (عدد: ${inv.customers.length}):*\n\n${customersAndServicesBlock}`);
+    } else {
+      sections.push(customersAndServicesBlock);
+    }
   }
 
   // 4. Total Amount (matches ThermalReceipt)
@@ -224,7 +231,8 @@ export function buildReceiptFormattedWhatsAppMessage(
 
 /**
  * Generates the first WhatsApp welcome message sent to the customer.
- * Directly formats the message to match the contents and layout of the printed thermal invoice.
+ * Directly formats the message to match the contents and layout of the printed thermal invoice,
+ * ensuring all customers in the family and their individual services are completely included.
  */
 export function generateWhatsAppWelcomeMessage(
   inv: Invoice, 
@@ -233,28 +241,35 @@ export function generateWhatsAppWelcomeMessage(
 ): string {
   if (!inv || !inv.customers || inv.customers.length === 0) return "";
 
-  const userTemplate = settings.welcomeMessage?.trim();
-
-  // If user has not modified the template or uses the default/standard format,
-  // return the exact full thermal receipt format.
-  const isDefaultOrEmpty = !userTemplate || 
-    userTemplate === "{محتوى_الفاتورة}" ||
-    userTemplate.includes("عزيزنا {اسم_العميل}، تم استلام طلباتك بمكتب مزايا") ||
-    userTemplate.includes("━━━━━");
-
-  // Always compute the pristine receipt formatted layout
+  // The pristine receipt message contains all printed invoice elements for all customers
   const receiptMessage = buildReceiptFormattedWhatsAppMessage(inv, services, settings);
 
-  if (isDefaultOrEmpty) {
+  const userTemplate = settings.welcomeMessage?.trim();
+
+  // If user has not modified the template or uses the standard invoice structure,
+  // return the pristine thermal receipt format directly.
+  if (!userTemplate || 
+      userTemplate === "{محتوى_الفاتورة}" ||
+      userTemplate.includes("{تفاصيل_الفاتورة}") ||
+      userTemplate.startsWith("🧾 *{اسم_المكتب}*") ||
+      userTemplate.includes("عزيزنا {اسم_العميل}") ||
+      userTemplate.includes("━━━━━")) {
     return receiptMessage;
   }
 
-  // Compute customers and services block for modular replacement
+  // If user has a fully custom template:
   const detailsBlock = buildCustomersAndServicesWhatsAppBlock(inv, services, settings);
 
-  let arabicNameOnly = inv.customers[0]?.arabicName || "";
-  let englishNameOnly = inv.customers[0]?.englishName || "";
-  let professionOnly = inv.customers[0]?.profession || "";
+  // When there are multiple customers in the family, represent all of them
+  const arabicNames = inv.customers.map((c, i) => `${i + 1}. ${c.arabicName}`).join(" | ");
+  const englishNames = inv.customers
+    .filter(c => c.englishName && c.englishName.trim())
+    .map((c, i) => `${i + 1}. ${c.englishName.toUpperCase()}`)
+    .join(" | ");
+  const professions = inv.customers
+    .filter(c => c.profession && c.profession.trim())
+    .map((c, i) => `${i + 1}. ${c.profession}`)
+    .join(" | ");
 
   let invDate = inv.date || new Date().toISOString().split("T")[0];
   if (invDate.includes("GMT") || invDate.length > 10) {
@@ -304,17 +319,6 @@ export function generateWhatsAppWelcomeMessage(
     ? instructionsList.join("\n") 
     : "يرجى إحضار أصل بطاقة الرقم القومي سارية للمطابقة عند الاستلام.";
 
-  // Extract customer services block
-  const custServicesList: string[] = [];
-  inv.customers.forEach(c => {
-    c.services.forEach(s => {
-      const matched = services.find(srv => srv.name === s.serviceId || srv.id === s.serviceId);
-      const srvName = matched?.name || s.serviceId;
-      const fineStr = (s.fineAmount && s.fineAmount > 0) ? ` (تشمل ${s.fineName || 'غرامة'}: ${s.fineAmount * s.quantity} ج.م)` : "";
-      custServicesList.push(`• ${srvName} (العدد: ${s.quantity}) - ${s.price} ج.م${fineStr}`);
-    });
-  });
-
   const statusText = inv.status === "NEW" 
     ? "جديدة" 
     : inv.status === "READY" 
@@ -333,12 +337,12 @@ export function generateWhatsAppWelcomeMessage(
     .replace(/{الموظف}/g, inv.employeeName || "شريف")
     .replace(/{حالة_الفاتورة}/g, statusText)
     .replace(/{فاصل}/g, WHATSAPP_DIVIDER)
-    .replace(/{اسم_العميل}/g, arabicNameOnly)
-    .replace(/{الاسم}/g, arabicNameOnly)
-    .replace(/{الاسم_الانجليزي}/g, englishNameOnly ? `🔤 *بالإنجليزي:* ${englishNameOnly}` : "")
-    .replace(/{المهنة}/g, professionOnly)
-    .replace(/{الخدمات}/g, custServicesList.join("\n"))
-    .replace(/{الخدمة_المختارة}/g, custServicesList.join("\n"))
+    .replace(/{اسم_العميل}/g, inv.customers.length > 1 ? arabicNames : (inv.customers[0]?.arabicName || ""))
+    .replace(/{الاسم}/g, inv.customers.length > 1 ? arabicNames : (inv.customers[0]?.arabicName || ""))
+    .replace(/{الاسم_الانجليزي}/g, englishNames ? `🔤 *بالإنجليزي:* ${englishNames}` : "")
+    .replace(/{المهنة}/g, professions)
+    .replace(/{الخدمات}/g, detailsBlock)
+    .replace(/{الخدمة_المختارة}/g, detailsBlock)
     .replace(/{تعليمات_الاستلام}/g, serviceInstructionsBody)
     .replace(/{تعليمات_الخدمة}/g, serviceInstructionsBody)
     .replace(/{السعر}/g, inv.totalAmount.toFixed(2))
@@ -349,6 +353,11 @@ export function generateWhatsAppWelcomeMessage(
     .replace(/{الميعاد_النهائي}/g, deliveryDisplay)
     .replace(/{الخاتمة}/g, footerTextDisplay)
     .replace(/{رقم_الفاتورة}/g, inv.invoiceId.toString());
+
+  // If the user's custom template omitted the full details block, append it so no family member is missing
+  if (!userTemplate.includes("{تفاصيل_الفاتورة}") && !userTemplate.includes("{محتوى_الفاتورة}") && !formatted.includes(detailsBlock)) {
+    formatted = `${formatted}\n\n${WHATSAPP_DIVIDER}\n\n${detailsBlock}`;
+  }
 
   formatted = formatted.replace(/\n{3,}/g, "\n\n");
   return formatted;
