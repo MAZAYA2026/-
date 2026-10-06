@@ -1503,6 +1503,47 @@ app.post("/api/sheets/webhook/sync-fines", async (req, res) => {
   }
 });
 
+// Dedicated Webhook Sync Aman Report Endpoint
+app.post("/api/sheets/webhook/sync-aman", async (req, res) => {
+  const { webhookUrl, dateFrom, dateTo, amanRows } = req.body;
+  const db = readDB();
+  const targetUrl = webhookUrl || db.settings?.googleSheetWebhookUrl || (db.settings?.googleSheetUrl?.startsWith("http") ? db.settings.googleSheetUrl : undefined);
+
+  if (!targetUrl || !targetUrl.startsWith("http")) {
+    return res.status(400).json({ error: "الرجاء إدخال رابط سكربت Webhook صالح أولاً في قسم إعدادات جوجل شيت." });
+  }
+
+  try {
+    const response = await fetch(targetUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        action: "push_aman",
+        dateFrom: dateFrom || "",
+        dateTo: dateTo || "",
+        amanRows: Array.isArray(amanRows) ? amanRows : [],
+      }),
+      redirect: "follow",
+    });
+
+    const text = await response.text();
+    let data: any = {};
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { message: text };
+    }
+
+    res.json({
+      status: "success",
+      message: data.message || "تم حفظ ومزامنة كشف أمان في ملف جوجل شيت بنجاح! 📑✅",
+      data,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: "فشل إرسال كشف أمان إلى السكربت: " + err.message });
+  }
+});
+
 // Webhook Pull DB Endpoint
 app.post("/api/sheets/webhook/pull", async (req, res) => {
   const { webhookUrl } = req.body;

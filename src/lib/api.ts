@@ -389,4 +389,33 @@ export async function syncGovernmentFinesWithSheets(webhookUrl?: string): Promis
   return response.json();
 }
 
+export async function syncAmanReportToGoogleSheets(payload: {
+  dateFrom: string;
+  dateTo: string;
+  amanRows: Array<{
+    id?: string;
+    index?: number;
+    arabicName: string;
+    birthDate: string;
+    notes: string;
+    invoiceId?: number;
+    date?: string;
+  }>;
+  webhookUrl?: string;
+}): Promise<{
+  status: string;
+  message: string;
+}> {
+  const response = await fetch("/api/sheets/webhook/sync-aman", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || "فشل مزامنة كشف أمان مع جوجل شيت");
+  }
+  return response.json();
+}
+
 

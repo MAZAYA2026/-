@@ -354,6 +354,9 @@ export default function App() {
               invoices={invoices} 
               services={services} 
               activeEmployee={activeEmployee}
+              settings={settings}
+              onInvoiceUpdated={handleInvoiceUpdated}
+              onInvoiceCreated={handleInvoiceCreated}
             />
           )}
 

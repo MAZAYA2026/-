@@ -450,6 +450,57 @@ function doPost(e) {
         }
       }
 
+      // --- Sheet 7: Aman_كشف_حركة_الخدمات_الجماهيرية ---
+      var amanSheet = getOrCreateSheet(ss, "Aman_كشف_حركة_الخدمات_الجماهيرية");
+      amanSheet.clearContents();
+      var amanHeaders = ["م", "الاسم", "تاريخ الميلاد", "الملاحظات", "رقم الفاتورة", "التاريخ"];
+      var amanRows = [amanHeaders];
+      var aCounter = 1;
+      if (db.invoices && Array.isArray(db.invoices)) {
+        for (var ai = 0; ai < db.invoices.length; ai++) {
+          var aInv = db.invoices[ai];
+          if (aInv.customers && Array.isArray(aInv.customers)) {
+            for (var ac = 0; ac < aInv.customers.length; ac++) {
+              var aCust = aInv.customers[ac];
+              var isAman = false;
+              var aNote = "";
+              if (aCust.services && Array.isArray(aCust.services)) {
+                for (var asIdx = 0; asIdx < aCust.services.length; asIdx++) {
+                  var sId = String(aCust.services[asIdx].serviceId || "");
+                  if (sId.indexOf("#") === 0 && sId.indexOf("##") !== 0) {
+                    isAman = true;
+                    aNote = aCust.services[asIdx].notes || "";
+                    break;
+                  }
+                }
+              }
+              if (isAman) {
+                amanRows.push([
+                  aCounter++,
+                  aCust.arabicName || "",
+                  aCust.birthDate || "",
+                  aNote || aCust.profession || "",
+                  aInv.invoiceId || "",
+                  aInv.date || ""
+                ]);
+              }
+            }
+          }
+        }
+      }
+      if (amanRows.length > 0) {
+        amanSheet.getRange(1, 1, amanRows.length, amanRows[0].length).setValues(amanRows);
+        formatHeader(amanSheet, amanHeaders.length);
+        try {
+          amanSheet.setColumnWidth(1, 60);
+          amanSheet.setColumnWidth(2, 280);
+          amanSheet.setColumnWidth(3, 140);
+          amanSheet.setColumnWidth(4, 250);
+          amanSheet.setColumnWidth(5, 110);
+          amanSheet.setColumnWidth(6, 120);
+        } catch(cwErr) {}
+      }
+
       return ContentService.createTextOutput(JSON.stringify({ 
         status: "success", 
         message: "تم تحديث وحفظ كافة البيانات في ملف جوجل شيت بنجاح! 🚀" 
@@ -552,6 +603,44 @@ function doPost(e) {
           message: "تم تسجيل وتحديث ورقة الغرامات الحكومية (" + finesList.length + " بند) بملف جوجل شيت بنجاح! ⚖️✅" 
         })).setMimeType(ContentService.MimeType.JSON);
       }
+    }
+
+    // 5. Direct Specific Aman Report Push
+    if (action === "push_aman") {
+      var aRowsList = contents.amanRows || [];
+      var aSheet = getOrCreateSheet(ss, "Aman_كشف_حركة_الخدمات_الجماهيرية");
+      aSheet.clearContents();
+      var aHeaders = ["م", "الاسم", "تاريخ الميلاد", "الملاحظات", "رقم الفاتورة", "التاريخ"];
+      var aRows = [aHeaders];
+      for (var ar = 0; ar < aRowsList.length; ar++) {
+        var rowItem = aRowsList[ar];
+        if (rowItem && (rowItem.arabicName || rowItem.birthDate || rowItem.notes)) {
+          aRows.push([
+            ar + 1,
+            rowItem.arabicName || "",
+            rowItem.birthDate || "",
+            rowItem.notes || "",
+            rowItem.invoiceId || "",
+            rowItem.date || contents.dateFrom || ""
+          ]);
+        }
+      }
+      if (aRows.length > 0) {
+        aSheet.getRange(1, 1, aRows.length, aRows[0].length).setValues(aRows);
+        formatHeader(aSheet, aHeaders.length);
+        try {
+          aSheet.setColumnWidth(1, 60);
+          aSheet.setColumnWidth(2, 280);
+          aSheet.setColumnWidth(3, 140);
+          aSheet.setColumnWidth(4, 250);
+          aSheet.setColumnWidth(5, 110);
+          aSheet.setColumnWidth(6, 120);
+        } catch(cwErr) {}
+      }
+      return ContentService.createTextOutput(JSON.stringify({ 
+        status: "success", 
+        message: "تم حفظ وتحديث كشف أمان في ورقة (Aman_كشف_حركة_الخدمات_الجماهيرية) بملف جوجل شيت بنجاح! 📑✅" 
+      })).setMimeType(ContentService.MimeType.JSON);
     }
 
     return ContentService.createTextOutput(JSON.stringify({ error: "إجراء غير معروف" }))
