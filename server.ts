@@ -1235,34 +1235,14 @@ async function pullFromGoogleWebhook(webhookUrl: string) {
 let syncTimeout: NodeJS.Timeout | null = null;
 let pendingReasons: string[] = [];
 
-// Real-time synchronization to Google Sheets as live central database
-// Automatically batches and persists Services, Invoices, English names (Dictionary), and Closings
-function triggerBackgroundWebhookSync(db: any, reason: string = "حفظ البيانات") {
-  const webhookUrl = db.settings?.googleSheetWebhookUrl || (db.settings?.googleSheetUrl?.includes("script.google.com") ? db.settings.googleSheetUrl : null);
-  if (!webhookUrl || !webhookUrl.startsWith("http")) return;
-
-  if (!pendingReasons.includes(reason)) {
-    pendingReasons.push(reason);
-  }
-
-  if (syncTimeout) {
-    clearTimeout(syncTimeout);
-  }
-
-  // 350ms debounce batches rapid consecutive mutations (e.g. invoice creation + auto-learn English names) into 1 atomic sync
-  syncTimeout = setTimeout(() => {
-    const reasonsStr = pendingReasons.join(" | ");
-    pendingReasons = [];
-    syncTimeout = null;
-
-    pushToGoogleWebhook(webhookUrl, db)
-      .then((res) => {
-        console.log(`[Google Sheet Live DB Sync] (${reasonsStr}) synced successfully:`, res?.message || "OK");
-      })
-      .catch((err) => {
-        console.warn(`[Google Sheet Live DB Sync] (${reasonsStr}) warning:`, err.message);
-      });
-  }, 350);
+// User strict directive:
+// "لا تقم بعمل مزامنة وحفظ تلقائي للبيانات والخدمات كلها الى ملف جوجل شيت لا تعمل مزامنة نهائيا الا عند الضغط على حفظ 
+// حالة واحدة فقط اللى تحفظها تلقائيا هو كشف امان بعد الخروج من الخلية اللى يتم الكتابة بها"
+function triggerBackgroundWebhookSync(_db: any, _reason: string = "حفظ البيانات") {
+  // Automatic background syncing of services, invoices, dictionary, etc. is strictly disabled.
+  // Full data synchronization ONLY occurs when the user explicitly clicks a "حفظ" button.
+  // The ONLY automatic sync permitted is Aman Report (/api/sheets/webhook/sync-aman) on cell blur.
+  return;
 }
 
 // Webhook test connection endpoint
@@ -1507,7 +1487,7 @@ app.post("/api/sheets/webhook/sync-fines", async (req, res) => {
 app.post("/api/sheets/webhook/sync-aman", async (req, res) => {
   const { webhookUrl, dateFrom, dateTo, amanRows } = req.body;
   const db = readDB();
-  const targetUrl = webhookUrl || db.settings?.googleSheetWebhookUrl || (db.settings?.googleSheetUrl?.startsWith("http") ? db.settings.googleSheetUrl : undefined);
+  const targetUrl = webhookUrl || db.settings?.googleSheetWebhookUrl;
 
   if (!targetUrl || !targetUrl.startsWith("http")) {
     return res.status(400).json({ error: "الرجاء إدخال رابط سكربت Webhook صالح أولاً في قسم إعدادات جوجل شيت." });

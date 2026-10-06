@@ -933,15 +933,15 @@ function formatHeader(sheet, numCols) {
           deliveryMessage: deliveryMessage.trim(),
           googleSheetUrl: rawUrl,
           googleSheetWebhookUrl: googleSheetWebhookUrl.trim(),
-          autoSyncWebhook: true,
+          autoSyncWebhook: false, // Strict manual mode
           footerText: footerText.trim(),
           googleSheetsConnected: true,
         };
         const result = await updateSettingsOnServer(payload);
         onSettingsUpdated(result);
         setShowScriptGuide(true);
-        setSyncMessage("تم حفظ رابط ملف جوجل شيت! 📊 لتفعيل الحفظ والمزامنة المباشرة، انسخ كود السكربت من الزر المخصص بالأسفل وضعه في Apps Script الخاص بملف الشيت.");
-        alert("تم حفظ رابط ملف جوجل شيت بنجاح! 📊\nلتفعيل المزامنة التلقائية اللحظية، انسخ كود السكربت من الزر المخصص بالأسفل وركبه في Extensions > Apps Script بالملف.");
+        setSyncMessage("تم حفظ رابط ملف جوجل شيت! 📊 تم تفعيل النمط اليدوي (الحفظ عند الضغط على زر الحفظ فقط) لحماية بياناتك.");
+        alert("تم حفظ رابط ملف جوجل شيت بنجاح! 📊\n🛡️ تم ضبط النظام على النمط اليدوي (المزامنة تتم فقط عند الضغط على زر حفظ).");
         return;
       }
 

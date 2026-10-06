@@ -8,7 +8,7 @@
     "readyPassportMessage": "🛂 *{اسم_المكتب}*\n_{الترويسة_الفرعية}_\n\n────────────────────────────\n\nعزيزنا {اسم_العميل}،\nنفيدكم علماً بأن جواز السفر الخاص بكم بالفاتورة رقم #{رقم_الفاتورة} جاهز للاستلام الآن بالمكتب 📑✨\n\n📋 *الخدمات:* {الخدمات}\n🗄️ *مكان الحفظ:* درج رقم ({رقم_الارشيف})\n\n⚠️ *تنبيهات هامة جداً لاستلام جواز السفر:*\n• إحضار أصل بطاقة الرقم القومي سارية للمطابقة.\n• إحضار جواز السفر السابق (إن وجد) للتخريم والإلغاء.\n• إحضار أصل الفاتورة الحرارية للمطابقة.\n• استلام الجواز لصاحب الشأن شخصياً أو لمن له الصفة القانونية المباشرة (الأب للأبناء القصر / الزوج بموجب وثيقة الزواج).\n\n────────────────────────────\n\n📍 {اسم_المكتب}\n📞 للاستفسار والمتابعة: {هاتف_التواصل}",
     "deliveryMessage": "تم تسليم جواز السفر والأوراق الخاصة بك بنجاح يا {اسم_العميل}.\nرقم الفاتورة: {رقم_الفاتورة}\nنسعد بتقييمكم لخدمات مكتب مزايا للجوازات ونراكم قريباً في معاملات أخرى.",
     "googleSheetWebhookUrl": "https://script.google.com/macros/s/AKfycbzs-tNIvoZJQOwvb7FgYht4du96_QrDzqTXIiUMAV0iVfvvIkENhxuBXGYfDp-5snc/exec",
-    "autoSyncWebhook": true,
+    "autoSyncWebhook": false,
     "googleSheetId": "",
     "googleSheetUrl": "",
     "googleSheetsConnected": true,
@@ -114,6 +114,36 @@
           ]
         }
       ]
+    },
+    {
+      "date": "2026-10-06",
+      "status": "NEW",
+      "employeeName": "شريف (المدير)",
+      "customers": [
+        {
+          "arabicName": "السيد عبد السلام قابيل السعدنى",
+          "englishName": "",
+          "englishNameOption": "gemini",
+          "nationalId": "",
+          "birthDate": "1-5-2025",
+          "phone": "",
+          "profession": "",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر مستعجل",
+              "quantity": 1,
+              "price": 2000,
+              "deliveryDate": "2026-10-06",
+              "notes": ""
+            }
+          ]
+        }
+      ],
+      "totalGov": 1500,
+      "totalOffice": 500,
+      "totalAmount": 2000,
+      "invoiceId": 102,
+      "notificationSent": false
     }
   ],
   "collectionClosings": [],
