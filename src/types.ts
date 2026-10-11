@@ -39,6 +39,9 @@ export interface CustomerInput {
     notes?: string; // ملاحظات أو تعليمات خاصة بالخدمة
     fineName?: string; // اسم الغرامة الحكومية إن وجدت (لخدمات #)
     fineAmount?: number; // مبلغ الغرامة الحكومية للوحدة إن وجد
+    completed?: boolean; // هل تم الانتهاء من تنفيذ هذه الخدمة
+    completedAt?: string; // تاريخ وتوقيت الانتهاء من تنفيذ هذه الخدمة
+    executionNote?: string; // ملاحظات تنفيذ الخدمة (مثل: تأخير بسبب كذا أو مع مندوب كذا)
   }[];
 }
 
@@ -100,6 +103,7 @@ export interface AppSettings {
   welcomeMessage: string; // رسالة ترحيب واستلام الطلب الأولى
   readyMessage: string; // رسالة جاهز للتسليم (للمعاملات العامة)
   readyPassportMessage?: string; // رسالة جاهز للتسليم الخاصة بمعاملات جوازات السفر (التي تبدأ بـ #)
+  partialReadyMessage?: string; // قالب رسالة الإنجاز الجزئي للخدمات واستكمال باقي المعاملات تباعاً
   deliveryMessage: string; // رسالة تم التسليم
   whatsappTemplate?: string; // (ملغي - البديل عنه رسالة الترحيب واستلام الطلب منعاً لتكرار البيانات)
   googleSheetWebhookUrl?: string; // Web App Webhook URL (https://script.google.com/macros/s/.../exec)

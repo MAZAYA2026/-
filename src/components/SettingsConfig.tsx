@@ -7,8 +7,7 @@ import {
   pullDataFromGoogleWebhook,
   saveDictionaryWord,
   updateDictionaryWord,
-  deleteDictionaryWord,
-  syncGovernmentFinesWithSheets
+  deleteDictionaryWord
 } from "../lib/api";
 import { 
   Save, 
@@ -55,7 +54,7 @@ import {
 } from "../lib/businessDays";
 
 import { GovernmentFine } from "../types";
-import { DEFAULT_READY_PASSPORT_MESSAGE, DEFAULT_READY_GENERAL_MESSAGE } from "../lib/whatsapp";
+import { DEFAULT_READY_PASSPORT_MESSAGE, DEFAULT_READY_GENERAL_MESSAGE, DEFAULT_PARTIAL_READY_MESSAGE } from "../lib/whatsapp";
 
 interface SettingsConfigProps {
   settings: AppSettings;
@@ -88,6 +87,7 @@ export default function SettingsConfig({
   const [welcomeMessage, setWelcomeMessage] = useState(settings.welcomeMessage || "");
   const [readyMessage, setReadyMessage] = useState(settings.readyMessage || DEFAULT_READY_GENERAL_MESSAGE);
   const [readyPassportMessage, setReadyPassportMessage] = useState(settings.readyPassportMessage || DEFAULT_READY_PASSPORT_MESSAGE);
+  const [partialReadyMessage, setPartialReadyMessage] = useState(settings.partialReadyMessage || DEFAULT_PARTIAL_READY_MESSAGE);
   const [deliveryMessage, setDeliveryMessage] = useState(settings.deliveryMessage || "");
   const [googleSheetUrl, setGoogleSheetUrl] = useState(settings.googleSheetUrl || "");
   const [googleSheetWebhookUrl, setGoogleSheetWebhookUrl] = useState(settings.googleSheetWebhookUrl || settings.googleSheetUrl || "");
@@ -127,6 +127,7 @@ export default function SettingsConfig({
         welcomeMessage: welcomeMessage.trim(),
         readyMessage: readyMessage.trim(),
         readyPassportMessage: readyPassportMessage.trim(),
+        partialReadyMessage: partialReadyMessage.trim(),
         deliveryMessage: deliveryMessage.trim(),
         googleSheetUrl: googleSheetUrl.trim(),
         googleSheetWebhookUrl: googleSheetWebhookUrl.trim(),
@@ -382,6 +383,7 @@ function doPost(e) {
           ["رسالة الترحيب واستلام الطلب", db.settings.welcomeMessage || "", "welcomeMessage"],
           ["قالب رسالة جاهزية الأوراق للاستلام (العامة)", db.settings.readyMessage || "", "readyMessage"],
           ["قالب رسالة جاهزية جوازات السفر (#)", db.settings.readyPassportMessage || "", "readyPassportMessage"],
+          ["قالب رسالة الإنجاز الجزئي للخدمات", db.settings.partialReadyMessage || "", "partialReadyMessage"],
           ["قالب رسالة تم التسليم بنجاح", db.settings.deliveryMessage || "", "deliveryMessage"],
           ["تذييل الفاتورة المطبوعة", db.settings.footerText || "", "footerText"],
           ["إعدادات النظام كاملة (JSON)", JSON.stringify(db.settings || {}), "settings_json"]
@@ -520,6 +522,7 @@ function doPost(e) {
         ["رسالة الترحيب واستلام الطلب", stData.welcomeMessage || "", "welcomeMessage"],
         ["قالب رسالة جاهزية الأوراق للاستلام (العامة)", stData.readyMessage || "", "readyMessage"],
         ["قالب رسالة جاهزية جوازات السفر (#)", stData.readyPassportMessage || "", "readyPassportMessage"],
+        ["قالب رسالة الإنجاز الجزئي للخدمات", stData.partialReadyMessage || "", "partialReadyMessage"],
         ["قالب رسالة تم التسليم بنجاح", stData.deliveryMessage || "", "deliveryMessage"],
         ["تذييل الفاتورة المطبوعة", stData.footerText || "", "footerText"],
         ["إعدادات النظام كاملة (JSON)", JSON.stringify(stData || {}), "settings_json"]
@@ -771,6 +774,8 @@ function doGet(e) {
           db.settings.welcomeMessage = val;
         } else if (label.indexOf("جوازات") !== -1 || key === "readyPassportMessage") {
           db.settings.readyPassportMessage = val;
+        } else if (label.indexOf("جزئي") !== -1 || key === "partialReadyMessage") {
+          db.settings.partialReadyMessage = val;
         } else if (label.indexOf("جاهزية") !== -1 || label.indexOf("ready") !== -1) {
           db.settings.readyMessage = val;
         } else if (label.indexOf("التسليم بنجاح") !== -1 || label.indexOf("delivery") !== -1) {
@@ -903,6 +908,7 @@ function formatHeader(sheet, numCols) {
       setWelcomeMessage(settings.welcomeMessage || "");
       setReadyMessage(settings.readyMessage || DEFAULT_READY_GENERAL_MESSAGE);
       setReadyPassportMessage(settings.readyPassportMessage || DEFAULT_READY_PASSPORT_MESSAGE);
+      setPartialReadyMessage(settings.partialReadyMessage || DEFAULT_PARTIAL_READY_MESSAGE);
       setDeliveryMessage(settings.deliveryMessage || "");
       setGoogleSheetUrl(settings.googleSheetUrl || "");
       setGoogleSheetWebhookUrl(settings.googleSheetWebhookUrl || settings.googleSheetUrl || "");
@@ -930,6 +936,7 @@ function formatHeader(sheet, numCols) {
           welcomeMessage: welcomeMessage.trim(),
           readyMessage: readyMessage.trim(),
           readyPassportMessage: readyPassportMessage.trim(),
+          partialReadyMessage: partialReadyMessage.trim(),
           deliveryMessage: deliveryMessage.trim(),
           googleSheetUrl: rawUrl,
           googleSheetWebhookUrl: googleSheetWebhookUrl.trim(),
@@ -956,6 +963,7 @@ function formatHeader(sheet, numCols) {
         welcomeMessage: welcomeMessage.trim(),
         readyMessage: readyMessage.trim(),
         readyPassportMessage: readyPassportMessage.trim(),
+        partialReadyMessage: partialReadyMessage.trim(),
         deliveryMessage: deliveryMessage.trim(),
         googleSheetWebhookUrl: rawUrl,
         googleSheetUrl: googleSheetUrl || "",
@@ -1036,28 +1044,6 @@ function formatHeader(sheet, numCols) {
     }
   };
 
-  const [finesSyncLoading, setFinesSyncLoading] = useState(false);
-  const handleSyncFines = async () => {
-    const rawUrl = googleSheetWebhookUrl.trim();
-    if (!rawUrl) {
-      alert("الرجاء إدخال رابط سكربت Webhook الخاص بجوجل شيت أولاً.");
-      return;
-    }
-    setFinesSyncLoading(true);
-    setSyncMessage("جاري مزامنة بنود الغرامات الحكومية مع جوجل شيت...");
-    try {
-      const res = await syncGovernmentFinesWithSheets(rawUrl);
-      setSyncMessage(res.message);
-      alert(res.message);
-    } catch (err: any) {
-      console.error(err);
-      setSyncMessage(`فشل مزامنة الغرامات: ${err.message}`);
-      alert(`فشل مزامنة الغرامات: ${err.message}`);
-    } finally {
-      setFinesSyncLoading(false);
-    }
-  };
-
   // Passcode States
   const [myCurrentPassword, setMyCurrentPassword] = useState("");
   const [myNewPassword, setMyNewPassword] = useState("");
@@ -1132,6 +1118,7 @@ function formatHeader(sheet, numCols) {
         welcomeMessage: welcomeMessage.trim(),
         readyMessage: readyMessage.trim(),
         readyPassportMessage: readyPassportMessage.trim(),
+        partialReadyMessage: partialReadyMessage.trim(),
         deliveryMessage: deliveryMessage.trim(),
         googleSheetId: settings.googleSheetId || "",
         googleSheetUrl: googleSheetUrl.trim(),
@@ -1416,6 +1403,60 @@ _{الترويسة_الفرعية}_
                       type="button"
                       onClick={() => setReadyMessage((prev) => prev + " " + tag)}
                       className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-slate-800 font-bold hover:bg-slate-100 transition-colors cursor-pointer"
+                    >
+                      {tag}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Partial Ready Message for Multi-service / Family Invoices */}
+            <div className="space-y-2 border border-sky-200 bg-sky-50/50 rounded-xl p-3.5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <label className="text-xs font-bold text-sky-950 flex items-center gap-1.5">
+                  <span>⏳</span>
+                  <span>قالب رسالة الإنجاز الجزئي للخدمات (إشعار العميل بانتهاء خدمة وجاري استكمال الباقي):</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setPartialReadyMessage(DEFAULT_PARTIAL_READY_MESSAGE)}
+                  className="text-[10px] font-bold text-sky-800 hover:text-sky-950 bg-white border border-sky-300 px-2 py-1 rounded-lg hover:bg-sky-100/50 transition-colors shadow-2xs self-start sm:self-auto cursor-pointer"
+                >
+                  استعادة قالب الإنجاز الجزئي الافتراضي 🔄
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-600 leading-relaxed">
+                يُرسل هذا القالب الفرعي عبر الواتساب عند الانتهاء من تنفيذ أي خدمة بعينها في الفاتورة (عند وجود أكثر من خدمة أو أكثر من فرد). يُفيد العميل بالخدمة التي تم إنجازها وملاحظتها مع طمأنته بأن باقي الخدمات قيد المتابعة تباعاً.
+              </p>
+              <textarea 
+                value={partialReadyMessage}
+                onChange={(e) => setPartialReadyMessage(e.target.value)}
+                placeholder="قالب رسالة الإنجاز الجزئي للخدمات..."
+                rows={7}
+                className="w-full bg-white border border-sky-200 rounded-xl p-3 text-xs font-mono leading-relaxed"
+                dir="rtl"
+              />
+              <div className="space-y-1 text-[10px]">
+                <div className="font-bold text-slate-600">المتغيرات الصالحة للإدراج تلقائياً:</div>
+                <div className="flex flex-wrap gap-1.5 font-mono">
+                  {[
+                    "{اسم_العميل}",
+                    "{رقم_الفاتورة}",
+                    "{الخدمة_المنجزة}",
+                    "{تاريخ_الانجاز}",
+                    "{ملاحظة_التنفيذ}",
+                    "{الخدمات_المتبقية}",
+                    "{اسم_المكتب}",
+                    "{الترويسة_الفرعية}",
+                    "{هاتف_التواصل}",
+                    "{فاصل}"
+                  ].map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => setPartialReadyMessage((prev) => prev + " " + tag)}
+                      className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-sky-900 font-bold hover:bg-sky-50 transition-colors cursor-pointer"
                     >
                       {tag}
                     </button>

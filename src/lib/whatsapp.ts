@@ -269,6 +269,90 @@ _{الترويسة_الفرعية}_
 📍 {اسم_المكتب}
 📞 للاستفسار والمتابعة: {هاتف_التواصل}`;
 
+export const DEFAULT_PARTIAL_READY_MESSAGE = `⏳ *{اسم_المكتب}*
+_{الترويسة_الفرعية}_
+
+────────────────────────────
+
+عزيزنا {اسم_العميل}،
+نفيدكم علماً بأنه *تم تنفيذ وإنجاز جزء من خدماتكم* الخاصة بالفاتورة رقم #{رقم_الفاتورة} بنجاح ✨
+
+✅ *الخدمة المنجزة:*
+• {الخدمة_المنجزة}
+{تاريخ_الانجاز}
+{ملاحظة_التنفيذ}
+
+⏳ *باقي الخدمات قيد المتابعة والتنفيذ تباعاً:*
+{الخدمات_المتبقية}
+
+سنقوم بإشعاركم فور الانتهاء من باقي الخدمات لتسليم المعاملة كاملة بمشيئة الله.
+
+────────────────────────────
+
+📍 {اسم_المكتب}
+📞 للاستفسار والمتابعة: {هاتف_التواصل}`;
+
+/**
+ * Generates a WhatsApp notification for partial service execution.
+ */
+export function generateWhatsAppPartialReadyMessage(
+  inv: Invoice,
+  custIdx: number,
+  sIdx: number,
+  services: Service[],
+  settings: AppSettings
+): { message: string; targetPhone: string } {
+  const template = settings.partialReadyMessage?.trim() || DEFAULT_PARTIAL_READY_MESSAGE;
+  const cust = inv.customers[custIdx] || inv.customers[0];
+  const targetService = cust.services[sIdx];
+  const matchedService = services.find(srv => srv.id === targetService?.serviceId || srv.name === targetService?.serviceId);
+  const serviceName = matchedService?.name || targetService?.serviceId || "الخدمة المطلوبة";
+
+  const customerName = cust.arabicName || "العميل الكريم";
+  const contact = (settings.contactPhone || "").trim();
+  const header = (settings.headerText || "مكتب مزايا للجوازات").trim();
+  const subHeader = (settings.subHeaderText !== undefined ? settings.subHeaderText : "جوازات طنطا والمعاملات الحكومية").trim();
+
+  const completionDateText = targetService?.completedAt ? `📅 موعد الانتهاء: ${targetService.completedAt}` : "";
+  const executionNoteText = targetService?.executionNote?.trim() ? `📝 ملاحظة الإنجاز: ${targetService.executionNote.trim()}` : "";
+
+  // Collect other uncompleted services across all customers in the invoice
+  const remainingServicesList: string[] = [];
+  inv.customers.forEach((c, cI) => {
+    c.services.forEach((s, sI) => {
+      // Skip the currently completed service
+      if (cI === custIdx && sI === sIdx) return;
+      if (!s.completed) {
+        const m = services.find(srv => srv.id === s.serviceId || srv.name === s.serviceId);
+        const name = m?.name || s.serviceId;
+        const prefix = inv.customers.length > 1 ? `[${c.arabicName}] ` : "";
+        remainingServicesList.push(`• ${prefix}${name}`);
+      }
+    });
+  });
+
+  const remainingText = remainingServicesList.length > 0
+    ? remainingServicesList.join("\n")
+    : "• جاري فحص وإنهاء الإجراءات المتبقية";
+
+  let msg = template
+    .replace(/{اسم_المكتب}/g, header)
+    .replace(/{الترويسة_الفرعية}/g, subHeader)
+    .replace(/{اسم_العميل}/g, customerName)
+    .replace(/{رقم_الفاتورة}/g, inv.invoiceId.toString())
+    .replace(/{الخدمة_المنجزة}/g, serviceName)
+    .replace(/{تاريخ_الانجاز}/g, completionDateText)
+    .replace(/{ملاحظة_التنفيذ}/g, executionNoteText)
+    .replace(/{الخدمات_المتبقية}/g, remainingText)
+    .replace(/{هاتف_التواصل}/g, contact)
+    .replace(/{رقم_التواصل}/g, contact)
+    .replace(/{فاصل}/g, WHATSAPP_DIVIDER);
+
+  msg = msg.replace(/\n{3,}/g, "\n\n");
+  const targetPhone = cust.phone?.trim() || inv.customers[0]?.phone?.trim() || "";
+  return { message: msg, targetPhone };
+}
+
 /**
  * Checks if a service name represents a passport service (starts with #).
  */

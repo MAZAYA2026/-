@@ -2,8 +2,8 @@ import React, { useState, useRef } from "react";
 import { Invoice, InvoiceStatus, AppSettings, Service, Employee, CustomerInput, GovernmentFine } from "../types";
 import { updateInvoiceOnServer, deleteInvoiceOnServer } from "../lib/api";
 import { calculateWorkingDaysDeliveryDate, getArabicDayName, recalculateCustomerServicesDeliveryDates } from "../lib/businessDays";
-import { generateWhatsAppWelcomeMessage, generateWhatsAppReadyMessage, getWhatsAppUrl } from "../lib/whatsapp";
-import { Search, Edit3, Trash2, Printer, Send, CheckCircle, PackageOpen, X, MapPin, Calendar, Info, RefreshCw, AlertCircle, Save, AlertTriangle } from "lucide-react";
+import { generateWhatsAppWelcomeMessage, generateWhatsAppReadyMessage, generateWhatsAppPartialReadyMessage, getWhatsAppUrl } from "../lib/whatsapp";
+import { Search, Edit3, Trash2, Printer, Send, CheckCircle, PackageOpen, X, MapPin, Calendar, Info, RefreshCw, AlertCircle, Save, AlertTriangle, CheckSquare, Square, Clock, MessageSquare, Check, Sparkles } from "lucide-react";
 import ThermalReceipt from "./ThermalReceipt";
 
 interface InvoiceQueryProps {
@@ -46,6 +46,17 @@ export default function InvoiceQuery({
 
   // Print Receipt modal state
   const [printInvoice, setPrintInvoice] = useState<Invoice | null>(null);
+
+  // Execution Note and Partial WhatsApp Modal State
+  const [noteModal, setNoteModal] = useState<{
+    invoice: Invoice;
+    customerIndex: number;
+    serviceIndex: number;
+    currentNote: string;
+    completed: boolean;
+    serviceName: string;
+    customerName: string;
+  } | null>(null);
 
   // Filtered invoices
   const filteredInvoices = invoices.filter((inv) => {
@@ -201,6 +212,88 @@ export default function InvoiceQuery({
       window.open(waUrl, "_blank");
     } else {
       alert("رقم هاتف العميل غير متوفر.");
+    }
+  };
+
+  // WhatsApp Partial Execution Notification
+  const handleSendWhatsAppPartial = (inv: Invoice, custIdx: number, sIdx: number) => {
+    const { message: msg, targetPhone: rawPhone } = generateWhatsAppPartialReadyMessage(inv, custIdx, sIdx, services, settings);
+    if (rawPhone) {
+      let cleanPhone = rawPhone.replace(/\D/g, "");
+      if (cleanPhone.startsWith("0")) cleanPhone = "2" + cleanPhone;
+      const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`;
+      window.open(waUrl, "_blank");
+    } else {
+      alert("رقم هاتف العميل غير متوفر في هذه الفاتورة.");
+    }
+  };
+
+  // Toggle individual service completion with timestamp and execution note prompt
+  const handleToggleServiceCompleted = async (inv: Invoice, custIdx: number, sIdx: number) => {
+    try {
+      const cloned = JSON.parse(JSON.stringify(inv)) as Invoice;
+      const targetService = cloned.customers[custIdx].services[sIdx];
+      const currentlyCompleted = !!targetService.completed;
+      const newCompleted = !currentlyCompleted;
+
+      targetService.completed = newCompleted;
+      if (newCompleted) {
+        // Record precise timestamp of completion (Date & Time in Egypt / local format)
+        const now = new Date();
+        const dateStr = now.toISOString().split("T")[0];
+        const timeStr = now.toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit", hour12: true });
+        targetService.completedAt = `${dateStr} (${timeStr})`;
+      } else {
+        targetService.completedAt = undefined;
+      }
+
+      // Check if all services across all customers are completed -> auto promote status
+      const allServicesCompleted = cloned.customers.every(c => c.services.every(s => s.completed));
+      if (allServicesCompleted && cloned.status === InvoiceStatus.NEW) {
+        // All services finished, can be promoted or prompt drawer
+      }
+
+      const result = await updateInvoiceOnServer(cloned.invoiceId, cloned);
+      onInvoiceUpdated(result);
+
+      // If newly marked completed, open the execution note & WhatsApp notification modal
+      if (newCompleted) {
+        const cust = result.customers[custIdx];
+        const srv = cust.services[sIdx];
+        const matched = services.find(s => s.id === srv.serviceId || s.name === srv.serviceId);
+        setNoteModal({
+          invoice: result,
+          customerIndex: custIdx,
+          serviceIndex: sIdx,
+          currentNote: srv.executionNote || "",
+          completed: true,
+          serviceName: matched?.name || srv.serviceId,
+          customerName: cust.arabicName
+        });
+      }
+    } catch (err) {
+      console.error(err);
+      alert("حدث خطأ أثناء حفظ حالة إنجاز الخدمة.");
+    }
+  };
+
+  // Save execution note from note modal
+  const handleSaveExecutionNote = async (noteText: string, andSendWhatsApp: boolean) => {
+    if (!noteModal) return;
+    const { invoice: currentInv, customerIndex: cIdx, serviceIndex: sIdx } = noteModal;
+    try {
+      const cloned = JSON.parse(JSON.stringify(currentInv)) as Invoice;
+      cloned.customers[cIdx].services[sIdx].executionNote = noteText.trim();
+      const result = await updateInvoiceOnServer(cloned.invoiceId, cloned);
+      onInvoiceUpdated(result);
+      setNoteModal(null);
+
+      if (andSendWhatsApp) {
+        handleSendWhatsAppPartial(result, cIdx, sIdx);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("حدث خطأ أثناء حفظ ملاحظة الخدمة.");
     }
   };
 
@@ -510,30 +603,120 @@ export default function InvoiceQuery({
                       )}
 
                       {/* Customer services list */}
-                      <div className="mt-1.5 space-y-1.5 pl-1">
+                      <div className="mt-2 space-y-2 pl-1">
                         {cust.services.map((s, sIdx) => {
                           const matched = services.find(srv => srv.id === s.serviceId || srv.name === s.serviceId);
+                          const isCompleted = !!s.completed;
                           return (
-                            <div key={sIdx} className="space-y-1 border-b border-slate-100 last:border-b-0 pb-1">
-                              <div className="flex justify-between items-center text-[11px] text-slate-700">
-                                <span className="font-medium">• {s.serviceId}</span>
-                                <div className="flex items-center gap-1.5 font-mono text-[10px]">
-                                  {s.fineAmount && s.fineAmount > 0 ? (
-                                    <span className="text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded-sm border border-amber-200 font-cairo">
-                                      {s.fineName || "غرامة"}: +{s.fineAmount * s.quantity} ج.م
-                                    </span>
-                                  ) : null}
-                                  {s.deliveryDate && (
-                                    <span className="text-indigo-800 bg-indigo-50 px-1.5 py-0.5 rounded-sm border border-indigo-200">
-                                      {s.deliveryDate}
-                                    </span>
-                                  )}
-                                  <span className="text-slate-500 font-bold">x{s.quantity}</span>
+                            <div 
+                              key={sIdx} 
+                              className={`p-2.5 rounded-xl border transition-all ${
+                                isCompleted 
+                                  ? "bg-emerald-50/70 border-emerald-200/90 text-emerald-950" 
+                                  : "bg-slate-50/70 border-slate-150 text-slate-800"
+                              }`}
+                            >
+                              <div className="flex items-start justify-between gap-2 text-xs">
+                                <div className="flex items-start gap-2 flex-1">
+                                  {/* Completion Checkbox */}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleServiceCompleted(inv, cIdx, sIdx)}
+                                    className={`mt-0.5 p-1 rounded-lg border transition-all flex items-center justify-center shrink-0 cursor-pointer ${
+                                      isCompleted
+                                        ? "bg-emerald-600 border-emerald-700 text-white shadow-xs"
+                                        : "bg-white border-slate-300 text-slate-300 hover:border-emerald-500 hover:text-emerald-500"
+                                    }`}
+                                    title={isCompleted ? "اضغط لإلغاء إتمام الخدمة" : "اضغط لوضع علامة تم الانتهاء من تنفيذ هذه الخدمة"}
+                                  >
+                                    <Check className={`w-3.5 h-3.5 ${isCompleted ? "stroke-[3]" : "opacity-0 hover:opacity-100"}`} />
+                                  </button>
+
+                                  <div className="flex-1 space-y-1">
+                                    <div className="flex flex-wrap items-center gap-1.5 font-bold font-cairo">
+                                      <span className={isCompleted ? "line-through text-emerald-800" : "text-slate-800"}>
+                                        {s.serviceId}
+                                      </span>
+                                      {isCompleted && (
+                                        <span className="bg-emerald-600 text-white text-[10px] px-1.5 py-0.2 rounded-md font-bold">
+                                          ✓ تم الإنجاز
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    {/* Completion Timestamp */}
+                                    {s.completedAt && (
+                                      <div className="flex items-center gap-1 text-[10px] text-emerald-700 font-mono font-medium">
+                                        <Clock className="w-3 h-3 text-emerald-600 shrink-0" />
+                                        <span>تاريخ الإنجاز: {s.completedAt}</span>
+                                      </div>
+                                    )}
+
+                                    {/* Execution Note */}
+                                    {s.executionNote && s.executionNote.trim() && (
+                                      <div className="bg-white/90 border border-emerald-200 text-emerald-900 text-[10px] rounded-lg p-1.5 font-cairo">
+                                        <span className="font-bold text-emerald-700">📝 ملاحظة التنفيذ: </span>
+                                        <span>{s.executionNote}</span>
+                                      </div>
+                                    )}
+
+                                    {/* Action buttons for this specific service: Note & WhatsApp Partial */}
+                                    <div className="flex flex-wrap items-center gap-1 pt-0.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setNoteModal({
+                                            invoice: inv,
+                                            customerIndex: cIdx,
+                                            serviceIndex: sIdx,
+                                            currentNote: s.executionNote || "",
+                                            completed: isCompleted,
+                                            serviceName: matched?.name || s.serviceId,
+                                            customerName: cust.arabicName
+                                          });
+                                        }}
+                                        className="text-[10px] font-bold text-blue-700 hover:text-blue-900 bg-white border border-blue-200 hover:bg-blue-50 px-2 py-0.5 rounded-md flex items-center gap-1 transition-colors shadow-2xs cursor-pointer font-cairo"
+                                        title="كتابة أو تعديل ملاحظة أثناء تنفيذ هذه الخدمة (تأخير، مندوب، إلخ)"
+                                      >
+                                        <Edit3 className="w-2.5 h-2.5 text-blue-600" />
+                                        <span>{s.executionNote ? "تعديل الملاحظة" : "إضافة ملاحظة تنفيذ"}</span>
+                                      </button>
+
+                                      {isCompleted && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleSendWhatsAppPartial(inv, cIdx, sIdx)}
+                                          className="text-[10px] font-bold text-emerald-800 hover:text-emerald-950 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 px-2 py-0.5 rounded-md flex items-center gap-1 transition-colors shadow-2xs cursor-pointer font-cairo"
+                                          title="إرسال إشعار واتساب للعميل بانتهاء هذه الخدمة وجاري استكمال باقي المعاملات"
+                                        >
+                                          <MessageSquare className="w-2.5 h-2.5 text-emerald-700" />
+                                          <span>إشعار جزئي واتساب 📲</span>
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="flex flex-col items-end gap-1 font-mono text-[10px]">
+                                  <div className="flex items-center gap-1">
+                                    {s.fineAmount && s.fineAmount > 0 ? (
+                                      <span className="text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded-sm border border-amber-200 font-cairo">
+                                        {s.fineName || "غرامة"}: +{s.fineAmount * s.quantity} ج.م
+                                      </span>
+                                    ) : null}
+                                    {s.deliveryDate && (
+                                      <span className="text-indigo-800 bg-indigo-50 px-1.5 py-0.5 rounded-sm border border-indigo-200">
+                                        {s.deliveryDate}
+                                      </span>
+                                    )}
+                                    <span className="text-slate-500 font-bold">x{s.quantity}</span>
+                                  </div>
                                 </div>
                               </div>
+
                               {/* Individual Delivery Instructions */}
                               {matched?.instructions && (
-                                <div className="text-[10px] text-blue-800 bg-blue-50/60 px-2 py-0.5 rounded-md border border-blue-100/80 mr-2 leading-tight">
+                                <div className="text-[10px] text-blue-800 bg-blue-50/80 px-2 py-1 rounded-md border border-blue-100/90 mt-1 leading-tight">
                                   <span className="font-bold">📋 تعليمات التسليم: </span>
                                   <span>{matched.instructions}</span>
                                 </div>
@@ -561,16 +744,47 @@ export default function InvoiceQuery({
                   {inv.totalAmount.toFixed(2)} <span className="text-[10px] text-slate-500 font-cairo">ج.م</span>
                 </div>
 
-                <div className="flex gap-1.5">
-                  {inv.status === InvoiceStatus.NEW && (
-                    <button
-                      onClick={() => handleOpenDrawerPrompt(inv)}
-                      className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold font-cairo text-[11px] px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-xs transition-colors"
-                    >
-                      <PackageOpen className="w-3.5 h-3.5" />
-                      جاهز للتسليم
-                    </button>
-                  )}
+                <div className="flex gap-1.5 items-center">
+                  {inv.status === InvoiceStatus.NEW && (() => {
+                    const totalServices = inv.customers.reduce((acc, c) => acc + c.services.length, 0);
+                    const completedServices = inv.customers.reduce((acc, c) => acc + c.services.filter(s => s.completed).length, 0);
+                    const hasCompletedSome = completedServices > 0;
+                    const allCompleted = totalServices > 0 && completedServices === totalServices;
+                    const isMulti = totalServices > 1 || inv.customers.length > 1;
+
+                    return (
+                      <div className="flex items-center gap-1.5">
+                        {isMulti && (
+                          <span className={`text-[10px] font-bold px-2 py-1 rounded-md font-cairo ${
+                            allCompleted 
+                              ? "bg-emerald-100 text-emerald-800 border border-emerald-300" 
+                              : (hasCompletedSome ? "bg-amber-100 text-amber-800 border border-amber-300" : "bg-slate-100 text-slate-500 border border-slate-200")
+                          }`}>
+                            إنجاز: {completedServices} من {totalServices}
+                          </span>
+                        )}
+                        <button
+                          onClick={() => handleOpenDrawerPrompt(inv)}
+                          className={`font-bold font-cairo text-[11px] px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer ${
+                            allCompleted
+                              ? "bg-emerald-600 hover:bg-emerald-500 text-white shadow-md ring-2 ring-emerald-400 ring-offset-1 animate-pulse"
+                              : (hasCompletedSome
+                                  ? "bg-emerald-700 hover:bg-emerald-600 text-white shadow-xs"
+                                  : "bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs")
+                          }`}
+                          title={
+                            allCompleted
+                              ? "تم إنجاز كامل الخدمات بنجاح! جاهز للتسليم الآن"
+                              : (hasCompletedSome ? `تم إنجاز ${completedServices} خدمة. اضغط للأرشفة وتجهيز التسليم` : "جاهز للتسليم")
+                          }
+                        >
+                          <PackageOpen className="w-3.5 h-3.5" />
+                          <span>جاهز للتسليم</span>
+                          {allCompleted && <Sparkles className="w-3 h-3 text-amber-300" />}
+                        </button>
+                      </div>
+                    );
+                  })()}
 
                   {inv.status === InvoiceStatus.READY && (
                     <button
@@ -659,6 +873,85 @@ export default function InvoiceQuery({
               >
                 حفظ وإرسال إشعار جاهز 🚀
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SERVICE EXECUTION NOTE & PARTIAL WHATSAPP MODAL */}
+      {noteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl animate-fade-in-up font-cairo">
+            <div className="px-6 py-4 bg-slate-900 text-white flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <span className="text-emerald-400 font-bold">✓</span>
+                <h4 className="font-bold text-sm">ملاحظة تنفيذ الخدمة وإشعار الواتساب</h4>
+              </div>
+              <button 
+                onClick={() => setNoteModal(null)}
+                className="text-slate-400 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="bg-sky-50 border border-sky-100 rounded-xl p-3 text-xs text-sky-950 space-y-1">
+                <div className="font-bold flex items-center justify-between">
+                  <span>الخدمة: <strong>{noteModal.serviceName}</strong></span>
+                  <span className="font-mono text-[11px] text-sky-700">فاتورة #{noteModal.invoice.invoiceId}</span>
+                </div>
+                <div className="text-[11px] text-slate-600">
+                  العميل: <strong className="text-slate-800">{noteModal.customerName}</strong>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                  <span>ملاحظة التنفيذ (اختياري):</span>
+                  <span className="text-[10px] text-slate-400">مثلاً: تأخير بسبب فحص أمني / مع مندوب كذا</span>
+                </label>
+                <textarea
+                  value={noteModal.currentNote}
+                  onChange={(e) => setNoteModal({ ...noteModal, currentNote: e.target.value })}
+                  placeholder="اكتب أي ملاحظة تمت أثناء تنفيذ هذه الخدمة (كتأخير بسبب كذا أو مع مندوب كذا أو خلافه)..."
+                  rows={3}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs focus:outline-hidden focus:border-blue-500 font-cairo leading-relaxed"
+                  autoFocus
+                />
+              </div>
+
+              <p className="text-[11px] text-slate-500 leading-relaxed bg-amber-50/70 border border-amber-200/60 p-2.5 rounded-lg text-amber-900">
+                📲 يمكنك حفظ الملاحظة فقط، أو حفظها وإرسال <strong>إشعار واتساب فوري</strong> للعميل يفيد بأن هذه الخدمة تم إنجازها بنجاح وجاري استكمال باقي المعاملات تباعاً.
+              </p>
+            </div>
+
+            <div className="px-6 py-4 bg-slate-50 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setNoteModal(null)}
+                className="px-3 py-1.5 text-slate-500 hover:text-slate-700 text-xs font-bold"
+              >
+                إلغاء
+              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleSaveExecutionNote(noteModal.currentNote, false)}
+                  className="px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-100 text-slate-800 text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                >
+                  حفظ الملاحظة فقط 💾
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSaveExecutionNote(noteModal.currentNote, true)}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  حفظ وإرسال واتساب 📲
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -864,6 +1157,57 @@ export default function InvoiceQuery({
                               )}
                             </div>
                           )}
+
+                          {/* Service Completion & Execution Note inside Edit Modal */}
+                          <div className="pt-2 border-t border-slate-200/60 space-y-2">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <label className="flex items-center gap-2 cursor-pointer text-xs font-bold font-cairo">
+                                <input
+                                  type="checkbox"
+                                  checked={!!s.completed}
+                                  onChange={(e) => {
+                                    const checked = e.target.checked;
+                                    const updated = [...editCustomers];
+                                    updated[cIdx].services[sIdx].completed = checked;
+                                    if (checked) {
+                                      const now = new Date();
+                                      const dateStr = now.toISOString().split("T")[0];
+                                      const timeStr = now.toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit", hour12: true });
+                                      updated[cIdx].services[sIdx].completedAt = `${dateStr} (${timeStr})`;
+                                    } else {
+                                      updated[cIdx].services[sIdx].completedAt = undefined;
+                                    }
+                                    setEditCustomers(updated);
+                                  }}
+                                  className="w-4 h-4 rounded-sm text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                                />
+                                <span className={s.completed ? "text-emerald-700" : "text-slate-700"}>
+                                  تم الانتهاء من تنفيذ هذه الخدمة
+                                </span>
+                              </label>
+
+                              {s.completedAt && (
+                                <span className="text-[10px] text-emerald-700 font-mono font-medium bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                                  📅 أُنجزت في: {s.completedAt}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-bold text-slate-500 block">ملاحظة أثناء تنفيذ الخدمة (تأخير، مندوب، إلخ):</label>
+                              <input
+                                type="text"
+                                value={s.executionNote || ""}
+                                onChange={(e) => {
+                                  const updated = [...editCustomers];
+                                  updated[cIdx].services[sIdx].executionNote = e.target.value;
+                                  setEditCustomers(updated);
+                                }}
+                                placeholder="اكتب ملاحظة التنفيذ هنا (اختياري)..."
+                                className="w-full bg-white border border-slate-200 rounded-md px-2.5 py-1.5 text-xs text-slate-800 font-cairo"
+                              />
+                            </div>
+                          </div>
                         </div>
                       );
                     })}
