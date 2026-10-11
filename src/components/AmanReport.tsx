@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import { Invoice, Service, Employee, AppSettings, InvoiceStatus, CustomerInput } from "../types";
 import { updateInvoiceOnServer, createInvoiceOnServer, syncAmanReportToGoogleSheets } from "../lib/api";
+import { playLanguageWarningSound } from "../lib/audio";
 import { 
   Calendar, 
   Printer, 
@@ -8,11 +9,13 @@ import {
   Filter, 
   CheckCircle2, 
   AlertCircle, 
+  AlertTriangle,
   Database, 
   Plus, 
   RefreshCw, 
   Check, 
-  Save 
+  Save,
+  Volume2
 } from "lucide-react";
 
 export interface AmanRowItem {
@@ -91,7 +94,7 @@ export default function AmanReport({
             id: `inv-${inv.invoiceId}-c-${cIdx}`,
             arabicName: cust.arabicName || "",
             birthDate: extractBirthDate(cust.birthDate, cust.nationalId),
-            notes: amanService.notes || cust.profession || "",
+            notes: "", // Empty for manual handwriting after printing
             date: inv.date,
             invoiceId: inv.invoiceId,
             customerIndex: cIdx,
@@ -137,7 +140,9 @@ export default function AmanReport({
         });
       });
 
-      return updated;
+      // Preserve any manual unlinked rows currently in progress that aren't yet in baseCustomers
+      const customRows = prev.filter(r => r.isCustomManual && !baseCustomers.some(b => b.id === r.id));
+      return [...updated, ...customRows];
     });
   }, [baseCustomers]);
 
@@ -163,6 +168,26 @@ export default function AmanReport({
     return list;
   }, [tableRows, totalAllocatedRows, dateFrom]);
 
+  // Detect English characters typed into the Arabic Name cell
+  const englishRowsIndices = useMemo(() => {
+    const list: number[] = [];
+    displayRows.forEach((r, idx) => {
+      if (/[a-zA-Z]/.test(r.arabicName)) {
+        list.push(idx + 1);
+      }
+    });
+    return list;
+  }, [displayRows]);
+
+  const hasEnglishInRows = englishRowsIndices.length > 0;
+
+  // Play audible alert chime whenever English characters are detected in Arabic fields
+  useEffect(() => {
+    if (hasEnglishInRows) {
+      playLanguageWarningSound();
+    }
+  }, [hasEnglishInRows, englishRowsIndices.length]);
+
   const showSaveNotice = (msg: string) => {
     setSaveStatus(msg);
     setTimeout(() => {
@@ -172,6 +197,10 @@ export default function AmanReport({
 
   // Handle cell edit
   const handleCellChange = (rowIndex: number, field: "arabicName" | "birthDate" | "notes", value: string) => {
+    if (field === "arabicName" && /[a-zA-Z]/.test(value)) {
+      playLanguageWarningSound();
+    }
+
     setTableRows((prev) => {
       const copy = [...prev];
       // Expand if typing in an empty padded slot
@@ -255,17 +284,23 @@ export default function AmanReport({
             notes: trimmedNotes,
           });
 
-          showSaveNotice(`تم حفظ تعديل العميل (${trimmedName}) بالفاتورة وجوجل شيت تلقائياً ✓`);
+          // Compile updated active rows for Google Sheets sync
+          const currentRowsToSync = displayRows
+            .map((r, i) => (i === rowIndex ? { ...r, arabicName: trimmedName, birthDate: trimmedBirthDate, notes: trimmedNotes } : r))
+            .filter((r) => r.arabicName.trim().length > 0);
 
-          // Background sync dedicated Aman sheet if webhook available
-          const webhookUrl = settings?.googleSheetWebhookUrl;
-          if (webhookUrl && webhookUrl.startsWith("http")) {
-            syncAmanReportToGoogleSheets({
+          // Auto-save and sync to Google Sheets immediately on blur
+          try {
+            await syncAmanReportToGoogleSheets({
               dateFrom,
               dateTo,
-              amanRows: displayRows.filter(r => r.arabicName.trim().length > 0),
-              webhookUrl,
-            }).catch(() => {});
+              amanRows: currentRowsToSync,
+              webhookUrl: settings?.googleSheetWebhookUrl,
+            });
+            showSaveNotice(`تم حفظ تعديل (${trimmedName}) ومزامنة كشف أمان مع جوجل شيت تلقائياً 📊✓`);
+          } catch (syncErr: any) {
+            console.warn("Aman Sheet sync notice:", syncErr);
+            showSaveNotice(`تم حفظ (${trimmedName}) بالفاتورة (تعذر الاتصال بجوجل شيت) ✓`);
           }
         }
       } 
@@ -335,17 +370,21 @@ export default function AmanReport({
           notes: trimmedNotes,
         });
 
-        showSaveNotice(`تم تسجيل العميل (${trimmedName}) وحفظ الفاتورة وجوجل شيت تلقائياً 💾✓`);
+        const currentRowsToSync = displayRows
+          .map((r, i) => (i === rowIndex ? { ...r, id: newRowId, invoiceId: createdInv.invoiceId, arabicName: trimmedName, birthDate: trimmedBirthDate, notes: trimmedNotes } : r))
+          .filter((r) => r.arabicName.trim().length > 0);
 
-        // Background sync dedicated Aman sheet if webhook available
-        const webhookUrl = settings?.googleSheetWebhookUrl;
-        if (webhookUrl && webhookUrl.startsWith("http")) {
-          syncAmanReportToGoogleSheets({
+        try {
+          await syncAmanReportToGoogleSheets({
             dateFrom,
             dateTo,
-            amanRows: displayRows.filter(r => r.arabicName.trim().length > 0),
-            webhookUrl,
-          }).catch(() => {});
+            amanRows: currentRowsToSync,
+            webhookUrl: settings?.googleSheetWebhookUrl,
+          });
+          showSaveNotice(`تم تسجيل (${trimmedName}) وحفظ الفاتورة ومزامنة كشف أمان مع جوجل شيت تلقائياً 📊✓`);
+        } catch (syncErr: any) {
+          console.warn("Aman Sheet sync notice:", syncErr);
+          showSaveNotice(`تم تسجيل (${trimmedName}) وحفظ الفاتورة (تعذر الاتصال بجوجل شيت) ✓`);
         }
       }
     } catch (err: any) {
@@ -417,8 +456,7 @@ export default function AmanReport({
 
     activeRows.forEach((cust, idx) => {
       const cleanName = cust.arabicName.replace(/,/g, " ");
-      const cleanNotes = (cust.notes || "").replace(/,/g, " ");
-      csvContent += `${idx + 1},${cleanName},${cust.birthDate || ""},${cleanNotes}\r\n`;
+      csvContent += `${idx + 1},${cleanName},${cust.birthDate || ""},\r\n`;
     });
 
     csvContent += "\r\n,,,توقيع رئيس القسم\r\n";
@@ -451,22 +489,22 @@ export default function AmanReport({
         }
         const ctx = measurementCanvasRef.current.getContext("2d");
         if (ctx) {
-          ctx.font = "bold 20px 'Cairo', sans-serif";
+          ctx.font = "bold 20px 'Cairo', 'Segoe UI', Tahoma, Arial, sans-serif";
           const metrics = ctx.measureText(clean);
           const widthInCm = metrics.width / 37.79527559;
 
-          // Do NOT reduce font size until length strictly exceeds 8cm
+          // Do NOT reduce font size until length strictly exceeds 8.0 cm
           if (widthInCm <= 8.0) {
             return "20px";
           }
           if (widthInCm <= 8.6) {
-            return "18.5px";
+            return "18px";
           }
           if (widthInCm <= 9.2) {
-            return "17px";
+            return "16.5px";
           }
           if (widthInCm <= 9.8) {
-            return "15.5px";
+            return "15px";
           }
           return "14px";
         }
@@ -475,12 +513,12 @@ export default function AmanReport({
       }
     }
 
-    // 2. Character length fallback: at 20px Cairo bold, ~28-29 characters correspond to 8cm
+    // 2. Character length fallback: at 20px Cairo bold, ~28 characters correspond to 8cm
     const len = clean.length;
     if (len <= 28) return "20px";
-    if (len <= 32) return "18.5px";
-    if (len <= 36) return "17px";
-    if (len <= 40) return "15.5px";
+    if (len <= 32) return "18px";
+    if (len <= 36) return "16.5px";
+    if (len <= 40) return "15px";
     return "14px";
   };
 
@@ -569,6 +607,12 @@ export default function AmanReport({
           line-height: 1.1 !important;
           vertical-align: middle !important;
         }
+        .print\\:hidden {
+          display: none !important;
+        }
+        .print\\:inline-block {
+          display: inline-block !important;
+        }
         input {
           border: none !important;
           outline: none !important;
@@ -640,6 +684,73 @@ export default function AmanReport({
           </div>
         )}
       </div>
+
+      {/* LARGE Attention-Grabbing Language Mismatch Alert Banner */}
+      {hasEnglishInRows && (
+        <>
+          {/* Top Page Banner */}
+          <div className="bg-amber-500 border-4 border-amber-700 text-slate-950 p-5 rounded-3xl shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-pulse font-cairo">
+            <div className="flex items-center gap-3.5">
+              <div className="p-3 bg-amber-700 text-white rounded-2xl shrink-0 shadow-md">
+                <AlertTriangle className="w-8 h-8 animate-bounce" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h4 className="text-lg sm:text-xl font-black text-slate-950">
+                    ⚠️ تنبيه لفت نظر: تم إدخال حروف إنجليزية في خانة الاسم المخصصة للعربية!
+                  </h4>
+                  <span className="flex items-center gap-1 bg-amber-950 text-amber-200 text-xs font-black px-2.5 py-1 rounded-xl shrink-0">
+                    <Volume2 className="w-3.5 h-3.5 text-amber-400" />
+                    <span>صوت تنبيه</span>
+                  </span>
+                </div>
+                <p className="text-xs sm:text-sm text-amber-950 font-bold mt-1">
+                  يرجى تحويل لغة لوحة المفاتيح إلى العربية بالضغط على (Alt + Shift) وإعادة تصحيح الاسم.
+                </p>
+              </div>
+            </div>
+            <span className="font-mono font-black text-xs sm:text-sm bg-amber-950 text-white px-3.5 py-2 rounded-2xl shadow-md shrink-0 self-start sm:self-auto">
+              الأسطر المتأثرة: {englishRowsIndices.join("، ")}
+            </span>
+          </div>
+
+          {/* Fixed LARGE Floating Alert Banner always in viewport when scrolled */}
+          <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 w-[95%] max-w-2xl bg-amber-500 border-4 border-amber-700 text-slate-950 rounded-3xl p-5 sm:p-6 shadow-2xl animate-bounce font-cairo">
+            <div className="flex items-start gap-4">
+              <div className="p-3.5 bg-amber-700 text-white rounded-2xl shrink-0 shadow-lg">
+                <AlertTriangle className="w-9 h-9 sm:w-11 sm:h-11 animate-pulse" />
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-xl sm:text-2xl font-black text-slate-950">
+                    ⚠️ تنبيه لفت نظر: لغة لوحة المفاتيح غير صحيحة!
+                  </h3>
+                  <span className="flex items-center gap-1.5 bg-amber-950 text-amber-200 text-xs font-black px-3 py-1.5 rounded-xl shadow-xs shrink-0">
+                    <Volume2 className="w-4 h-4 text-amber-400 animate-pulse" />
+                    <span>صوت تنبيه</span>
+                  </span>
+                </div>
+                <p className="text-sm sm:text-base font-extrabold text-amber-950 mt-2 leading-relaxed">
+                  تم إدخال حروف باللغة <span className="underline decoration-2 decoration-red-700 font-black">الإنجليزية</span> في خانة الاسم العربي (الأسطر: {englishRowsIndices.join("، ")}) بكشف أمان!
+                </p>
+                <div className="mt-3 flex flex-wrap items-center gap-2.5 bg-amber-600/35 p-3 rounded-2xl border border-amber-600/50">
+                  <span className="text-xs sm:text-sm font-black text-slate-950">
+                    اضغط الآن على اختصار لوحة المفاتيح للتحويل:
+                  </span>
+                  <div className="flex items-center gap-1.5 font-mono font-black text-xs sm:text-sm">
+                    <kbd className="px-3 py-1 bg-white text-slate-900 rounded-xl shadow-md border border-slate-300 text-sm font-bold">Alt</kbd>
+                    <span className="text-slate-900 font-black">+</span>
+                    <kbd className="px-3 py-1 bg-white text-slate-900 rounded-xl shadow-md border border-slate-300 text-sm font-bold">Shift</kbd>
+                  </div>
+                  <span className="text-xs sm:text-sm font-black text-amber-950 bg-amber-400/90 px-3 py-1 rounded-xl">
+                    ⬅️ التحويل إلى العربية
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Date Filter & Action Bar */}
       <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs space-y-4">
@@ -892,30 +1003,62 @@ export default function AmanReport({
                             </td>
 
                             {/* 2. Customer Name (Editable In-Place) */}
-                            <td 
-                              className="border border-black text-right font-bold p-0 relative" 
-                              style={{ 
-                                width: "9.5cm", 
-                                fontFamily: "'Cairo', sans-serif", 
-                                lineHeight: 1.1, 
-                                whiteSpace: "nowrap" 
-                              }}
-                            >
-                              <input
-                                type="text"
-                                value={rowName}
-                                placeholder="اضغط لكتابة الاسم..."
-                                onChange={(e) => handleCellChange(globalIndex, "arabicName", e.target.value)}
-                                onBlur={() => handleCellBlur(globalIndex)}
-                                className="w-full h-full bg-transparent border-0 px-1 text-right font-bold text-black focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-blue-50/70 rounded-xs transition-colors"
-                                style={{ 
-                                  fontFamily: "'Cairo', sans-serif", 
-                                  fontSize: getNameFontSize(rowName), 
-                                  fontWeight: "bold", 
-                                  lineHeight: 1.1 
-                                }}
-                              />
-                            </td>
+                            {(() => {
+                              const isEnglishDetected = /[a-zA-Z]/.test(rowName);
+                              return (
+                                <td 
+                                  className={`border border-black text-right font-bold p-0 relative transition-all ${
+                                    isEnglishDetected ? "bg-amber-100 ring-2 ring-amber-500 z-10" : ""
+                                  }`} 
+                                  style={{ 
+                                    width: "9.5cm", 
+                                    fontFamily: "'Cairo', sans-serif", 
+                                    lineHeight: 1.1, 
+                                    whiteSpace: "nowrap" 
+                                  }}
+                                >
+                                  <div className="relative w-full h-full flex items-center">
+                                    {/* Screen input: Interactive typing & auto-save on blur */}
+                                    <input
+                                      type="text"
+                                      value={rowName}
+                                      placeholder="اضغط لكتابة الاسم..."
+                                      onChange={(e) => handleCellChange(globalIndex, "arabicName", e.target.value)}
+                                      onBlur={() => handleCellBlur(globalIndex)}
+                                      className={`w-full h-full border-0 px-1 text-right font-bold transition-colors print:hidden ${
+                                        isEnglishDetected
+                                          ? "bg-amber-100 text-amber-950 ring-2 ring-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-600"
+                                          : "bg-transparent text-black focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-blue-50/70"
+                                      } rounded-xs`}
+                                      style={{ 
+                                        fontFamily: "'Cairo', sans-serif", 
+                                        fontSize: getNameFontSize(rowName), 
+                                        fontWeight: "bold", 
+                                        lineHeight: 1.1 
+                                      }}
+                                    />
+                                    {/* Print text: crisp, unclipped text with exact calculated font size */}
+                                    <span
+                                      className="hidden print:inline-block w-full text-right font-bold text-black px-1"
+                                      style={{ 
+                                        fontFamily: "'Cairo', sans-serif", 
+                                        fontSize: getNameFontSize(rowName), 
+                                        fontWeight: "bold", 
+                                        lineHeight: 1.1,
+                                        whiteSpace: "nowrap"
+                                      }}
+                                    >
+                                      {rowName}
+                                    </span>
+                                    {isEnglishDetected && (
+                                      <span className="print:hidden absolute left-1 top-1/2 -translate-y-1/2 text-[9px] bg-red-600 text-white font-bold px-1.5 py-0.5 rounded shadow-xs pointer-events-none z-20 flex items-center gap-0.5">
+                                        <span>⚠️ حروف إنجليزية!</span>
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
+                              );
+                            })()}
 
                             {/* 3. Birth Date (Editable In-Place) */}
                             <td 
@@ -929,13 +1072,14 @@ export default function AmanReport({
                                 whiteSpace: "nowrap" 
                               }}
                             >
+                              {/* Screen input: Interactive typing & auto-save on blur */}
                               <input
                                 type="text"
                                 value={rowBirthDate}
                                 placeholder="مواليد..."
                                 onChange={(e) => handleCellChange(globalIndex, "birthDate", e.target.value)}
                                 onBlur={() => handleCellBlur(globalIndex)}
-                                className="w-full h-full bg-transparent border-0 px-1 text-center font-bold text-black focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-blue-50/70 rounded-xs transition-colors"
+                                className="w-full h-full bg-transparent border-0 px-1 text-center font-bold text-black focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-blue-50/70 rounded-xs transition-colors print:hidden"
                                 style={{ 
                                   fontFamily: "'Cairo', sans-serif", 
                                   fontSize: "20px", 
@@ -943,9 +1087,22 @@ export default function AmanReport({
                                   lineHeight: 1.1 
                                 }}
                               />
+                              {/* Print text */}
+                              <span
+                                className="hidden print:inline-block w-full text-center font-bold text-black px-1"
+                                style={{ 
+                                  fontFamily: "'Cairo', sans-serif", 
+                                  fontSize: "20px", 
+                                  fontWeight: "bold", 
+                                  lineHeight: 1.1,
+                                  whiteSpace: "nowrap"
+                                }}
+                              >
+                                {rowBirthDate}
+                              </span>
                             </td>
 
-                            {/* 4. Notes (Editable In-Place) */}
+                            {/* 4. Notes - Explicitly empty for manual handwriting after printing per user request */}
                             <td 
                               className="border border-black text-right p-0" 
                               style={{ 
@@ -955,20 +1112,7 @@ export default function AmanReport({
                                 lineHeight: 1.1 
                               }}
                             >
-                              <input
-                                type="text"
-                                value={rowNotes}
-                                placeholder="ملاحظات..."
-                                onChange={(e) => handleCellChange(globalIndex, "notes", e.target.value)}
-                                onBlur={() => handleCellBlur(globalIndex)}
-                                className="w-full h-full bg-transparent border-0 px-1 text-right font-bold text-black focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-blue-50/70 rounded-xs transition-colors"
-                                style={{ 
-                                  fontFamily: "'Cairo', sans-serif", 
-                                  fontSize: "20px", 
-                                  fontWeight: "bold", 
-                                  lineHeight: 1.1 
-                                }}
-                              />
+                              {/* فارغة تماماً للكتابة اليدوية بالقلم بعد طباعة الورقة */}
                             </td>
                           </tr>
                         );

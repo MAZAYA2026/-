@@ -4,7 +4,8 @@ import { createInvoiceOnServer, saveDictionaryWord } from "../lib/api";
 import { calculateWorkingDaysDeliveryDate, getArabicDayName, isNonWorkingDay, recalculateCustomerServicesDeliveryDates } from "../lib/businessDays";
 import { generateWhatsAppWelcomeMessage, getWhatsAppUrl } from "../lib/whatsapp";
 import { breakdownArabicName, extractAtomicWordTokens, normalizeArabic } from "../lib/dictionary";
-import { Plus, Trash2, FileText, UserPlus, Sparkles, Printer, Send, Check, AlertCircle, Info, Calendar, BookOpen, ShieldAlert, CalendarCheck, AlertTriangle } from "lucide-react";
+import { playLanguageWarningSound } from "../lib/audio";
+import { Plus, Trash2, FileText, UserPlus, Sparkles, Printer, Send, Check, AlertCircle, Info, Calendar, BookOpen, ShieldAlert, CalendarCheck, AlertTriangle, Volume2 } from "lucide-react";
 import ThermalReceipt from "./ThermalReceipt";
 
 interface InvoiceCreatorProps {
@@ -102,6 +103,74 @@ export default function InvoiceCreator({
 
     return `${dd}-${mm}-${year}`; // DD-MM-YYYY
   };
+
+  // Detect language mismatch across any active customer input fields
+  const activeLanguageMismatch = React.useMemo(() => {
+    for (let idx = 0; idx < customers.length; idx++) {
+      const cust = customers[idx];
+      // 1. Arabic Name: typed English
+      if (/[a-zA-Z]/.test(cust.arabicName)) {
+        return {
+          customerIndex: idx + 1,
+          fieldName: "الاسم العربي",
+          expectedLang: "العربية",
+          wrongLang: "الإنجليزية",
+          keyHint: "التحويل إلى العربية (Alt + Shift)",
+          sampleText: cust.arabicName,
+        };
+      }
+      // 2. Profession: typed English
+      if (/[a-zA-Z]/.test(cust.profession)) {
+        return {
+          customerIndex: idx + 1,
+          fieldName: "المهنة",
+          expectedLang: "العربية",
+          wrongLang: "الإنجليزية",
+          keyHint: "التحويل إلى العربية (Alt + Shift)",
+          sampleText: cust.profession,
+        };
+      }
+      // 3. English Name: typed Arabic (when not "previous" option)
+      if (
+        cust.englishNameOption !== "previous" &&
+        cust.englishName &&
+        cust.englishName !== "نفس ترجمة الجواز السابق" &&
+        /[\u0600-\u06FF]/.test(cust.englishName)
+      ) {
+        return {
+          customerIndex: idx + 1,
+          fieldName: "الاسم باللغة الإنجليزية",
+          expectedLang: "الإنجليزية",
+          wrongLang: "العربية",
+          keyHint: "التحويل إلى الإنجليزية (Alt + Shift)",
+          sampleText: cust.englishName,
+        };
+      }
+    }
+
+    // 4. Missing word translation inputs: typed Arabic
+    for (const [missingWord, val] of Object.entries(missingWordInputs)) {
+      if (typeof val === "string" && /[\u0600-\u06FF]/.test(val)) {
+        return {
+          customerIndex: 1,
+          fieldName: `ترجمة المقطع (${missingWord}) بالإنجليزية`,
+          expectedLang: "الإنجليزية",
+          wrongLang: "العربية",
+          keyHint: "التحويل إلى الإنجليزية (Alt + Shift)",
+          sampleText: val,
+        };
+      }
+    }
+
+    return null;
+  }, [customers, missingWordInputs]);
+
+  // Audible warning chime when mismatch is detected
+  useEffect(() => {
+    if (activeLanguageMismatch) {
+      playLanguageWarningSound();
+    }
+  }, [activeLanguageMismatch?.fieldName, activeLanguageMismatch?.customerIndex, activeLanguageMismatch?.wrongLang]);
 
   // Handler for service dropdown selection
   const handleServiceChange = (cIdx: number, sIdx: number, val: string) => {
@@ -574,6 +643,45 @@ export default function InvoiceCreator({
   return (
     <div className="space-y-6">
       
+      {/* LARGE Attention-Grabbing Language Mismatch Alert Banner */}
+      {activeLanguageMismatch && (
+        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 w-[95%] max-w-2xl bg-amber-500 border-4 border-amber-700 text-slate-950 rounded-3xl p-5 sm:p-6 shadow-2xl animate-bounce font-cairo">
+          <div className="flex items-start gap-4">
+            <div className="p-3.5 bg-amber-700 text-white rounded-2xl shrink-0 shadow-lg">
+              <AlertTriangle className="w-9 h-9 sm:w-11 sm:h-11 animate-pulse" />
+            </div>
+            <div className="flex-1">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-xl sm:text-2xl font-black text-slate-950">
+                  ⚠️ تنبيه لفت نظر: لغة لوحة المفاتيح غير صحيحة!
+                </h3>
+                <span className="flex items-center gap-1.5 bg-amber-950 text-amber-200 text-xs font-black px-3 py-1.5 rounded-xl shadow-xs shrink-0">
+                  <Volume2 className="w-4 h-4 text-amber-400 animate-pulse" />
+                  <span>صوت تنبيه</span>
+                </span>
+              </div>
+              <p className="text-sm sm:text-base font-extrabold text-amber-950 mt-2 leading-relaxed">
+                أنت تكتب الآن باللغة <span className="underline decoration-2 decoration-red-700 font-black">{activeLanguageMismatch.wrongLang}</span> داخل خانة (
+                <strong>{activeLanguageMismatch.fieldName}</strong> للعميل #{activeLanguageMismatch.customerIndex}) والمطلوب كتابتها باللغة <span className="underline decoration-2 decoration-emerald-800 font-black">{activeLanguageMismatch.expectedLang}</span>!
+              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-2.5 bg-amber-600/35 p-3 rounded-2xl border border-amber-600/50">
+                <span className="text-xs sm:text-sm font-black text-slate-950">
+                  اضغط الآن على اختصار لوحة المفاتيح:
+                </span>
+                <div className="flex items-center gap-1.5 font-mono font-black text-xs sm:text-sm">
+                  <kbd className="px-3 py-1 bg-white text-slate-900 rounded-xl shadow-md border border-slate-300 text-sm font-bold">Alt</kbd>
+                  <span className="text-slate-900 font-black">+</span>
+                  <kbd className="px-3 py-1 bg-white text-slate-900 rounded-xl shadow-md border border-slate-300 text-sm font-bold">Shift</kbd>
+                </div>
+                <span className="text-xs sm:text-sm font-black text-amber-950 bg-amber-400/90 px-3 py-1 rounded-xl">
+                  ⬅️ {activeLanguageMismatch.keyHint}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Page Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-5">
         <div>
@@ -696,6 +804,12 @@ export default function InvoiceCreator({
                       }`}
                       required
                     />
+                    {/[a-zA-Z]/.test(customer.arabicName) && (
+                      <div className="bg-amber-100 border border-amber-300 text-amber-950 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 mt-1.5 animate-pulse">
+                        <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                        <span>⚠️ تنبيه لفت نظر: تم إدخال حروف إنجليزية في خانة الاسم العربي! يرجى تحويل لغة الكتابة بالضغط على (Alt + Shift)</span>
+                      </div>
+                    )}
                     {errors[`c-${cIdx}-arabicName`] && (
                       <p className="text-[11px] text-rose-600 flex items-center gap-1 mt-1">
                         <AlertCircle className="w-3.5 h-3.5" />
@@ -736,23 +850,106 @@ export default function InvoiceCreator({
                 {isPass && (
                   <div className="bg-blue-50/40 p-4 rounded-xl border border-blue-100/60 space-y-4 animate-fade-in">
                     
-                    <div className="flex items-center gap-1.5 text-blue-700 text-xs font-bold border-b border-blue-100/60 pb-1.5">
+                    <div className="flex items-center gap-1.5 text-blue-700 text-xs font-bold border-b border-blue-100/60 pb-1.5 font-cairo">
                       <Sparkles className="w-4 h-4" />
                       <span>بيانات استمارة الجوازات (مطلوبة لتفعيل الخدمة #)</span>
                     </div>
 
-                    {/* English Name translation panel on a separate dedicated full-width row */}
-                    <div className="space-y-3 bg-white/90 p-4 rounded-xl border border-blue-200/80 shadow-xs">
+                    {/* Passport complementary fields in 3 columns: National ID, Birth Date, Profession (Arabic inputs first) */}
+                    <div className="grid md:grid-cols-3 gap-4">
+                      {/* National ID */}
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-slate-700 font-cairo flex justify-between items-center">
+                          <span>الرقم القومي للعميل (14 رقم) <span className="text-rose-500">*</span></span>
+                          <span className={`text-[10px] font-mono ${customer.nationalId.length === 14 ? "text-emerald-600 font-bold" : "text-slate-400"}`}>
+                            {customer.nationalId.length} / 14 رقم
+                          </span>
+                        </label>
+                        <input
+                          type="text"
+                          value={customer.nationalId}
+                          onChange={(e) => handleNationalIdChange(cIdx, e.target.value)}
+                          placeholder="الرقم القومي المكون من 14 رقماً"
+                          className={`w-full bg-slate-50 border rounded-xl px-3 py-2.5 text-xs focus:outline-hidden font-mono ${
+                            errors[`c-${cIdx}-nationalId`] ? "border-rose-300 bg-rose-50/10" : "border-slate-200"
+                          }`}
+                        />
+                        {errors[`c-${cIdx}-nationalId`] && (
+                          <p className="text-[10px] text-rose-600 flex items-center gap-1 mt-1 font-cairo">
+                            <AlertCircle className="w-3.5 h-3.5" />
+                            <span>{errors[`c-${cIdx}-nationalId`]}</span>
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Calculated Birth Date */}
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-slate-500 font-cairo flex items-center gap-1">
+                          تاريخ الميلاد المحسوب <span className="text-[9px] text-slate-400">(مستخرج تلقائياً)</span>
+                        </label>
+                        <div className="w-full bg-slate-100 border border-slate-200 text-slate-600 rounded-xl px-3 py-2.5 text-xs font-mono font-bold flex items-center gap-2">
+                          <Calendar className="w-4 h-4 text-slate-400" />
+                          <span>{customer.birthDate || "ادخل الرقم القومي لحسابه"}</span>
+                        </div>
+                      </div>
+
+                      {/* Profession */}
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-slate-700 font-cairo flex justify-between">
+                          <span>المهنة بالبطاقة أو الجواز <span className="text-rose-500">*</span></span>
+                          <span className={`text-[10px] ${customer.profession.length >= 32 ? "text-rose-500 font-bold" : "text-slate-400"}`}>
+                            {customer.profession.length} / 32 حرف
+                          </span>
+                        </label>
+                        <input
+                          type="text"
+                          value={customer.profession}
+                          onChange={(e) => {
+                            if (/[a-zA-Z]/.test(e.target.value)) {
+                              playLanguageWarningSound();
+                            }
+                            handleProfessionChange(cIdx, e.target.value);
+                          }}
+                          maxLength={32}
+                          placeholder="المهنة بالبطاقة (أقصى 32 حرف)"
+                          className={`w-full bg-slate-50 border rounded-xl px-3 py-2.5 text-xs focus:outline-hidden transition-all ${
+                            /[a-zA-Z]/.test(customer.profession)
+                              ? "border-amber-500 ring-2 ring-amber-400 bg-amber-50/40 text-amber-950 font-bold"
+                              : errors[`c-${cIdx}-profession`] ? "border-rose-300 bg-rose-50/10" : "border-slate-200"
+                          }`}
+                        />
+                        {/[a-zA-Z]/.test(customer.profession) && (
+                          <div className="bg-amber-100 border border-amber-300 text-amber-950 px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1.5 mt-1 animate-pulse font-cairo">
+                            <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                            <span>⚠️ حروف إنجليزية في خانة المهنة! يرجى التحويل للعربية (Alt + Shift)</span>
+                          </div>
+                        )}
+                        {errors[`c-${cIdx}-profession`] && (
+                          <p className="text-[10px] text-rose-600 flex items-center gap-1 mt-1 font-cairo">
+                            <AlertCircle className="w-3.5 h-3.5" />
+                            <span>{errors[`c-${cIdx}-profession`]}</span>
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center text-[11px] text-slate-500 px-1 pt-0.5 font-cairo">
+                      <Info className="w-4 h-4 text-blue-500 shrink-0 ml-1.5" />
+                      <span>سيقوم النظام بحساب تاريخ الميلاد وتجهيز بيانات استمارة الجوازات تلقائياً.</span>
+                    </div>
+
+                    {/* English Name translation panel - placed UNDER National ID & Profession so switching to English is the very last step! */}
+                    <div className="space-y-3 bg-white/95 p-4 rounded-xl border border-blue-200/90 shadow-xs">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <label className="text-xs font-bold text-slate-800 font-cairo flex items-center gap-1.5">
                           <BookOpen className="w-3.5 h-3.5 text-blue-600" />
                           <span>الاسم باللغة الإنجليزية (القاموس المعتمد للجوازات)</span>
                           <span className="text-rose-500">*</span>
-                          <span className="text-[10px] text-slate-400 font-normal mr-1">(أحرف كبيرة CAPITAL تلقائياً)</span>
+                          <span className="text-[10px] text-blue-600 font-bold mr-1">(التحويل للإنجليزية آخر خطوة بعد إنهاء البيانات)</span>
                         </label>
                         
                         {/* Options */}
-                        <div className="flex items-center gap-4 text-xs text-slate-600 font-medium">
+                        <div className="flex items-center gap-4 text-xs text-slate-600 font-medium font-cairo">
                           <label className="flex items-center gap-1.5 cursor-pointer hover:text-blue-700 transition-colors">
                             <input
                               type="radio"
@@ -794,9 +991,13 @@ export default function InvoiceCreator({
                           type="text"
                           value={customer.englishNameOption === "previous" ? "نفس ترجمة الجواز السابق" : customer.englishName}
                           onChange={(e) => {
+                            const val = e.target.value.toUpperCase();
+                            if (customer.englishNameOption !== "previous" && /[\u0600-\u06FF]/.test(val)) {
+                              playLanguageWarningSound();
+                            }
                             const updated = [...customers];
-                            updated[cIdx].englishName = e.target.value.toUpperCase();
-                            if (customer.englishNameOption === "previous" && e.target.value !== "نفس ترجمة الجواز السابق") {
+                            updated[cIdx].englishName = val;
+                            if (customer.englishNameOption === "previous" && val !== "نفس ترجمة الجواز السابق") {
                               updated[cIdx].englishNameOption = "dictionary";
                             }
                             setCustomers(updated);
@@ -804,9 +1005,11 @@ export default function InvoiceCreator({
                           placeholder="مثال: MOHAMED AHMED MAHMOUD ALI"
                           dir="ltr"
                           className={`w-full bg-slate-50 border rounded-xl px-4 py-3 text-sm font-bold font-mono tracking-wide focus:outline-hidden transition-all ${
-                            errors[`c-${cIdx}-englishName`] 
-                              ? "border-rose-400 bg-rose-50/20 text-rose-900 focus:ring-rose-200" 
-                              : "border-slate-300 focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-100 text-slate-800"
+                            customer.englishNameOption !== "previous" && /[\u0600-\u06FF]/.test(customer.englishName)
+                              ? "border-amber-500 bg-amber-50/40 text-amber-950 ring-2 ring-amber-400"
+                              : errors[`c-${cIdx}-englishName`] 
+                                ? "border-rose-400 bg-rose-50/20 text-rose-900 focus:ring-rose-200" 
+                                : "border-slate-300 focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-100 text-slate-800"
                           } ${customer.englishNameOption === "previous" ? "italic text-slate-600 font-sans" : ""}`}
                         />
                         {customer.englishNameOption !== "previous" && (
@@ -821,6 +1024,13 @@ export default function InvoiceCreator({
                           </button>
                         )}
                       </div>
+
+                      {customer.englishNameOption !== "previous" && /[\u0600-\u06FF]/.test(customer.englishName) && (
+                        <div className="bg-amber-100 border border-amber-300 text-amber-950 px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 mt-1.5 animate-pulse font-cairo">
+                          <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                          <span>⚠️ تنبيه: تم إدخال حروف عربية داخل خانة الاسم الإنجليزي! يرجى تحويل لوحة المفاتيح إلى الإنجليزية (Alt + Shift)</span>
+                        </div>
+                      )}
 
                       {/* Dictionary status and missing words alert section */}
                       {(() => {
@@ -839,7 +1049,7 @@ export default function InvoiceCreator({
 
                         // Some words missing in dictionary
                         return (
-                          <div className="p-3.5 bg-amber-50/90 border-2 border-amber-300 rounded-xl space-y-3 animate-fade-in">
+                          <div className="p-3.5 bg-amber-50/90 border-2 border-amber-300 rounded-xl space-y-3 animate-fade-in font-cairo">
                             {/* Required explicit prompt */}
                             <div className="flex items-center gap-2 text-amber-900 font-bold text-xs font-cairo">
                               <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
@@ -868,10 +1078,20 @@ export default function InvoiceCreator({
                                       <input
                                         type="text"
                                         value={inputVal}
-                                        onChange={(e) => setMissingWordInputs(prev => ({ ...prev, [missingWord]: e.target.value.toUpperCase() }))}
+                                        onChange={(e) => {
+                                          const val = e.target.value.toUpperCase();
+                                          if (/[\u0600-\u06FF]/.test(val)) {
+                                            playLanguageWarningSound();
+                                          }
+                                          setMissingWordInputs(prev => ({ ...prev, [missingWord]: val }));
+                                        }}
                                         placeholder={`اكتب ترجمة (${missingWord}) بالإنجليزية...`}
                                         dir="ltr"
-                                        className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold uppercase text-slate-800 focus:outline-hidden focus:border-blue-500 focus:bg-white"
+                                        className={`w-full bg-slate-50 border rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold uppercase text-slate-800 focus:outline-hidden ${
+                                          /[\u0600-\u06FF]/.test(inputVal)
+                                            ? "border-amber-500 ring-2 ring-amber-400 bg-amber-50/50"
+                                            : "border-slate-300 focus:border-blue-500 focus:bg-white"
+                                        }`}
                                       />
                                     </div>
 
@@ -924,76 +1144,6 @@ export default function InvoiceCreator({
                           <span>{errors[`c-${cIdx}-englishName`]}</span>
                         </p>
                       )}
-                    </div>
-
-                    {/* Passport complementary fields in 3 columns: National ID, Birth Date, Profession */}
-                    <div className="grid md:grid-cols-3 gap-4">
-                      {/* National ID */}
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-bold text-slate-700 font-cairo flex justify-between items-center">
-                          <span>الرقم القومي للعميل (14 رقم) <span className="text-rose-500">*</span></span>
-                          <span className={`text-[10px] font-mono ${customer.nationalId.length === 14 ? "text-emerald-600 font-bold" : "text-slate-400"}`}>
-                            {customer.nationalId.length} / 14 رقم
-                          </span>
-                        </label>
-                        <input
-                          type="text"
-                          value={customer.nationalId}
-                          onChange={(e) => handleNationalIdChange(cIdx, e.target.value)}
-                          placeholder="الرقم القومي المكون من 14 رقماً"
-                          className={`w-full bg-slate-50 border rounded-xl px-3 py-2.5 text-xs focus:outline-hidden font-mono ${
-                            errors[`c-${cIdx}-nationalId`] ? "border-rose-300 bg-rose-50/10" : "border-slate-200"
-                          }`}
-                        />
-                        {errors[`c-${cIdx}-nationalId`] && (
-                          <p className="text-[10px] text-rose-600 flex items-center gap-1 mt-1">
-                            <AlertCircle className="w-3.5 h-3.5" />
-                            <span>{errors[`c-${cIdx}-nationalId`]}</span>
-                          </p>
-                        )}
-                      </div>
-
-                      {/* Calculated Birth Date */}
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-bold text-slate-500 font-cairo flex items-center gap-1">
-                          تاريخ الميلاد المحسوب <span className="text-[9px] text-slate-400">(مستخرج تلقائياً)</span>
-                        </label>
-                        <div className="w-full bg-slate-100 border border-slate-200 text-slate-600 rounded-xl px-3 py-2.5 text-xs font-mono font-bold flex items-center gap-2">
-                          <Calendar className="w-4 h-4 text-slate-400" />
-                          <span>{customer.birthDate || "ادخل الرقم القومي لحسابه"}</span>
-                        </div>
-                      </div>
-
-                      {/* Profession */}
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-bold text-slate-700 font-cairo flex justify-between">
-                          <span>المهنة بالبطاقة أو الجواز <span className="text-rose-500">*</span></span>
-                          <span className={`text-[10px] ${customer.profession.length >= 32 ? "text-rose-500 font-bold" : "text-slate-400"}`}>
-                            {customer.profession.length} / 32 حرف
-                          </span>
-                        </label>
-                        <input
-                          type="text"
-                          value={customer.profession}
-                          onChange={(e) => handleProfessionChange(cIdx, e.target.value)}
-                          maxLength={32}
-                          placeholder="المهنة بالبطاقة (أقصى 32 حرف)"
-                          className={`w-full bg-slate-50 border rounded-xl px-3 py-2.5 text-xs focus:outline-hidden ${
-                            errors[`c-${cIdx}-profession`] ? "border-rose-300 bg-rose-50/10" : "border-slate-200"
-                          }`}
-                        />
-                        {errors[`c-${cIdx}-profession`] && (
-                          <p className="text-[10px] text-rose-600 flex items-center gap-1 mt-1">
-                            <AlertCircle className="w-3.5 h-3.5" />
-                            <span>{errors[`c-${cIdx}-profession`]}</span>
-                          </p>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center text-[11px] text-slate-500 px-1 pt-1">
-                      <Info className="w-4 h-4 text-blue-500 shrink-0 ml-1.5" />
-                      <span>سيقوم النظام بحساب تاريخ الميلاد وتجهيز بيانات استمارة الجوازات تلقائياً.</span>
                     </div>
 
                   </div>
