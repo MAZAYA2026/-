@@ -98,31 +98,42 @@ export default function InvoiceQuery({
     }
   }, [handleLoadInvoicesFromSheet]);
 
-  // Filtered invoices
-  const filteredInvoices = invoices.filter((inv) => {
-    if (searchId && !inv.invoiceId.toString().includes(searchId)) return false;
-    
-    // Date Range checks
-    if (dateFrom && inv.date < dateFrom) return false;
-    if (dateTo && inv.date > dateTo) return false;
+  // Clean date helper function: strips GMT+... and (Eastern European Summer Time)
+  const formatInvoiceDateDisplay = (dateVal: string | undefined): string => {
+    if (!dateVal) return "";
+    let s = String(dateVal).trim();
+    // Remove GMT offset and any timezone text like GMT+0300 (Eastern European Summer Time)
+    s = s.replace(/\s*GMT[+-]\d+.*$/i, "").trim();
+    return s;
+  };
 
-    // Inside customers
-    if (searchName || searchNationalId || searchPhone || searchService) {
-      const match = inv.customers.some((cust) => {
-        if (searchName && !cust.arabicName.includes(searchName) && !(cust.englishName || "").toLowerCase().includes(searchName.toLowerCase())) return false;
-        if (searchNationalId && !cust.nationalId.includes(searchNationalId)) return false;
-        if (searchPhone && !cust.phone.includes(searchPhone)) return false;
-        if (searchService) {
-          const serviceMatch = cust.services.some((s) => s.serviceId.includes(searchService));
-          if (!serviceMatch) return false;
-        }
-        return true;
-      });
-      if (!match) return false;
-    }
+  // Filtered invoices, sorted by invoiceId descending so newest operations appear at the top
+  const filteredInvoices = invoices
+    .filter((inv) => {
+      if (searchId && !inv.invoiceId.toString().includes(searchId)) return false;
+      
+      // Date Range checks
+      if (dateFrom && inv.date < dateFrom) return false;
+      if (dateTo && inv.date > dateTo) return false;
 
-    return true;
-  });
+      // Inside customers
+      if (searchName || searchNationalId || searchPhone || searchService) {
+        const match = inv.customers.some((cust) => {
+          if (searchName && !cust.arabicName.includes(searchName) && !(cust.englishName || "").toLowerCase().includes(searchName.toLowerCase())) return false;
+          if (searchNationalId && !cust.nationalId.includes(searchNationalId)) return false;
+          if (searchPhone && !cust.phone.includes(searchPhone)) return false;
+          if (searchService) {
+            const serviceMatch = cust.services.some((s) => s.serviceId.includes(searchService));
+            if (!serviceMatch) return false;
+          }
+          return true;
+        });
+        if (!match) return false;
+      }
+
+      return true;
+    })
+    .sort((a, b) => Number(b.invoiceId) - Number(a.invoiceId));
 
   const handleOpenDrawerPrompt = (inv: Invoice) => {
     setPromptDrawerInvoice(inv);
@@ -588,7 +599,7 @@ export default function InvoiceQuery({
                   </div>
                   <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1.5">
                     <Calendar className="w-3.5 h-3.5 text-slate-300" />
-                    <span>تاريخ: {inv.date}</span>
+                    <span>تاريخ: {formatInvoiceDateDisplay(inv.date)}</span>
                     <span className="text-slate-300">|</span>
                     <span>بواسطة: {inv.employeeName}</span>
                   </div>

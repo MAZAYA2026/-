@@ -766,9 +766,19 @@ function doGet(e) {
           try {
             custData = rawJson ? JSON.parse(rawJson) : [];
           } catch(e){}
+          var rawDate = iRow[1];
+          var cleanDate = "";
+          if (rawDate instanceof Date) {
+            cleanDate = Utilities.formatDate(rawDate, Session.getScriptTimeZone() || "GMT+3", "yyyy-MM-dd");
+          } else {
+            cleanDate = String(rawDate || "").trim();
+            // Remove GMT offset and timezone descriptions if present
+            cleanDate = cleanDate.replace(/\s*GMT[+-]\d+.*$/i, "").trim();
+          }
+
           db.invoices.push({
             invoiceId: Number(iRow[0]),
-            date: String(iRow[1] || ""),
+            date: cleanDate,
             status: String(iRow[2] || "NEW"),
             employeeName: String(iRow[3] || ""),
             archiveDrawer: String(iRow[4] || ""),

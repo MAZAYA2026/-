@@ -46,7 +46,9 @@ export default function App() {
     setSyncing(true);
     try {
       const data = await fetchDB();
-      setInvoices(data.invoices || []);
+      const rawInvoices: Invoice[] = data.invoices || [];
+      const sortedInvoices = [...rawInvoices].sort((a, b) => Number(b.invoiceId) - Number(a.invoiceId));
+      setInvoices(sortedInvoices);
       setServices(data.services || []);
       setSettings(data.settings || null);
       setClosings(data.collectionClosings || []);
@@ -98,9 +100,9 @@ export default function App() {
     }
   };
 
-  // State handlers for downstream modifications
+  // State handlers for downstream modifications: ensure latest operations appear first
   const handleInvoiceCreated = (newInv: Invoice) => {
-    setInvoices((prev) => [...prev, newInv]);
+    setInvoices((prev) => [newInv, ...prev.filter(inv => inv.invoiceId !== newInv.invoiceId)]);
   };
 
   const handleInvoiceUpdated = (updatedInv: Invoice) => {

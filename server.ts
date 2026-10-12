@@ -1720,34 +1720,49 @@ app.post("/api/sheets/webhook/import-invoices", async (req, res) => {
     let newCount = 0;
     let updatedCount = 0;
 
+    // Helper to sanitize invoice date (strips GMT+... and timezone words)
+    const cleanInvoiceDate = (d: any): string => {
+      if (!d) return "";
+      let s = String(d).trim();
+      // If it contains GMT+... or (Eastern European Summer Time), strip it
+      s = s.replace(/\s*GMT[+-]\d+.*$/i, "").trim();
+      return s;
+    };
+
     // Merge or append from Google Sheets
     sheetInvoices.forEach((sheetInv: any) => {
       if (!sheetInv || !sheetInv.invoiceId) return;
 
-      if (!invoiceMap.has(sheetInv.invoiceId)) {
+      const sanitizedSheetInv = {
+        ...sheetInv,
+        date: cleanInvoiceDate(sheetInv.date)
+      };
+
+      if (!invoiceMap.has(sanitizedSheetInv.invoiceId)) {
         // Brand new invoice from sheet
-        invoiceMap.set(sheetInv.invoiceId, sheetInv);
+        invoiceMap.set(sanitizedSheetInv.invoiceId, sanitizedSheetInv);
         newCount++;
       } else {
         // Invoice exists locally: update details if sheet has customers or updated status
-        const existing = invoiceMap.get(sheetInv.invoiceId);
-        const sheetCustomers = Array.isArray(sheetInv.customers) ? sheetInv.customers : [];
+        const existing = invoiceMap.get(sanitizedSheetInv.invoiceId);
+        const sheetCustomers = Array.isArray(sanitizedSheetInv.customers) ? sanitizedSheetInv.customers : [];
         const existingCustomers = Array.isArray(existing.customers) ? existing.customers : [];
 
         if (sheetCustomers.length > 0 || !existingCustomers.length) {
-          invoiceMap.set(sheetInv.invoiceId, {
+          invoiceMap.set(sanitizedSheetInv.invoiceId, {
             ...existing,
-            ...sheetInv,
-            archiveDrawer: sheetInv.archiveDrawer || existing.archiveDrawer || "",
-            status: (sheetInv.status && sheetInv.status !== "NEW") ? sheetInv.status : (existing.status || sheetInv.status || "NEW")
+            ...sanitizedSheetInv,
+            date: sanitizedSheetInv.date || existing.date || "",
+            archiveDrawer: sanitizedSheetInv.archiveDrawer || existing.archiveDrawer || "",
+            status: (sanitizedSheetInv.status && sanitizedSheetInv.status !== "NEW") ? sanitizedSheetInv.status : (existing.status || sanitizedSheetInv.status || "NEW")
           });
           updatedCount++;
         }
       }
     });
 
-    // Sort by invoiceId descending
-    const mergedInvoices = Array.from(invoiceMap.values()).sort((a, b) => b.invoiceId - a.invoiceId);
+    // Sort by invoiceId descending: latest operations appear on top
+    const mergedInvoices = Array.from(invoiceMap.values()).sort((a, b) => Number(b.invoiceId) - Number(a.invoiceId));
 
     db.invoices = mergedInvoices;
     writeDB(db);
