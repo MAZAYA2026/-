@@ -1,6 +1,6 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Invoice, InvoiceStatus, AppSettings, Service, Employee, CustomerInput, GovernmentFine } from "../types";
-import { updateInvoiceOnServer, deleteInvoiceOnServer } from "../lib/api";
+import { updateInvoiceOnServer, deleteInvoiceOnServer, importInvoicesFromGoogleSheet } from "../lib/api";
 import { calculateWorkingDaysDeliveryDate, getArabicDayName, recalculateCustomerServicesDeliveryDates } from "../lib/businessDays";
 import { generateWhatsAppWelcomeMessage, generateWhatsAppReadyMessage, generateWhatsAppPartialReadyMessage, getWhatsAppUrl } from "../lib/whatsapp";
 import { Search, Edit3, Trash2, Printer, Send, CheckCircle, PackageOpen, X, MapPin, Calendar, Info, RefreshCw, AlertCircle, Save, AlertTriangle, CheckSquare, Square, Clock, MessageSquare, Check, Sparkles } from "lucide-react";
@@ -57,6 +57,39 @@ export default function InvoiceQuery({
     serviceName: string;
     customerName: string;
   } | null>(null);
+
+  // Loading from Google Sheets state
+  const [isLoadingSheets, setIsLoadingSheets] = useState(false);
+  const [sheetNotice, setSheetNotice] = useState<string | null>(null);
+
+  // Function to load all invoices directly from Google Sheets
+  const handleLoadInvoicesFromSheet = useCallback(async (isSilent = false) => {
+    const webhookUrl = settings?.googleSheetWebhookUrl;
+    if (!webhookUrl || !webhookUrl.startsWith("http")) return;
+
+    if (!isSilent) setIsLoadingSheets(true);
+    try {
+      const res = await importInvoicesFromGoogleSheet(webhookUrl);
+      if (res && Array.isArray(res.invoices)) {
+        onInvoicesLoaded?.(res.invoices);
+        setSheetNotice(`تم جلب وتحميل ${res.invoices.length} فاتورة مسجلة من جوجل شيت بنجاح! 📊📥`);
+        setTimeout(() => setSheetNotice(null), 4000);
+      }
+    } catch (err: any) {
+      console.warn("Notice: fetch invoices from sheet:", err.message);
+      if (!isSilent) {
+        setSheetNotice(`تعذر الاتصال بملف جوجل شيت: ${err.message}`);
+        setTimeout(() => setSheetNotice(null), 5000);
+      }
+    } finally {
+      setIsLoadingSheets(false);
+    }
+  }, [settings?.googleSheetWebhookUrl, onInvoicesLoaded]);
+
+  // User explicit requirement: "عند فتح الاستعلام والمحفوظات يتم جلب جميع الفواتير المسجلة على جوجل شيت"
+  useEffect(() => {
+    handleLoadInvoicesFromSheet(false);
+  }, [handleLoadInvoicesFromSheet]);
 
   // Filtered invoices
   const filteredInvoices = invoices.filter((inv) => {
@@ -376,10 +409,39 @@ export default function InvoiceQuery({
           <div className="flex items-center gap-2">
             <h2 className="text-xl font-extrabold text-slate-900 font-cairo">شاشة الاستعلام والمحفوظات</h2>
             <span className="text-[11px] font-bold bg-slate-100 text-slate-600 px-2.5 py-0.5 rounded-full border border-slate-200 font-mono">
-              {invoices.length} فاتورة
+              {invoices.length} فاتورة مسجلة
             </span>
+            {isLoadingSheets && (
+              <span className="flex items-center gap-1.5 text-xs font-bold text-blue-700 bg-blue-50 px-3 py-1 rounded-full border border-blue-200 animate-pulse">
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                جاري جلب الفواتير من جوجل شيت...
+              </span>
+            )}
           </div>
-          <p className="text-sm text-slate-500 mt-1">البحث عن فواتير الأسر، تعيين أدراج الأرشفة، وتحديث الحالات واسترجاع السجلات</p>
+          <p className="text-sm text-slate-500 mt-1">
+            يتم جلب الفواتير مباشرة من جوجل شيت عند فتح الشاشة، والبحث وتعيين الأدراج وتحديث الحالات.
+          </p>
+        </div>
+
+        {/* Actions & Refresh */}
+        <div className="flex items-center gap-3">
+          {sheetNotice && (
+            <div className="text-xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-xl flex items-center gap-1.5 shadow-xs">
+              <Check className="w-4 h-4 text-emerald-600" />
+              <span>{sheetNotice}</span>
+            </div>
+          )}
+
+          <button
+            type="button"
+            disabled={isLoadingSheets}
+            onClick={() => handleLoadInvoicesFromSheet(false)}
+            className="px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 shadow-xs"
+            title="إعادة جلب وتحميل جميع الفواتير من جوجل شيت الآن"
+          >
+            <RefreshCw className={`w-4 h-4 ${isLoadingSheets ? "animate-spin text-blue-600" : ""}`} />
+            <span>{isLoadingSheets ? "جاري التحديث..." : "تحديث من جوجل شيت 🔄"}</span>
+          </button>
         </div>
       </div>
 

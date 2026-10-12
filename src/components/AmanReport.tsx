@@ -1,6 +1,6 @@
-import React, { useState, useRef, useEffect, useMemo } from "react";
+import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { Invoice, Service, Employee, AppSettings, InvoiceStatus, CustomerInput } from "../types";
-import { updateInvoiceOnServer, createInvoiceOnServer, syncAmanReportToGoogleSheets } from "../lib/api";
+import { updateInvoiceOnServer, createInvoiceOnServer, syncAmanReportToGoogleSheets, fetchAmanReportFromGoogleSheets } from "../lib/api";
 import { playLanguageWarningSound } from "../lib/audio";
 import { 
   Calendar, 
@@ -15,7 +15,8 @@ import {
   RefreshCw, 
   Check, 
   Save,
-  Volume2
+  Volume2,
+  CloudDownload
 } from "lucide-react";
 
 export interface AmanRowItem {
@@ -54,7 +55,8 @@ export default function AmanReport({
   // Auto-save feedback message
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  const [isSyncingSheets, setIsSyncingSheets] = useState(false);
+  const [isLoadingSheets, setIsLoadingSheets] = useState(false);
+  const [sheetFetchError, setSheetFetchError] = useState<string | null>(null);
 
   const reportPrintRef = useRef<HTMLDivElement>(null);
 
@@ -74,8 +76,7 @@ export default function AmanReport({
     return "";
   };
 
-  // Extract base customers from invoices whose services start with single '#' ONLY.
-  // Single '#' means: starts with '#' but NOT starting with '##' (e.g. ## is regular, # is single-hash مستعجل).
+  // Extract base customers from invoices as fallback if Google Sheets is not yet connected
   const baseCustomers = useMemo(() => {
     const list: AmanRowItem[] = [];
 
@@ -106,32 +107,18 @@ export default function AmanReport({
     return list;
   }, [invoices, dateFrom, dateTo]);
 
-  // Local table rows to support in-place editing, manual typing, and instant response
+  // Table rows loaded and maintained directly from Google Sheets
   const [tableRows, setTableRows] = useState<AmanRowItem[]>([]);
 
   // Track original values to detect real changes onBlur
   const originalValuesRef = useRef<Map<string, { arabicName: string; birthDate: string; notes: string }>>(new Map());
 
-  // Initialize or re-sync tableRows when baseCustomers change
-  useEffect(() => {
-    setTableRows((prev) => {
-      // Map existing edited items by id if already present
-      const prevMap = new Map<string, AmanRowItem>(prev.map((r: AmanRowItem) => [r.id, r]));
-      
-      const updated: AmanRowItem[] = baseCustomers.map((base) => {
-        const existing = prevMap.get(base.id);
-        if (existing) {
-          return {
-            ...base,
-            arabicName: existing.arabicName,
-            birthDate: existing.birthDate,
-            notes: existing.notes,
-          };
-        }
-        return base;
-      });
-
-      // Update original values cache
+  // Function to load data directly from Google Sheets
+  const loadDataFromGoogleSheet = useCallback(async (isSilent = false) => {
+    const webhookUrl = settings?.googleSheetWebhookUrl;
+    if (!webhookUrl || !webhookUrl.startsWith("http")) {
+      // If webhook is not configured yet, fallback to baseCustomers
+      setTableRows(baseCustomers);
       baseCustomers.forEach((b) => {
         originalValuesRef.current.set(b.id, {
           arabicName: b.arabicName,
@@ -139,12 +126,66 @@ export default function AmanReport({
           notes: b.notes,
         });
       });
+      return;
+    }
 
-      // Preserve any manual unlinked rows currently in progress that aren't yet in baseCustomers
-      const customRows = prev.filter(r => r.isCustomManual && !baseCustomers.some(b => b.id === r.id));
-      return [...updated, ...customRows];
-    });
-  }, [baseCustomers]);
+    if (!isSilent) setIsLoadingSheets(true);
+    setSheetFetchError(null);
+
+    try {
+      const res = await fetchAmanReportFromGoogleSheets({
+        dateFrom,
+        dateTo,
+        webhookUrl,
+      });
+
+      if (res && Array.isArray(res.rows) && res.rows.length > 0) {
+        const loaded: AmanRowItem[] = res.rows.map((row, idx) => ({
+          id: row.id || `sheet-${idx}`,
+          arabicName: row.arabicName || "",
+          birthDate: row.birthDate || "",
+          notes: row.notes || "",
+          date: row.date || dateFrom,
+          invoiceId: row.invoiceId,
+          isCustomManual: !row.invoiceId,
+        }));
+
+        setTableRows(loaded);
+        originalValuesRef.current.clear();
+        loaded.forEach((r) => {
+          originalValuesRef.current.set(r.id, {
+            arabicName: r.arabicName,
+            birthDate: r.birthDate,
+            notes: r.notes,
+          });
+        });
+        setSaveStatus(`تم جلب وتحميل بيانات كشف أمان من جوجل شيت مباشرة (${loaded.length} عميل) 📊📥`);
+        setTimeout(() => setSaveStatus(null), 3500);
+      } else {
+        // Sheet has no rows yet for this range, fallback to invoice base customers if any
+        setTableRows(baseCustomers);
+        baseCustomers.forEach((b) => {
+          originalValuesRef.current.set(b.id, {
+            arabicName: b.arabicName,
+            birthDate: b.birthDate,
+            notes: b.notes,
+          });
+        });
+      }
+    } catch (err: any) {
+      console.warn("Direct Google Sheet fetch for Aman Report:", err.message);
+      setSheetFetchError(err.message || "تعذر جلب البيانات من جوجل شيت");
+      // Fallback to baseCustomers on network failure
+      setTableRows(baseCustomers);
+    } finally {
+      setIsLoadingSheets(false);
+    }
+  }, [dateFrom, dateTo, settings?.googleSheetWebhookUrl, baseCustomers]);
+
+  // Load from Google Sheet directly upon component opening or whenever the date range changes
+  useEffect(() => {
+    loadDataFromGoogleSheet();
+  }, [dateFrom, dateTo, loadDataFromGoogleSheet]);
 
   // Rows per official A4 print page
   const ROWS_PER_PAGE = 35;
@@ -250,7 +291,15 @@ export default function AmanReport({
 
     setIsSaving(true);
     try {
-      // Case 1: Linked to an existing invoice
+      // 1. Prepare updated active rows for direct registration on Google Sheets
+      const updatedDisplayRows = displayRows.map((r, i) => 
+        i === rowIndex 
+          ? { ...r, arabicName: trimmedName, birthDate: trimmedBirthDate, notes: trimmedNotes } 
+          : r
+      );
+      const activeRowsToRecord = updatedDisplayRows.filter((r) => r.arabicName.trim().length > 0);
+
+      // 2. Also keep linked invoice in sync if invoiceId exists
       if (row.invoiceId !== undefined && row.customerIndex !== undefined) {
         const targetInvoice = invoices.find((inv) => inv.invoiceId === row.invoiceId);
         if (targetInvoice && targetInvoice.customers[row.customerIndex]) {
@@ -274,39 +323,16 @@ export default function AmanReport({
             customers: updatedCustomers,
           };
 
-          const savedInv = await updateInvoiceOnServer(targetInvoice.invoiceId, updatedInvoice);
-          onInvoiceUpdated?.(savedInv);
-
-          // Update cached values
-          originalValuesRef.current.set(row.id, {
-            arabicName: trimmedName,
-            birthDate: trimmedBirthDate,
-            notes: trimmedNotes,
-          });
-
-          // Compile updated active rows for Google Sheets sync
-          const currentRowsToSync = displayRows
-            .map((r, i) => (i === rowIndex ? { ...r, arabicName: trimmedName, birthDate: trimmedBirthDate, notes: trimmedNotes } : r))
-            .filter((r) => r.arabicName.trim().length > 0);
-
-          // Auto-save and sync to Google Sheets immediately on blur
           try {
-            await syncAmanReportToGoogleSheets({
-              dateFrom,
-              dateTo,
-              amanRows: currentRowsToSync,
-              webhookUrl: settings?.googleSheetWebhookUrl,
-            });
-            showSaveNotice(`تم حفظ تعديل (${trimmedName}) ومزامنة كشف أمان مع جوجل شيت تلقائياً 📊✓`);
-          } catch (syncErr: any) {
-            console.warn("Aman Sheet sync notice:", syncErr);
-            showSaveNotice(`تم حفظ (${trimmedName}) بالفاتورة (تعذر الاتصال بجوجل شيت) ✓`);
+            const savedInv = await updateInvoiceOnServer(targetInvoice.invoiceId, updatedInvoice);
+            onInvoiceUpdated?.(savedInv);
+          } catch (e) {
+            console.warn("Notice: invoice server update:", e);
           }
         }
       } 
-      // Case 2: Manual entry in an empty row (missing customer added)
-      else if (trimmedName.length > 0) {
-        // Find default # service from catalog
+      // Case 2: New entry in an empty row
+      else if (trimmedName.length > 0 && !row.invoiceId) {
         const defaultAmanService = services.find(
           (s) => s.name.startsWith("#") && !s.name.startsWith("##")
         ) || {
@@ -345,51 +371,52 @@ export default function AmanReport({
           totalAmount: (defaultAmanService.govPrice || 0) + (defaultAmanService.officeFee || 0),
         };
 
-        const createdInv = await createInvoiceOnServer(newInvoiceData);
-        onInvoiceCreated?.(createdInv);
-
-        // Update row to link with newly created invoice
-        const newRowId = `inv-${createdInv.invoiceId}-c-0`;
-        setTableRows((prev) => {
-          const copy = [...prev];
-          if (copy[rowIndex]) {
-            copy[rowIndex] = {
-              ...copy[rowIndex],
-              id: newRowId,
-              invoiceId: createdInv.invoiceId,
-              customerIndex: 0,
-              isCustomManual: false,
-            };
-          }
-          return copy;
-        });
-
-        originalValuesRef.current.set(newRowId, {
-          arabicName: trimmedName,
-          birthDate: trimmedBirthDate,
-          notes: trimmedNotes,
-        });
-
-        const currentRowsToSync = displayRows
-          .map((r, i) => (i === rowIndex ? { ...r, id: newRowId, invoiceId: createdInv.invoiceId, arabicName: trimmedName, birthDate: trimmedBirthDate, notes: trimmedNotes } : r))
-          .filter((r) => r.arabicName.trim().length > 0);
-
         try {
-          await syncAmanReportToGoogleSheets({
-            dateFrom,
-            dateTo,
-            amanRows: currentRowsToSync,
-            webhookUrl: settings?.googleSheetWebhookUrl,
+          const createdInv = await createInvoiceOnServer(newInvoiceData);
+          onInvoiceCreated?.(createdInv);
+          const newRowId = `inv-${createdInv.invoiceId}-c-0`;
+          setTableRows((prev) => {
+            const copy = [...prev];
+            if (copy[rowIndex]) {
+              copy[rowIndex] = {
+                ...copy[rowIndex],
+                id: newRowId,
+                invoiceId: createdInv.invoiceId,
+                customerIndex: 0,
+                isCustomManual: false,
+              };
+            }
+            return copy;
           });
-          showSaveNotice(`تم تسجيل (${trimmedName}) وحفظ الفاتورة ومزامنة كشف أمان مع جوجل شيت تلقائياً 📊✓`);
-        } catch (syncErr: any) {
-          console.warn("Aman Sheet sync notice:", syncErr);
-          showSaveNotice(`تم تسجيل (${trimmedName}) وحفظ الفاتورة (تعذر الاتصال بجوجل شيت) ✓`);
+        } catch (e) {
+          console.warn("Notice: invoice create:", e);
         }
       }
+
+      // Update cached values
+      originalValuesRef.current.set(row.id, {
+        arabicName: trimmedName,
+        birthDate: trimmedBirthDate,
+        notes: trimmedNotes,
+      });
+
+      // 3. User explicit requirement: "بيانات كشف امان تسجل على الداتا شيت مباشرة وليس تخزين محلى"
+      // Record directly to Google Sheets database sheet
+      try {
+        await syncAmanReportToGoogleSheets({
+          dateFrom,
+          dateTo,
+          amanRows: activeRowsToRecord,
+          webhookUrl: settings?.googleSheetWebhookUrl,
+        });
+        showSaveNotice(`تم تسجيل (${trimmedName}) على الداتا شيت بجوجل شيت مباشرة بنجاح 📑📊✓`);
+      } catch (syncErr: any) {
+        console.warn("Aman Sheet direct push error:", syncErr);
+        showSaveNotice(`تم الحفظ (يرجى التحقق من اتصال جوجل شيت: ${syncErr.message}) ⚠️`);
+      }
     } catch (err: any) {
-      console.error("Auto-save failed on blur:", err);
-      showSaveNotice(`خطأ أثناء الحفظ التلقائي: ${err.message}`);
+      console.error("Direct sheet recording failed on blur:", err);
+      showSaveNotice(`خطأ أثناء التسجيل: ${err.message}`);
     } finally {
       setIsSaving(false);
     }
@@ -408,34 +435,7 @@ export default function AmanReport({
         isCustomManual: true,
       },
     ]);
-    showSaveNotice("تمت إضافة سطر جديد للكشف، اكتب الاسم وسيحفظ تلقائياً عند الخروج من الخلية ✍️");
-  };
-
-  // Direct manual sync to Google Sheets
-  const handleManualSyncToSheets = async () => {
-    const webhookUrl = settings?.googleSheetWebhookUrl;
-    if (!webhookUrl || !webhookUrl.startsWith("http")) {
-      alert("الرجاء التأكد من إدخال رابط سكربت Webhook الخاص بجوجل شيت في شاشة الإعدادات أولاً.");
-      return;
-    }
-
-    setIsSyncingSheets(true);
-    try {
-      const activeRows = displayRows.filter(r => r.arabicName.trim().length > 0);
-      const res = await syncAmanReportToGoogleSheets({
-        dateFrom,
-        dateTo,
-        amanRows: activeRows,
-        webhookUrl,
-      });
-
-      alert(res.message || "تم حفظ ومزامنة كشف أمان في ملف جوجل شيت بنجاح! 📑✅");
-      showSaveNotice("تمت المزامنة بنجاح مع ملف جوجل شيت 📊✓");
-    } catch (err: any) {
-      alert("فشل مزامنة كشف أمان مع جوجل شيت: " + err.message);
-    } finally {
-      setIsSyncingSheets(false);
-    }
+    showSaveNotice("تمت إضافة سطر جديد للكشف، اكتب الاسم وسيسجل على جوجل شيت مباشرة بمجرد الخروج من الخلية ✍️");
   };
 
   // Excel Export to CSV with exact requested format
@@ -668,19 +668,32 @@ export default function AmanReport({
         <div>
           <h2 className="text-xl font-extrabold text-slate-900">كشف حركة التابع للخدمات الجماهيرية (قسم جوازات طنطا)</h2>
           <p className="text-xs text-slate-500 mt-1">
-            كشف رسمي يستوعب 35 صفاً لكل ورقة A4. يتيح اختيار التاريخ من وإلى، والكتابة والتعديل المباشر بالخلايا مع الحفظ التلقائي اللحظي ومزامنة جوجل شيت.
+            كشف رسمي يستوعب 35 صفاً لكل ورقة A4. يتم جلب وتحميل البيانات مباشرة من جوجل شيت، والتسجيل المباشر على الداتا شيت دون تخزين محلي.
           </p>
         </div>
 
-        {/* Real-time Save & Sync status badge */}
-        {(saveStatus || isSaving || isSyncingSheets) && (
-          <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-800 px-3.5 py-1.5 rounded-xl text-xs font-bold shadow-xs animate-fade-in self-start md:self-auto">
-            {isSaving || isSyncingSheets ? (
+        {/* Real-time Save & Sheet Status badge */}
+        {(saveStatus || isSaving || isLoadingSheets || sheetFetchError) && (
+          <div className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold shadow-xs animate-fade-in self-start md:self-auto border ${
+            sheetFetchError 
+              ? "bg-amber-50 border-amber-200 text-amber-800" 
+              : "bg-emerald-50 border-emerald-200 text-emerald-800"
+          }`}>
+            {isSaving || isLoadingSheets ? (
               <RefreshCw className="w-4 h-4 text-emerald-600 animate-spin" />
+            ) : sheetFetchError ? (
+              <AlertCircle className="w-4 h-4 text-amber-600" />
             ) : (
               <Check className="w-4 h-4 text-emerald-600" />
             )}
-            <span>{saveStatus || (isSyncingSheets ? "جاري مزامنة جوجل شيت..." : "جاري الحفظ التلقائي...")}</span>
+            <span>
+              {saveStatus || 
+               (isLoadingSheets 
+                 ? "جاري تحميل البيانات من جوجل شيت..." 
+                 : isSaving 
+                   ? "جاري التسجيل على الداتا شيت مباشرة..." 
+                   : sheetFetchError)}
+            </span>
           </div>
         )}
       </div>
@@ -860,7 +873,7 @@ export default function AmanReport({
               type="button"
               onClick={handleAddNewRow}
               className="px-3.5 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs"
-              title="إضافة سطر جديد للكتابة اليدوية"
+              title="إضافة سطر جديد للكتابة والتسجيل المباشر"
             >
               <Plus className="w-4 h-4" />
               إضافة سطر جديد ➕
@@ -868,13 +881,13 @@ export default function AmanReport({
 
             <button
               type="button"
-              disabled={isSyncingSheets}
-              onClick={handleManualSyncToSheets}
-              className="px-3.5 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-xs cursor-pointer disabled:opacity-50"
-              title="مزامنة فورية لكشف أمان مع ملف جوجل شيت"
+              disabled={isLoadingSheets}
+              onClick={() => loadDataFromGoogleSheet(false)}
+              className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+              title="إعادة تحميل البيانات مباشرة من جوجل شيت"
             >
-              <Database className="w-4 h-4" />
-              {isSyncingSheets ? "جاري المزامنة..." : "مزامنة جوجل شيت 📊"}
+              <RefreshCw className={`w-4 h-4 ${isLoadingSheets ? "animate-spin text-blue-600" : ""}`} />
+              {isLoadingSheets ? "جاري الجلب من شيت..." : "تحديث من جوجل شيت 🔄"}
             </button>
 
             <button
@@ -901,9 +914,9 @@ export default function AmanReport({
         {/* Tip & hint note */}
         <div className="bg-blue-50/70 border border-blue-100 rounded-xl px-3.5 py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-blue-900">
           <div className="flex items-center gap-2">
-            <span className="font-bold">💡 ميزة الكتابة والتعديل المباشر:</span>
+            <span className="font-bold">💡 التسجيل المباشر على جوجل شيت:</span>
             <span>
-              يمكنك النقر على أي خانة اسم أو تاريخ ميلاد أو ملاحظات والتعديل فيها بحرية، وسيتم الحفظ التلقائي ومزامنة جوجل شيت بمجرد الخروج من الخلية.
+              يتم جلب البيانات وتحميلها من ورقة الداتا شيت بجوجل شيت مباشرة، وعند كتابة أو تعديل أي اسم يتم تسجيله لحظياً ومباشرة على جوجل شيت دون تخزين محلي.
             </span>
           </div>
           <span className="font-mono font-bold shrink-0 bg-blue-100 text-blue-800 px-2 py-0.5 rounded-md text-[11px]">

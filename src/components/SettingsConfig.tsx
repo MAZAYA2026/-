@@ -646,6 +646,61 @@ function doPost(e) {
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
+    // 6. Direct Specific Invoices Push / Sync
+    if (action === "push_invoices") {
+      var invoicesList = contents.invoices || (contents.db && contents.db.invoices) || [];
+      if (Array.isArray(invoicesList)) {
+        var invSheet = getOrCreateSheet(ss, "Invoices_الفواتير");
+        invSheet.clearContents();
+        var invHeaders = [
+          "رقم الفاتورة", "التاريخ", "الحالة", "الموظف", "مكان الحفظ (رقم الدرج)", 
+          "رسوم حكومية", "رسوم مكتب", "الإجمالي الكلي", "أسماء العملاء", "أرقام الهواتف", 
+          "الخدمات المطلوبة", "تفاصيل العملاء كاملة (JSON)"
+        ];
+        var invRows = [invHeaders];
+        for (var ii = 0; ii < invoicesList.length; ii++) {
+          var invItem = invoicesList[ii];
+          var custNames = [];
+          var custPhones = [];
+          var servicesList = [];
+          if (invItem.customers && Array.isArray(invItem.customers)) {
+            for (var kk = 0; kk < invItem.customers.length; kk++) {
+              var cItem = invItem.customers[kk];
+              custNames.push(cItem.arabicName + (cItem.englishName ? " (" + cItem.englishName + ")" : ""));
+              if (cItem.phone) custPhones.push(cItem.phone);
+              if (cItem.services && Array.isArray(cItem.services)) {
+                for (var ssIdx = 0; ssIdx < cItem.services.length; ssIdx++) {
+                  servicesList.push(cItem.services[ssIdx].serviceId + " x" + (cItem.services[ssIdx].quantity || 1));
+                }
+              }
+            }
+          }
+          invRows.push([
+            invItem.invoiceId || "",
+            invItem.date || "",
+            invItem.status || "",
+            invItem.employeeName || "",
+            invItem.archiveDrawer || "",
+            invItem.totalGov || 0,
+            invItem.totalOffice || 0,
+            invItem.totalAmount || 0,
+            custNames.join(" | "),
+            custPhones.join(" | "),
+            servicesList.join(" , "),
+            JSON.stringify(invItem.customers || [])
+          ]);
+        }
+        if (invRows.length > 0) {
+          invSheet.getRange(1, 1, invRows.length, invRows[0].length).setValues(invRows);
+          formatHeader(invSheet, invHeaders.length);
+        }
+        return ContentService.createTextOutput(JSON.stringify({ 
+          status: "success", 
+          message: "تم تسجيل وتحديث الفواتير (" + invoicesList.length + " فاتورة) في الداتا شيت بجوجل شيت بنجاح! 📑✅" 
+        })).setMimeType(ContentService.MimeType.JSON);
+      }
+    }
+
     return ContentService.createTextOutput(JSON.stringify({ error: "إجراء غير معروف" }))
       .setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
@@ -861,6 +916,33 @@ function doGet(e) {
               name: fName,
               amount: fAmount,
               notes: fNotes
+            });
+          }
+        }
+      }
+    }
+
+    // 7. Read Aman Report (Aman_كشف_حركة_الخدمات_الجماهيرية)
+    var amanReportSheet = ss.getSheetByName("Aman_كشف_حركة_الخدمات_الجماهيرية") || ss.getSheetByName("Aman");
+    db.amanReport = [];
+    if (amanReportSheet) {
+      var aValRange = amanReportSheet.getDataRange().getValues();
+      if (aValRange && aValRange.length > 1) {
+        for (var aRowIdx = 1; aRowIdx < aValRange.length; aRowIdx++) {
+          var aRow = aValRange[aRowIdx];
+          var aName = String(aRow[1] || "").trim();
+          var aBirth = String(aRow[2] || "").trim();
+          var aNotes = String(aRow[3] || "").trim();
+          var aInvId = aRow[4] !== undefined && aRow[4] !== "" ? Number(aRow[4]) : undefined;
+          var aDate = String(aRow[5] || "").trim();
+          if (aName || aBirth || aNotes) {
+            db.amanReport.push({
+              id: aInvId ? ("inv-" + aInvId + "-c-0") : ("sheet-aman-" + aRowIdx),
+              arabicName: aName,
+              birthDate: aBirth,
+              notes: aNotes,
+              invoiceId: aInvId,
+              date: aDate
             });
           }
         }

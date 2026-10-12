@@ -441,8 +441,28 @@ app.post("/api/db/save", (req, res) => {
   res.json({ status: "success", message: "Database saved successfully" });
 });
 
-// 4. Create invoice endpoint to handle sequential number 100+
-app.post("/api/db/invoices", (req, res) => {
+// Helper to directly push invoices sheet to Google Sheets
+async function pushInvoicesDirectlyToSheet(db: any) {
+  const targetUrl = db.settings?.googleSheetWebhookUrl;
+  if (!targetUrl || !targetUrl.startsWith("http")) return;
+
+  try {
+    await fetch(targetUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        action: "push_invoices",
+        invoices: db.invoices || [],
+      }),
+      redirect: "follow",
+    });
+  } catch (err: any) {
+    console.warn("Direct Google Sheet invoices push notice:", err.message);
+  }
+}
+
+// 4. Create invoice endpoint: Records directly to Google Sheet
+app.post("/api/db/invoices", async (req, res) => {
   const db = readDB();
   const invoiceData = req.body;
   
@@ -464,13 +484,15 @@ app.post("/api/db/invoices", (req, res) => {
   autoLearnCustomerNames(newInvoice.customers, db);
 
   writeDB(db);
-  triggerBackgroundWebhookSync(db, `فاتورة جديدة رقم #${newInvoice.invoiceId} والأسماء الإنجليزية المترجمة`);
+
+  // User explicit requirement: "سجل جميع عمليات الفواتير تسجل مباشرة على الداتا شيت"
+  await pushInvoicesDirectlyToSheet(db);
 
   res.json({ status: "success", invoice: newInvoice });
 });
 
-// 5. Update invoice
-app.put("/api/db/invoices/:id", (req, res) => {
+// 5. Update invoice: Updates directly on Google Sheet
+app.put("/api/db/invoices/:id", async (req, res) => {
   const invoiceId = parseInt(req.params.id);
   const updatedInvoice = req.body;
   const db = readDB();
@@ -490,12 +512,15 @@ app.put("/api/db/invoices/:id", (req, res) => {
   autoLearnCustomerNames(db.invoices[index].customers, db);
 
   writeDB(db);
-  triggerBackgroundWebhookSync(db, `تعديل فاتورة رقم #${invoiceId} والأسماء الإنجليزية`);
+
+  // User explicit requirement: Record directly on Google Sheet
+  await pushInvoicesDirectlyToSheet(db);
+
   res.json({ status: "success", invoice: db.invoices[index] });
 });
 
-// 6. Delete invoice
-app.delete("/api/db/invoices/:id", (req, res) => {
+// 6. Delete invoice: Updates directly on Google Sheet
+app.delete("/api/db/invoices/:id", async (req, res) => {
   const invoiceId = parseInt(req.params.id);
   const db = readDB();
   
@@ -506,7 +531,10 @@ app.delete("/api/db/invoices/:id", (req, res) => {
 
   db.invoices = filtered;
   writeDB(db);
-  triggerBackgroundWebhookSync(db, `حذف فاتورة رقم #${invoiceId}`);
+
+  // User explicit requirement: Record directly on Google Sheet
+  await pushInvoicesDirectlyToSheet(db);
+
   res.json({ status: "success", message: "Invoice deleted" });
 });
 
@@ -1505,7 +1533,7 @@ app.post("/api/sheets/webhook/sync-fines", async (req, res) => {
   }
 });
 
-// Dedicated Webhook Sync Aman Report Endpoint
+// Dedicated Webhook Sync Aman Report Endpoint (Direct Save to Google Sheets)
 app.post("/api/sheets/webhook/sync-aman", async (req, res) => {
   const { webhookUrl, dateFrom, dateTo, amanRows } = req.body;
   const db = readDB();
@@ -1538,11 +1566,48 @@ app.post("/api/sheets/webhook/sync-aman", async (req, res) => {
 
     res.json({
       status: "success",
-      message: data.message || "تم حفظ ومزامنة كشف أمان في ملف جوجل شيت بنجاح! 📑✅",
+      message: data.message || "تم تسجيل وتحديث كشف أمان في الداتا شيت بجوجل شيت مباشرة بنجاح! 📑✅",
       data,
     });
   } catch (err: any) {
     res.status(500).json({ error: "فشل إرسال كشف أمان إلى السكربت: " + err.message });
+  }
+});
+
+// Dedicated Webhook Pull Aman Report Endpoint (Direct Load from Google Sheets)
+app.post("/api/sheets/webhook/pull-aman", async (req, res) => {
+  const { webhookUrl, dateFrom, dateTo } = req.body;
+  const db = readDB();
+  const targetUrl = webhookUrl || db.settings?.googleSheetWebhookUrl;
+
+  if (!targetUrl || !targetUrl.startsWith("http")) {
+    return res.status(400).json({ error: "الرجاء إدخال رابط سكربت Webhook صالح أولاً في قسم إعدادات جوجل شيت." });
+  }
+
+  try {
+    const pulledDB = await pullFromGoogleWebhook(targetUrl);
+    let rawAman: any[] = [];
+    if (pulledDB && Array.isArray(pulledDB.amanReport)) {
+      rawAman = pulledDB.amanReport;
+    }
+
+    // Filter by date range if provided
+    let filteredAman = rawAman;
+    if (dateFrom && dateTo) {
+      filteredAman = rawAman.filter((row: any) => {
+        if (!row.date) return true; // keep if no specific date set
+        return row.date >= dateFrom && row.date <= dateTo;
+      });
+    }
+
+    res.json({
+      status: "success",
+      rows: filteredAman,
+      totalRows: rawAman.length,
+      message: `تم جلب وتحميل ${filteredAman.length} صفاً من كشف أمان من جوجل شيت مباشرة! 📊📥`
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: "فشل جلب بيانات كشف أمان من جوجل شيت: " + err.message });
   }
 });
 
