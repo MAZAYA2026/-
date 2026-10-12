@@ -62,6 +62,9 @@ export default function InvoiceQuery({
   const [isLoadingSheets, setIsLoadingSheets] = useState(false);
   const [sheetNotice, setSheetNotice] = useState<string | null>(null);
 
+  // Track that initial fetch from Google Sheets happens only once upon mount
+  const hasFetchedOnMountRef = useRef(false);
+
   // Function to load all invoices directly from Google Sheets
   const handleLoadInvoicesFromSheet = useCallback(async (isSilent = false) => {
     const webhookUrl = settings?.googleSheetWebhookUrl;
@@ -86,9 +89,13 @@ export default function InvoiceQuery({
     }
   }, [settings?.googleSheetWebhookUrl, onInvoicesLoaded]);
 
-  // User explicit requirement: "عند فتح الاستعلام والمحفوظات يتم جلب جميع الفواتير المسجلة على جوجل شيت"
+  // User explicit requirement:
+  // "شاشة الاستعلام والمحفوظات لا تعمل جلب للفواتير من جوجل شيت باستمرار انما مرة واحدة فقط عند الفتح اول مرة"
   useEffect(() => {
-    handleLoadInvoicesFromSheet(false);
+    if (!hasFetchedOnMountRef.current) {
+      hasFetchedOnMountRef.current = true;
+      handleLoadInvoicesFromSheet(false);
+    }
   }, [handleLoadInvoicesFromSheet]);
 
   // Filtered invoices
@@ -436,11 +443,11 @@ export default function InvoiceQuery({
             type="button"
             disabled={isLoadingSheets}
             onClick={() => handleLoadInvoicesFromSheet(false)}
-            className="px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 shadow-xs"
-            title="إعادة جلب وتحميل جميع الفواتير من جوجل شيت الآن"
+            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer disabled:opacity-50 shadow-sm hover:shadow active:scale-95"
+            title="جلب الفواتير المسجلة على جوجل شيت عند الحاجة"
           >
-            <RefreshCw className={`w-4 h-4 ${isLoadingSheets ? "animate-spin text-blue-600" : ""}`} />
-            <span>{isLoadingSheets ? "جاري التحديث..." : "تحديث من جوجل شيت 🔄"}</span>
+            <RefreshCw className={`w-4 h-4 ${isLoadingSheets ? "animate-spin text-white" : ""}`} />
+            <span>{isLoadingSheets ? "جاري الجلب من شيت..." : "جلب الفواتير من جوجل شيت 📥"}</span>
           </button>
         </div>
       </div>
