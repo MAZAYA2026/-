@@ -1567,6 +1567,29 @@ app.post("/api/sheets/webhook/sync-fines", async (req, res) => {
 });
 
 // Dedicated Webhook Sync Aman Report Endpoint (Direct Save to Google Sheets)
+// Helper function to normalize any date format to YYYY-MM-DD
+function normalizeDateToYMD(dStr: string | undefined): string {
+  if (!dStr) return "";
+  const cleanStr = String(dStr).trim();
+  const isoMatch = cleanStr.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (isoMatch) {
+    return `${isoMatch[1]}-${isoMatch[2].padStart(2, "0")}-${isoMatch[3].padStart(2, "0")}`;
+  }
+  const dmyMatch = cleanStr.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+  if (dmyMatch) {
+    return `${dmyMatch[3]}-${dmyMatch[2].padStart(2, "0")}-${dmyMatch[1].padStart(2, "0")}`;
+  }
+  const parsed = new Date(cleanStr);
+  if (!isNaN(parsed.getTime())) {
+    const y = parsed.getFullYear();
+    const m = String(parsed.getMonth() + 1).padStart(2, "0");
+    const d = String(parsed.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+  return cleanStr.slice(0, 10);
+}
+
+// Dedicated Webhook Sync Aman Report Endpoint
 app.post("/api/sheets/webhook/sync-aman", async (req, res) => {
   const { webhookUrl, dateFrom, dateTo, amanRows } = req.body;
   const db = readDB();
@@ -1577,6 +1600,13 @@ app.post("/api/sheets/webhook/sync-aman", async (req, res) => {
   }
 
   try {
+    // 1. Immediately cache in local database
+    if (Array.isArray(amanRows)) {
+      db.amanReport = amanRows;
+      writeDB(db);
+    }
+
+    // 2. Push to Google Sheet Webhook
     const response = await fetch(targetUrl, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
@@ -1595,6 +1625,20 @@ app.post("/api/sheets/webhook/sync-aman", async (req, res) => {
       data = JSON.parse(text);
     } catch {
       data = { message: text };
+    }
+
+    // Fallback if older Apps Script returned "إجراء غير معروف"
+    if (
+      text.includes("غير معروف") || 
+      text.includes("Unknown action") || 
+      (data && data.error && String(data.error).includes("غير معروف"))
+    ) {
+      console.log("push_aman not recognized by older script version, falling back to full push...");
+      try {
+        await pushToGoogleWebhook(targetUrl, db);
+      } catch (fbErr) {
+        console.warn("Fallback push error:", fbErr);
+      }
     }
 
     res.json({
@@ -1620,23 +1664,113 @@ app.post("/api/sheets/webhook/pull-aman", async (req, res) => {
   try {
     const pulledDB = await pullFromGoogleWebhook(targetUrl);
     let rawAman: any[] = [];
-    if (pulledDB && Array.isArray(pulledDB.amanReport)) {
+    if (pulledDB && Array.isArray(pulledDB.amanReport) && pulledDB.amanReport.length > 0) {
       rawAman = pulledDB.amanReport;
     }
 
-    // Filter by date range if provided
+    // Helper to extract Aman rows from invoices
+    const extractFromInvoices = (invoicesList: any[]) => {
+      const extracted: any[] = [];
+      if (!Array.isArray(invoicesList)) return extracted;
+      invoicesList.forEach((inv: any) => {
+        if (!inv.customers || !Array.isArray(inv.customers)) return;
+        inv.customers.forEach((cust: any, cIdx: number) => {
+          if (!cust.services || !Array.isArray(cust.services)) return;
+          const amanSrv = cust.services.find((s: any) => {
+            const sName = String(s.serviceId || "").trim();
+            return sName.startsWith("#") && !sName.startsWith("##");
+          });
+          if (amanSrv) {
+            const srvName = String(amanSrv.serviceId || "");
+            const isUrgent = srvName.includes("مستعجل") || srvName.includes("عاجل") || srvName.includes("فورى");
+            const hasFine = !!(amanSrv.fineName || (amanSrv.fineAmount && amanSrv.fineAmount > 0));
+            extracted.push({
+              id: `inv-${inv.invoiceId}-c-${cIdx}`,
+              arabicName: cust.arabicName || "",
+              birthDate: cust.birthDate || "",
+              notes: amanSrv.notes || "",
+              invoiceId: inv.invoiceId,
+              customerIndex: cIdx,
+              date: inv.date || "",
+              serviceType: isUrgent ? "مستعجل" : "عادي",
+              hasFine,
+              fineName: amanSrv.fineName || "",
+              fineAmount: amanSrv.fineAmount || 0,
+            });
+          }
+        });
+      });
+      return extracted;
+    };
+
+    // If Aman sheet in Google Sheets was empty, extract Aman transactions directly from Google Sheets invoices
+    if (rawAman.length === 0 && pulledDB && Array.isArray(pulledDB.invoices) && pulledDB.invoices.length > 0) {
+      rawAman = extractFromInvoices(pulledDB.invoices);
+    }
+
+    // Fallback to local invoices if still empty
+    if (rawAman.length === 0 && db && Array.isArray(db.invoices) && db.invoices.length > 0) {
+      rawAman = extractFromInvoices(db.invoices);
+    }
+
+    // Enrich rows with serviceType and fine details from invoices if not already present
+    const allInvoices = [
+      ...(pulledDB?.invoices && Array.isArray(pulledDB.invoices) ? pulledDB.invoices : []),
+      ...(db?.invoices && Array.isArray(db.invoices) ? db.invoices : []),
+    ];
+
+    rawAman.forEach((row: any) => {
+      if (!row.serviceType || row.hasFine === undefined) {
+        let matchedInv = row.invoiceId ? allInvoices.find((i: any) => i.invoiceId === row.invoiceId) : undefined;
+        if (!matchedInv && row.arabicName) {
+          matchedInv = allInvoices.find((i: any) => i.customers?.some((c: any) => c.arabicName === row.arabicName));
+        }
+        if (matchedInv && Array.isArray(matchedInv.customers)) {
+          const cust = matchedInv.customers.find((c: any) => c.arabicName === row.arabicName) || matchedInv.customers[0];
+          if (cust && Array.isArray(cust.services)) {
+            const amanSrv = cust.services.find((s: any) => {
+              const sName = String(s.serviceId || "").trim();
+              return sName.startsWith("#") && !sName.startsWith("##");
+            });
+            if (amanSrv) {
+              const srvName = String(amanSrv.serviceId || "");
+              row.serviceType = (srvName.includes("مستعجل") || srvName.includes("عاجل") || srvName.includes("فورى")) ? "مستعجل" : "عادي";
+              row.hasFine = !!(amanSrv.fineName || (amanSrv.fineAmount && amanSrv.fineAmount > 0));
+              row.fineName = amanSrv.fineName || "";
+              row.fineAmount = amanSrv.fineAmount || 0;
+            }
+          }
+        }
+        if (!row.serviceType) row.serviceType = "عادي";
+        if (row.hasFine === undefined) row.hasFine = false;
+      }
+    });
+
+    // Cache into local database
+    if (rawAman.length > 0) {
+      db.amanReport = rawAman;
+      writeDB(db);
+    }
+
+    // Filter by date range using normalized YYYY-MM-DD
+    const fromYMD = normalizeDateToYMD(dateFrom);
+    const toYMD = normalizeDateToYMD(dateTo);
     let filteredAman = rawAman;
-    if (dateFrom && dateTo) {
+
+    if (fromYMD && toYMD) {
       filteredAman = rawAman.filter((row: any) => {
         if (!row.date) return true; // keep if no specific date set
-        return row.date >= dateFrom && row.date <= dateTo;
+        const rowYMD = normalizeDateToYMD(row.date);
+        if (!rowYMD) return true;
+        return rowYMD >= fromYMD && rowYMD <= toYMD;
       });
     }
 
     res.json({
       status: "success",
       rows: filteredAman,
-      totalRows: rawAman.length,
+      allRowsCount: rawAman.length,
+      totalRows: filteredAman.length,
       message: `تم جلب وتحميل ${filteredAman.length} صفاً من كشف أمان من جوجل شيت مباشرة! 📊📥`
     });
   } catch (err: any) {

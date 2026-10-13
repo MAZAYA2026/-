@@ -28,6 +28,10 @@ export interface AmanRowItem {
   notes: string;
   date: string;
   isCustomManual?: boolean;
+  serviceType?: "عادي" | "مستعجل" | string;
+  hasFine?: boolean;
+  fineName?: string;
+  fineAmount?: number;
 }
 
 interface AmanReportProps {
@@ -37,6 +41,117 @@ interface AmanReportProps {
   settings?: AppSettings;
   onInvoiceUpdated?: (updated: Invoice) => void;
   onInvoiceCreated?: (newInv: Invoice) => void;
+}
+
+// Helper function to normalize any date format into comparable YYYY-MM-DD
+export function normalizeDateToYMD(dStr: string | undefined): string {
+  if (!dStr) return "";
+  const cleanStr = String(dStr).trim();
+  const isoMatch = cleanStr.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (isoMatch) {
+    return `${isoMatch[1]}-${isoMatch[2].padStart(2, "0")}-${isoMatch[3].padStart(2, "0")}`;
+  }
+  const dmyMatch = cleanStr.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+  if (dmyMatch) {
+    return `${dmyMatch[3]}-${dmyMatch[2].padStart(2, "0")}-${dmyMatch[1].padStart(2, "0")}`;
+  }
+  const parsed = new Date(cleanStr);
+  if (!isNaN(parsed.getTime())) {
+    const y = parsed.getFullYear();
+    const m = String(parsed.getMonth() + 1).padStart(2, "0");
+    const d = String(parsed.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+  return cleanStr.slice(0, 10);
+}
+
+// Helper function to resolve Aman customer details: serviceType (عادي / مستعجل), fine status and display label
+export function resolveAmanDetails(
+  row: Partial<AmanRowItem>,
+  invoices: Invoice[],
+  services: Service[]
+): {
+  serviceType: "عادي" | "مستعجل";
+  hasFine: boolean;
+  fineName: string;
+  fineAmount: number;
+  statusText: string;
+} {
+  let serviceType: "عادي" | "مستعجل" = (row.serviceType as any) === "مستعجل" ? "مستعجل" : "عادي";
+  let hasFine = row.hasFine;
+  let fineName = row.fineName || "";
+  let fineAmount = row.fineAmount || 0;
+  const rowNotes = row.notes || "";
+
+  // Find linked customer from invoices if possible
+  let targetInv = row.invoiceId ? invoices.find((i) => i.invoiceId === row.invoiceId) : undefined;
+  if (!targetInv && row.arabicName) {
+    targetInv = invoices.find((i) => i.customers?.some((c) => c.arabicName?.trim() === row.arabicName?.trim()));
+  }
+
+  if (targetInv && Array.isArray(targetInv.customers)) {
+    const targetCust = row.customerIndex !== undefined 
+      ? targetInv.customers[row.customerIndex] 
+      : targetInv.customers.find((c) => c.arabicName?.trim() === row.arabicName?.trim());
+
+    if (targetCust && Array.isArray(targetCust.services)) {
+      const amanSrv = targetCust.services.find((s) => {
+        const srvId = String(s.serviceId || "").trim();
+        const matched = services.find((srv) => srv.id === srvId || srv.name === srvId);
+        const fullName = matched?.name || srvId;
+        return fullName.startsWith("#") && !fullName.startsWith("##");
+      });
+
+      if (amanSrv) {
+        const srvId = String(amanSrv.serviceId || "").trim();
+        const matched = services.find((srv) => srv.id === srvId || srv.name === srvId);
+        const fullName = matched?.name || srvId;
+
+        const isUrgent = fullName.includes("مستعجل") || fullName.includes("عاجل") || fullName.includes("فورى");
+        serviceType = isUrgent ? "مستعجل" : "عادي";
+
+        if (amanSrv.fineName && amanSrv.fineName.trim().length > 0) {
+          hasFine = true;
+          fineName = amanSrv.fineName.trim();
+          fineAmount = amanSrv.fineAmount || 0;
+        } else if (amanSrv.fineAmount && amanSrv.fineAmount > 0) {
+          hasFine = true;
+          fineName = "غرامة حكومية";
+          fineAmount = amanSrv.fineAmount;
+        } else if (hasFine === undefined) {
+          hasFine = false;
+        }
+      }
+    }
+  }
+
+  // Fallback checks from notes text if not resolved
+  if (hasFine === undefined) {
+    if (rowNotes.includes("يوجد غرامة") || rowNotes.includes("غرامة")) {
+      hasFine = true;
+      const m = rowNotes.match(/غرامة(?:\s*\(([^)]+)\))?/);
+      fineName = m && m[1] ? m[1].trim() : "غرامة حكومية";
+    } else {
+      hasFine = false;
+    }
+  }
+
+  if (!row.serviceType && (rowNotes.includes("مستعجل") || rowNotes.includes("عاجل"))) {
+    serviceType = "مستعجل";
+  }
+
+  const fineLabel = hasFine 
+    ? (fineName ? `يوجد غرامة (${fineName})` : "يوجد غرامة") 
+    : "لا توجد غرامة";
+  const statusText = `${serviceType} - ${fineLabel}`;
+
+  return {
+    serviceType,
+    hasFine: !!hasFine,
+    fineName,
+    fineAmount,
+    statusText,
+  };
 }
 
 export default function AmanReport({ 
@@ -79,33 +194,50 @@ export default function AmanReport({
   // Extract base customers from invoices as fallback if Google Sheets is not yet connected
   const baseCustomers = useMemo(() => {
     const list: AmanRowItem[] = [];
+    const fromYMD = normalizeDateToYMD(dateFrom);
+    const toYMD = normalizeDateToYMD(dateTo);
 
     invoices.forEach((inv) => {
-      // Filter by date range (from and to)
-      if (inv.date < dateFrom || inv.date > dateTo) return;
+      // Filter by date range (from and to) using normalized date
+      const invYMD = normalizeDateToYMD(inv.date);
+      if (fromYMD && toYMD && invYMD) {
+        if (invYMD < fromYMD || invYMD > toYMD) return;
+      }
 
       inv.customers.forEach((cust, cIdx) => {
         const amanService = cust.services.find((s) => {
-          const serviceName = s.serviceId;
-          return serviceName.startsWith("#") && !serviceName.startsWith("##");
+          const srvId = String(s.serviceId || "").trim();
+          const matched = services.find((srv) => srv.id === srvId || srv.name === srvId);
+          const fullName = matched?.name || srvId;
+          return fullName.startsWith("#") && !fullName.startsWith("##");
         });
 
         if (amanService) {
+          const srvId = String(amanService.serviceId || "").trim();
+          const matched = services.find((srv) => srv.id === srvId || srv.name === srvId);
+          const fullName = matched?.name || srvId;
+          const isUrgent = fullName.includes("مستعجل") || fullName.includes("عاجل") || fullName.includes("فورى");
+          const hasFine = !!(amanService.fineName && amanService.fineName.trim().length > 0) || !!(amanService.fineAmount && amanService.fineAmount > 0);
+
           list.push({
             id: `inv-${inv.invoiceId}-c-${cIdx}`,
             arabicName: cust.arabicName || "",
             birthDate: extractBirthDate(cust.birthDate, cust.nationalId),
-            notes: "", // Empty for manual handwriting after printing
+            notes: amanService.notes || "",
             date: inv.date,
             invoiceId: inv.invoiceId,
             customerIndex: cIdx,
+            serviceType: isUrgent ? "مستعجل" : "عادي",
+            hasFine,
+            fineName: amanService.fineName || "",
+            fineAmount: amanService.fineAmount || 0,
           });
         }
       });
     });
 
     return list;
-  }, [invoices, dateFrom, dateTo]);
+  }, [invoices, dateFrom, dateTo, services]);
 
   // Table rows loaded and maintained directly from Google Sheets
   const [tableRows, setTableRows] = useState<AmanRowItem[]>([]);
@@ -140,15 +272,22 @@ export default function AmanReport({
       });
 
       if (res && Array.isArray(res.rows) && res.rows.length > 0) {
-        const loaded: AmanRowItem[] = res.rows.map((row, idx) => ({
-          id: row.id || `sheet-${idx}`,
-          arabicName: row.arabicName || "",
-          birthDate: row.birthDate || "",
-          notes: row.notes || "",
-          date: row.date || dateFrom,
-          invoiceId: row.invoiceId,
-          isCustomManual: !row.invoiceId,
-        }));
+        const loaded: AmanRowItem[] = res.rows.map((row, idx) => {
+          const details = resolveAmanDetails(row, invoices, services);
+          return {
+            id: row.id || `sheet-${idx}`,
+            arabicName: row.arabicName || "",
+            birthDate: row.birthDate || "",
+            notes: row.notes || "",
+            date: row.date || dateFrom,
+            invoiceId: row.invoiceId,
+            isCustomManual: !row.invoiceId,
+            serviceType: details.serviceType,
+            hasFine: details.hasFine,
+            fineName: details.fineName,
+            fineAmount: details.fineAmount,
+          };
+        });
 
         setTableRows(loaded);
         originalValuesRef.current.clear();
@@ -180,7 +319,7 @@ export default function AmanReport({
     } finally {
       setIsLoadingSheets(false);
     }
-  }, [dateFrom, dateTo, settings?.googleSheetWebhookUrl, baseCustomers]);
+  }, [dateFrom, dateTo, settings?.googleSheetWebhookUrl, baseCustomers, invoices, services]);
 
   // Load from Google Sheet directly upon component opening or whenever the date range changes
   useEffect(() => {
@@ -607,6 +746,13 @@ export default function AmanReport({
           line-height: 1.1 !important;
           vertical-align: middle !important;
         }
+        .notes-light-gray {
+          color: #9ca3af !important;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+          font-weight: 600 !important;
+          font-size: 12.5px !important;
+        }
         .print\\:hidden {
           display: none !important;
         }
@@ -659,6 +805,85 @@ export default function AmanReport({
 
   // Count active non-empty names
   const activeCount = displayRows.filter((r) => r.arabicName.trim().length > 0).length;
+
+  // Breakdown statistics for each printed page
+  const pageStats = useMemo(() => {
+    return Array.from({ length: totalPages }).map((_, pageIdx) => {
+      const startIdx = pageIdx * ROWS_PER_PAGE;
+      const pageCustomers = displayRows.slice(startIdx, startIdx + ROWS_PER_PAGE);
+      const activeRows = pageCustomers.filter((r) => r.arabicName.trim().length > 0);
+
+      let normalCount = 0;
+      let urgentCount = 0;
+      let finesCount = 0;
+      const finesByType: Record<string, number> = {};
+
+      activeRows.forEach((row) => {
+        const details = resolveAmanDetails(row, invoices, services);
+        if (details.serviceType === "مستعجل") {
+          urgentCount++;
+        } else {
+          normalCount++;
+        }
+
+        if (details.hasFine) {
+          finesCount++;
+          const fName = details.fineName || "غرامة حكومية";
+          finesByType[fName] = (finesByType[fName] || 0) + 1;
+        }
+      });
+
+      const finesBreakdown = Object.entries(finesByType)
+        .map(([name, count]) => `${name}: ${count}`)
+        .join("، ");
+
+      return {
+        totalActive: activeRows.length,
+        normalCount,
+        urgentCount,
+        finesCount,
+        finesBreakdown,
+        finesByType,
+      };
+    });
+  }, [totalPages, displayRows, invoices, services]);
+
+  // Overall report statistics across all pages
+  const overallStats = useMemo(() => {
+    const activeRows = displayRows.filter((r) => r.arabicName.trim().length > 0);
+    let normalCount = 0;
+    let urgentCount = 0;
+    let finesCount = 0;
+    const finesByType: Record<string, number> = {};
+
+    activeRows.forEach((row) => {
+      const details = resolveAmanDetails(row, invoices, services);
+      if (details.serviceType === "مستعجل") {
+        urgentCount++;
+      } else {
+        normalCount++;
+      }
+
+      if (details.hasFine) {
+        finesCount++;
+        const fName = details.fineName || "غرامة حكومية";
+        finesByType[fName] = (finesByType[fName] || 0) + 1;
+      }
+    });
+
+    const finesBreakdown = Object.entries(finesByType)
+      .map(([name, count]) => `${name}: ${count}`)
+      .join("، ");
+
+    return {
+      totalActive: activeRows.length,
+      normalCount,
+      urgentCount,
+      finesCount,
+      finesBreakdown,
+      finesByType,
+    };
+  }, [displayRows, invoices, services]);
 
   return (
     <div className="space-y-6 font-cairo">
@@ -927,19 +1152,100 @@ export default function AmanReport({
 
       {/* Screen Preview & Printable Canvas */}
       <div className="bg-slate-100/70 rounded-2xl border border-slate-200 p-4 sm:p-6 overflow-x-auto">
-        <div className="text-xs text-slate-600 mb-4 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-            <span>
-              معاينة كشف الحركة للطباعة (A4) - الفترة: <strong>{headerDateDisplay}</strong> | الإجمالي: <strong>{activeCount} عميل</strong>
-            </span>
+        
+        {/* On-screen Detailed Breakdown Reference Card */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 mb-4 shadow-xs">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+            <div className="flex items-center gap-2">
+              <span className="p-1.5 bg-blue-50 text-blue-600 rounded-lg">
+                <CheckCircle2 className="w-4 h-4" />
+              </span>
+              <div>
+                <h4 className="text-sm font-black text-slate-900 font-cairo">
+                  تفصيلة كشف أمان للطباعة والحركة ({headerDateDisplay})
+                </h4>
+                <p className="text-[11px] text-slate-500">
+                  تظهر الملاحظات بخط رمادي فاتح لتسهيل قراءتها وإمكانية الكتابة باليد عليها بعد الطباعة
+                </p>
+              </div>
+            </div>
+
+            {totalPages > 1 && (
+              <span className="text-xs font-bold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200 self-start sm:self-auto">
+                إجمالي الصفحات: {totalPages} صفحات (35 صف لكل ورقة)
+              </span>
+            )}
           </div>
-          {totalPages > 1 && (
-            <span className="text-xs font-bold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200">
-              إجمالي الصفحات: {totalPages} صفحات (35 صف لكل ورقة)
-            </span>
-          )}
+
+          {/* Statistics Badges */}
+          <div className="flex flex-wrap items-center gap-2.5 pt-3">
+            <div className="flex items-center gap-1.5 bg-slate-100 text-slate-800 px-3 py-1.5 rounded-xl text-xs font-bold border border-slate-200">
+              <span>إجمالي المسجلين:</span>
+              <span className="font-mono text-sm text-slate-950 font-black">{overallStats.totalActive}</span>
+            </div>
+
+            <div className="flex items-center gap-1.5 bg-emerald-50 text-emerald-800 px-3 py-1.5 rounded-xl text-xs font-bold border border-emerald-200">
+              <span>جواز عادي:</span>
+              <span className="font-mono text-sm text-emerald-950 font-black">{overallStats.normalCount}</span>
+            </div>
+
+            <div className="flex items-center gap-1.5 bg-amber-50 text-amber-800 px-3 py-1.5 rounded-xl text-xs font-bold border border-amber-200">
+              <span>جواز عاجل / مستعجل:</span>
+              <span className="font-mono text-sm text-amber-950 font-black">{overallStats.urgentCount}</span>
+            </div>
+
+            <div className="flex items-center gap-1.5 bg-purple-50 text-purple-800 px-3 py-1.5 rounded-xl text-xs font-bold border border-purple-200">
+              <span>الغرامات الحكومية:</span>
+              <span className="font-mono text-sm text-purple-950 font-black">{overallStats.finesCount}</span>
+              {overallStats.finesBreakdown && (
+                <span className="text-[11px] text-purple-700 font-normal mr-1">
+                  ({overallStats.finesBreakdown})
+                </span>
+              )}
+            </div>
+          </div>
         </div>
+
+        {/* Informative helper when 0 transactions found for the currently selected date */}
+        {activeCount === 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-950 animate-fade-in font-cairo">
+            <div className="flex items-center gap-2.5">
+              <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
+              <div>
+                <p className="font-bold">
+                  لا توجد معاملات مسجلة في التاريخ المختار ({headerDateDisplay}).
+                </p>
+                <p className="text-amber-800 text-[11px] mt-0.5">
+                  يمكنك النقر أدناه لعرض معاملات هذا الشهر أو كافة المعاملات السابقة المسجلة دفعة واحدة:
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  const d = new Date();
+                  const firstDay = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+                  setDateFrom(firstDay);
+                  setDateTo(todayStr);
+                }}
+                className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold text-xs cursor-pointer shadow-xs transition-colors"
+              >
+                معاملات هذا الشهر 📅
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDateFrom("2025-01-01");
+                  setDateTo(todayStr);
+                }}
+                className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-xs cursor-pointer shadow-xs transition-colors"
+              >
+                عرض الكل 📁
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Report Print Canvas for Iframe / Native Print */}
         <div ref={reportPrintRef} className="mx-auto text-black">
@@ -1115,17 +1421,38 @@ export default function AmanReport({
                               </span>
                             </td>
 
-                            {/* 4. Notes - Explicitly empty for manual handwriting after printing per user request */}
+                            {/* 4. Notes - Light gray status: normal/urgent & fine status, readable and handwritten over */}
                             <td 
-                              className="border border-black text-right p-0" 
+                              className="border border-black text-right p-0 relative" 
                               style={{ 
                                 fontFamily: "'Cairo', sans-serif", 
-                                fontSize: "20px", 
-                                fontWeight: "bold", 
                                 lineHeight: 1.1 
                               }}
                             >
-                              {/* فارغة تماماً للكتابة اليدوية بالقلم بعد طباعة الورقة */}
+                              {rowName.trim().length > 0 && (() => {
+                                const noteInfo = resolveAmanDetails(row, invoices, services);
+                                return (
+                                  <div className="w-full h-full flex items-center justify-between px-1.5 overflow-hidden">
+                                    <span
+                                      className="notes-light-gray select-all font-semibold"
+                                      style={{
+                                        color: "#9ca3af",
+                                        fontFamily: "'Cairo', sans-serif",
+                                        fontSize: "12.5px",
+                                        fontWeight: "600",
+                                        lineHeight: 1.1,
+                                        WebkitPrintColorAdjust: "exact",
+                                        printColorAdjust: "exact",
+                                      }}
+                                    >
+                                      {noteInfo.statusText}
+                                      {rowNotes && rowNotes !== noteInfo.statusText && (
+                                        <span style={{ color: "#64748b", marginRight: "4px" }}> ({rowNotes})</span>
+                                      )}
+                                    </span>
+                                  </div>
+                                );
+                              })()}
                             </td>
                           </tr>
                         );
@@ -1134,14 +1461,41 @@ export default function AmanReport({
                   </table>
                 </div>
 
-                {/* Signoff Section */}
+                {/* Signoff Section & Small Reference Breakdown requested by user */}
                 <div 
-                  className="flex justify-start items-center px-4 pt-2 mt-2 border-t-2 border-black text-black font-cairo"
+                  className="flex justify-between items-center px-2 pt-1 mt-1 border-t-2 border-black text-black font-cairo"
                   style={{ height: "14mm", maxHeight: "15mm", boxSizing: "border-box" }}
                 >
-                  <div className="flex items-center gap-3" style={{ fontFamily: "'Cairo', sans-serif", fontSize: "20px", fontWeight: "bold" }}>
+                  {/* Right: Signature */}
+                  <div className="flex items-center gap-2" style={{ fontFamily: "'Cairo', sans-serif", fontSize: "16px", fontWeight: "bold" }}>
                     <span>رئيس القسم :</span>
-                    <span className="inline-block border-b-2 border-dotted border-black w-72 h-4 mb-1"></span>
+                    <span className="inline-block border-b-2 border-dotted border-black w-36 sm:w-48 h-3 mb-1"></span>
+                  </div>
+
+                  {/* Left: Small font reference breakdown requested by user */}
+                  <div 
+                    className="flex items-center gap-2 border border-black/50 px-2.5 py-0.5 rounded-sm bg-slate-50/90 print:bg-transparent print:border-black/60"
+                    style={{ 
+                      fontFamily: "'Cairo', sans-serif", 
+                      fontSize: "10.5px", 
+                      fontWeight: "bold",
+                      lineHeight: 1.2 
+                    }}
+                  >
+                    <span className="font-extrabold text-slate-900">📌 تفصيلة الكشف:</span>
+                    <span>عادي: <strong className="text-black">{pageStats[pageIdx]?.normalCount || 0}</strong></span>
+                    <span>|</span>
+                    <span>عاجل: <strong className="text-black">{pageStats[pageIdx]?.urgentCount || 0}</strong></span>
+                    <span>|</span>
+                    <span>
+                      الغرامات: <strong className="text-black">{pageStats[pageIdx]?.finesCount || 0}</strong>
+                      {pageStats[pageIdx]?.finesBreakdown ? ` (${pageStats[pageIdx].finesBreakdown})` : " (لا توجد)"}
+                    </span>
+                    {totalPages > 1 && (
+                      <span className="text-[9.5px] text-slate-500 font-normal mr-1">
+                        [ص {pageIdx + 1}/{totalPages}]
+                      </span>
+                    )}
                   </div>
                 </div>
 

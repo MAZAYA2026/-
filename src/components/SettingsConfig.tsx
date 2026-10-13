@@ -455,7 +455,7 @@ function doPost(e) {
       // --- Sheet 7: Aman_كشف_حركة_الخدمات_الجماهيرية ---
       var amanSheet = getOrCreateSheet(ss, "Aman_كشف_حركة_الخدمات_الجماهيرية");
       amanSheet.clearContents();
-      var amanHeaders = ["م", "الاسم", "تاريخ الميلاد", "الملاحظات", "رقم الفاتورة", "التاريخ"];
+      var amanHeaders = ["م", "الاسم", "تاريخ الميلاد", "الملاحظات (النوع والغرامة)", "رقم الفاتورة", "التاريخ"];
       var amanRows = [amanHeaders];
       var aCounter = 1;
       if (db.invoices && Array.isArray(db.invoices)) {
@@ -471,7 +471,14 @@ function doPost(e) {
                   var sId = String(aCust.services[asIdx].serviceId || "");
                   if (sId.indexOf("#") === 0 && sId.indexOf("##") !== 0) {
                     isAman = true;
-                    aNote = aCust.services[asIdx].notes || "";
+                    var sType = (sId.indexOf("مستعجل") !== -1 || sId.indexOf("عاجل") !== -1 || sId.indexOf("فورى") !== -1) ? "مستعجل" : "عادي";
+                    var fName = aCust.services[asIdx].fineName || "";
+                    var fAmt = aCust.services[asIdx].fineAmount || 0;
+                    var finePart = (fName || fAmt > 0) ? ("يوجد غرامة" + (fName ? " (" + fName + ")" : "")) : "لا توجد غرامة";
+                    aNote = sType + " - " + finePart;
+                    if (aCust.services[asIdx].notes) {
+                      aNote += " | " + aCust.services[asIdx].notes;
+                    }
                     break;
                   }
                 }
@@ -481,7 +488,7 @@ function doPost(e) {
                   aCounter++,
                   aCust.arabicName || "",
                   aCust.birthDate || "",
-                  aNote || aCust.profession || "",
+                  aNote || "",
                   aInv.invoiceId || "",
                   aInv.date || ""
                 ]);
@@ -982,6 +989,42 @@ function doGet(e) {
               invoiceId: aInvId,
               date: aDate
             });
+          }
+        }
+      }
+    }
+
+    // Fallback: If Aman sheet is empty or not yet filled, extract Aman entries from invoices sheet
+    if (db.amanReport.length === 0 && db.invoices && Array.isArray(db.invoices)) {
+      for (var ai2 = 0; ai2 < db.invoices.length; ai2++) {
+        var aInv2 = db.invoices[ai2];
+        if (aInv2.customers && Array.isArray(aInv2.customers)) {
+          for (var ac2 = 0; ac2 < aInv2.customers.length; ac2++) {
+            var aCust2 = aInv2.customers[ac2];
+            if (aCust2.services && Array.isArray(aCust2.services)) {
+              for (var as2 = 0; as2 < aCust2.services.length; as2++) {
+                var sId2 = String(aCust2.services[as2].serviceId || "");
+                if (sId2.indexOf("#") === 0 && sId2.indexOf("##") !== 0) {
+                  var sType2 = (sId2.indexOf("مستعجل") !== -1 || sId2.indexOf("عاجل") !== -1 || sId2.indexOf("فورى") !== -1) ? "مستعجل" : "عادي";
+                  var fName2 = aCust2.services[as2].fineName || "";
+                  var fAmt2 = aCust2.services[as2].fineAmount || 0;
+                  var finePart2 = (fName2 || fAmt2 > 0) ? ("يوجد غرامة" + (fName2 ? " (" + fName2 + ")" : "")) : "لا توجد غرامة";
+                  var noteVal2 = sType2 + " - " + finePart2;
+                  if (aCust2.services[as2].notes) {
+                    noteVal2 += " | " + aCust2.services[as2].notes;
+                  }
+                  db.amanReport.push({
+                    id: "inv-" + (aInv2.invoiceId || ai2) + "-c-" + ac2,
+                    arabicName: aCust2.arabicName || "",
+                    birthDate: aCust2.birthDate || "",
+                    notes: noteVal2,
+                    invoiceId: aInv2.invoiceId,
+                    date: aInv2.date || ""
+                  });
+                  break;
+                }
+              }
+            }
           }
         }
       }
