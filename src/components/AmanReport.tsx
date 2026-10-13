@@ -631,8 +631,8 @@ export default function AmanReport({
   const measurementCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Dynamic font sizing for customer name:
-  // User explicit requirement: "كشف امان بالنسبة لتقليل التلقائى لحجم الخط يبدأ بحالة تجاوز الاسم مقاس طولى 9سم اذا تجاوز هذة المقاس ابدأ فى التقليل بحيث الاسم بالكامل يتضمن هذا المقاس"
-  // Keep font size at default official 20px up to 9.0cm; start reducing only after strictly exceeding 9.0cm so the entire name fits within 9.0cm
+  // User explicit requirement: "في حال تجاوز طول الاسم مقاس 10 سم، يبدأ التقليل التدريجي التلقائي بحيث يتضمن المقاس 10 سم الاسم بالكامل دون أي اقتطاع أو خروج عن الخلية"
+  // Keep font size at default official 20px up to 10.0cm; start reducing only after strictly exceeding 10.0cm so the entire name fits within 10.0cm
   const getNameFontSize = (name: string): string => {
     if (!name || !name.trim()) return "20px";
     const clean = name.trim();
@@ -649,12 +649,12 @@ export default function AmanReport({
           const metrics = ctx.measureText(clean);
           const widthInCm = metrics.width / 37.79527559;
 
-          // Do NOT reduce font size until length strictly exceeds 9.0 cm
-          if (widthInCm <= 9.0) {
+          // Do NOT reduce font size until length strictly exceeds 10.0 cm
+          if (widthInCm <= 10.0) {
             return "20px";
           }
-          // Proportionally scale down font size so the entire text fits within 9.0 cm
-          const scaledSize = Math.max(11, Math.floor((9.0 / widthInCm) * 20 * 10) / 10);
+          // Proportionally scale down font size so the entire text fits within 10.0 cm
+          const scaledSize = Math.max(11, Math.floor((10.0 / widthInCm) * 20 * 10) / 10);
           return `${scaledSize}px`;
         }
       } catch (e) {
@@ -662,10 +662,10 @@ export default function AmanReport({
       }
     }
 
-    // 2. Character length fallback: at 20px Cairo bold, ~32 characters correspond to 9.0cm
+    // 2. Character length fallback: at 20px Cairo bold, ~36 characters correspond to 10.0cm
     const len = clean.length;
-    if (len <= 32) return "20px";
-    const scaledSize = Math.max(11, Math.floor((32 / len) * 20 * 10) / 10);
+    if (len <= 36) return "20px";
+    const scaledSize = Math.max(11, Math.floor((36 / len) * 20 * 10) / 10);
     return `${scaledSize}px`;
   };
 
