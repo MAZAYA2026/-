@@ -54,7 +54,7 @@ export default function ServicesConfig({
   const [fineFeedback, setFineFeedback] = useState<string | null>(null);
 
   useEffect(() => {
-    if (governmentFines && governmentFines.length > 0) {
+    if (Array.isArray(governmentFines)) {
       setFinesList(governmentFines);
     }
   }, [governmentFines]);

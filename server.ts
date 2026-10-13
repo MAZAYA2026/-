@@ -183,9 +183,10 @@ const initialData = {
     }
   ],
   governmentFines: [
-    { id: "fine-1", name: "غرامة فقد جواز سفر", amount: 500, notes: "تطبق في حالة فقدان جواز السفر السابق" },
-    { id: "fine-2", name: "غرامة تالف جواز سفر", amount: 500, notes: "تطبق في حالة تلف الجواز القديم أو عدم وضوح بياناته" },
-    { id: "fine-3", name: "غرامة تأخير تجديد / عدم استلام سابق", amount: 300, notes: "تطبق في حالات التأخير الرسمية المقررة" }
+    { id: "fine-1", name: "عدم وجود مؤهل", amount: 450, notes: "عدم وجود مؤهل" },
+    { id: "fine-2", name: "تجديد مبكر", amount: 550, notes: "تجديد مبكر" },
+    { id: "fine-3", name: "بدل تالف", amount: 550, notes: "بدل تالف" },
+    { id: "fine-1791356531482", name: "تغيير ترجمة", amount: 500, notes: "تغيير ترجمة" }
   ],
   settings: {
     headerText: "مكتب مزايا للخدمات الحكومية والجوازات E.G",
@@ -277,7 +278,7 @@ _{الترويسة_الفرعية}_
 📍 {اسم_المكتب}
 📞 للاستفسار والمتابعة: {هاتف_التواصل}`,
     deliveryMessage: "تم تسليم جواز السفر والأوراق الخاصة بك بنجاح يا {اسم_العميل}.\nرقم الفاتورة: {رقم_الفاتورة}\nنسعد بتقييمكم لخدمات مكتب مزايا للجوازات ونراكم قريباً في معاملات أخرى.",
-    googleSheetWebhookUrl: "https://script.google.com/macros/s/AKfycbzs-tNIvoZJQOwvb7FgYht4du96_QrDzqTXIiUMAV0iVfvvIkENhxuBXGYfDp-5snc/exec",
+    googleSheetWebhookUrl: "https://script.google.com/macros/s/AKfycbysUKVyPKjYc9IzaRUC2GvXylSxC_U92poDYTgzkMqnhjxoH0I0GNc7pWvQi_qhVZSj/exec",
     autoSyncWebhook: false,
     googleSheetId: "",
     googleSheetUrl: "",
@@ -1654,8 +1655,36 @@ app.post("/api/sheets/webhook/pull", async (req, res) => {
   }
 
   try {
-    const pulledDB = await pullFromGoogleWebhook(targetUrl);
+    let pulledDB = await pullFromGoogleWebhook(targetUrl);
     
+    // Check if sheet contains an updated webhook URL that has additional or newer data (like government fines)
+    const sheetWebhookUrl = pulledDB.settings?.googleSheetWebhookUrl;
+    if (
+      sheetWebhookUrl && 
+      typeof sheetWebhookUrl === "string" &&
+      sheetWebhookUrl.startsWith("http") && 
+      sheetWebhookUrl !== targetUrl && 
+      (!pulledDB.governmentFines || !Array.isArray(pulledDB.governmentFines) || pulledDB.governmentFines.length === 0)
+    ) {
+      console.log("Found updated webhook URL in sheet settings, pulling full fines and data from:", sheetWebhookUrl);
+      try {
+        const newerDB = await pullFromGoogleWebhook(sheetWebhookUrl);
+        if (newerDB) {
+          if (Array.isArray(newerDB.governmentFines) && newerDB.governmentFines.length > 0) {
+            pulledDB.governmentFines = newerDB.governmentFines;
+          }
+          if (Array.isArray(newerDB.services) && newerDB.services.length > 0) {
+            pulledDB.services = newerDB.services;
+          }
+          if (Array.isArray(newerDB.dictionary) && newerDB.dictionary.length > 0) {
+            pulledDB.dictionary = newerDB.dictionary;
+          }
+        }
+      } catch (errNew: any) {
+        console.warn("Could not fetch secondary sheetWebhookUrl:", errNew.message);
+      }
+    }
+
     // Retain webhook configuration and enforce manual mode (autoSync: false)
     const pulledSettings = pulledDB.settings || {};
     const hasProfileSettingsInSheet = Boolean(
@@ -1668,10 +1697,12 @@ app.post("/api/sheets/webhook/pull", async (req, res) => {
       pulledSettings.deliveryMessage
     );
 
+    const activeWebhookUrl = (sheetWebhookUrl && sheetWebhookUrl.startsWith("http")) ? sheetWebhookUrl : targetUrl;
+
     pulledDB.settings = {
       ...db.settings,
       ...(hasProfileSettingsInSheet ? pulledSettings : {}),
-      googleSheetWebhookUrl: targetUrl,
+      googleSheetWebhookUrl: activeWebhookUrl,
       autoSyncWebhook: false, // Strict manual mode
       googleSheetId: db.settings.googleSheetId || "",
       googleSheetUrl: db.settings.googleSheetUrl || "",
@@ -1688,12 +1719,14 @@ app.post("/api/sheets/webhook/pull", async (req, res) => {
       pulledDB.employees = db.employees || [];
     }
 
-    // If pulledDB has governmentFines, retain them, otherwise fallback to local db
+    // If pulledDB has governmentFines, retain them, otherwise fallback to local db or defaults
     if (!pulledDB.governmentFines || !Array.isArray(pulledDB.governmentFines) || pulledDB.governmentFines.length === 0) {
-      pulledDB.governmentFines = db.governmentFines || initialData.governmentFines;
+      pulledDB.governmentFines = (db.governmentFines && db.governmentFines.length > 0) 
+        ? db.governmentFines 
+        : initialData.governmentFines;
     }
 
-    // Save to local file
+    // Save to local database file
     writeDB(pulledDB);
 
     const servicesCount = pulledDB.services?.length || 0;
@@ -1705,6 +1738,7 @@ app.post("/api/sheets/webhook/pull", async (req, res) => {
       status: "success",
       message: `تم استيراد كافة البيانات بنجاح من جوجل شيت واعتمادها كقاعدة بيانات نشطة! 📥 (${servicesCount} خدمة، ${finesCount} بند غرامة حكومية، ${invoicesCount} فاتورة، ${dictionaryCount} اسم مترجم)`,
       db: pulledDB,
+      governmentFines: pulledDB.governmentFines
     });
   } catch (err: any) {
     res.status(500).json({ error: "فشل استيراد البيانات من السكربت: " + err.message });

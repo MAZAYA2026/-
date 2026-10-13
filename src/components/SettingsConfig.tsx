@@ -888,39 +888,67 @@ function doGet(e) {
     }
 
     // 6. Read Government Fines
-    var fineSheet = ss.getSheetByName("GovernmentFines_الغرامات_الحكومية") || 
-                    ss.getSheetByName("GovernmentFines") || 
-                    ss.getSheetByName("الغرامات_الحكومية") ||
-                    ss.getSheetByName("الغرامات") ||
-                    ss.getSheetByName("بنود_الغرامات") ||
-                    ss.getSheetByName("Government_Fines");
+    var fineSheet = null;
+    var allSheetsList = ss.getSheets();
+    for (var fsIdx = 0; fsIdx < allSheetsList.length; fsIdx++) {
+      var sName = allSheetsList[fsIdx].getName().trim();
+      var sNameLower = sName.toLowerCase();
+      if (
+        sName === "GovernmentFines_الغرامات_الحكومية" ||
+        sName === "GovernmentFines" ||
+        sName === "الغرامات_الحكومية" ||
+        sName === "الغرامات الحكومية" ||
+        sName === "الغرامات" ||
+        sName === "بنود_الغرامات" ||
+        sName === "بنود الغرامات" ||
+        sName === "بنود الغرامات الحكومية" ||
+        sName === "غرامات" ||
+        sNameLower === "fines" ||
+        sNameLower === "government_fines" ||
+        sNameLower === "government fines" ||
+        sName.indexOf("غرام") !== -1 ||
+        sNameLower.indexOf("fine") !== -1
+      ) {
+        fineSheet = allSheetsList[fsIdx];
+        break;
+      }
+    }
     if (fineSheet) {
       var fineValues = fineSheet.getDataRange().getValues();
       if (fineValues && fineValues.length > 1) {
         var headerRow = fineValues[0];
-        var hasIdCol = String(headerRow[0] || "").toLowerCase().indexOf("id") !== -1 || 
-                       String(headerRow[0] || "").indexOf("معرف") !== -1 || 
-                       String(headerRow[0] || "").indexOf("المعرف") !== -1;
+        var hasIdCol = false;
+        var nameColIdx = 0;
+        var amountColIdx = 1;
+        var notesColIdx = 2;
+
+        for (var h = 0; h < headerRow.length; h++) {
+          var hText = String(headerRow[h] || "").trim().toLowerCase();
+          if (hText.indexOf("id") !== -1 || hText.indexOf("معرف") !== -1) {
+            hasIdCol = true;
+          } else if (hText.indexOf("اسم") !== -1 || hText.indexOf("بند") !== -1 || hText.indexOf("name") !== -1) {
+            nameColIdx = h;
+          } else if (hText.indexOf("مبلغ") !== -1 || hText.indexOf("سعر") !== -1 || hText.indexOf("amount") !== -1 || hText.indexOf("price") !== -1 || hText.indexOf("قيمة") !== -1) {
+            amountColIdx = h;
+          } else if (hText.indexOf("ملاحظ") !== -1 || hText.indexOf("شروط") !== -1 || hText.indexOf("note") !== -1) {
+            notesColIdx = h;
+          }
+        }
+
+        if (hasIdCol && nameColIdx === 0) {
+          nameColIdx = 1;
+          amountColIdx = 2;
+          notesColIdx = 3;
+        }
 
         for (var f = 1; f < fineValues.length; f++) {
           var fRow = fineValues[f];
-          var fName = "";
-          var fAmount = 0;
-          var fNotes = "";
-          var fId = "fine-" + f;
+          var fId = hasIdCol ? String(fRow[0] || ("fine-" + f)).trim() : ("fine-" + f);
+          var fName = String(fRow[nameColIdx] || "").trim();
+          var fAmount = Number(fRow[amountColIdx]) || 0;
+          var fNotes = String(fRow[notesColIdx] || "").trim();
 
-          if (hasIdCol) {
-            fId = String(fRow[0] || ("fine-" + f)).trim();
-            fName = String(fRow[1] || "").trim();
-            fAmount = Number(fRow[2]) || 0;
-            fNotes = String(fRow[3] || "").trim();
-          } else {
-            fName = String(fRow[0] || "").trim();
-            fAmount = Number(fRow[1]) || 0;
-            fNotes = String(fRow[2] || "").trim();
-          }
-
-          if (fName && fName !== "" && fName !== "اسم بند الغرامة" && fName !== "اسم الغرامة" && fName !== "اسم بند الغرامة الحكومية") {
+          if (fName && fName !== "اسم بند الغرامة" && fName !== "اسم الغرامة" && fName !== "اسم بند الغرامة الحكومية") {
             db.governmentFines.push({
               id: fId || ("fine-" + f),
               name: fName,
@@ -1117,16 +1145,20 @@ function formatHeader(sheet, numCols) {
       const res = await pullDataFromGoogleWebhook(rawUrl);
       if (res.db && res.db.settings) {
         onSettingsUpdated(res.db.settings);
+        if (res.db.settings.googleSheetWebhookUrl) {
+          setGoogleSheetWebhookUrl(res.db.settings.googleSheetWebhookUrl);
+        }
       }
-      if (onGovernmentFinesUpdated && res.db && res.db.governmentFines) {
-        onGovernmentFinesUpdated(res.db.governmentFines);
+      const fines = res.governmentFines || (res.db && res.db.governmentFines);
+      if (fines && Array.isArray(fines) && onGovernmentFinesUpdated) {
+        onGovernmentFinesUpdated(fines);
       }
       if (onReloadDatabase) {
         await onReloadDatabase();
       }
-      setSyncMessage(res.message || "تم استيراد البيانات وبنود الغرامات بنجاح!");
-      alert(res.message || "تم استيراد كافة البيانات بنجاح من جوجل شيت! 📥 (شامل: كتالوج الخدمات، بنود الغرامات الحكومية، الفواتير، قاموس الأسماء، والإعدادات). سيتم تحديث الصفحة الآن.");
-      window.location.reload();
+      const finesCount = fines?.length || 0;
+      setSyncMessage(res.message || `تم استيراد البيانات وبنود الغرامات (${finesCount} بند) بنجاح!`);
+      alert(res.message || `تم استيراد كافة البيانات بنجاح من جوجل شيت! 📥 (شامل: كتالوج الخدمات، ${finesCount} بند غرامة حكومية، الفواتير، قاموس الأسماء، والإعدادات).`);
     } catch (err: any) {
       console.error(err);
       setSyncMessage(`فشل الاستيراد: ${err.message}`);

@@ -2,58 +2,382 @@
   "settings": {
     "headerText": "مكتب مزايا للخدمات الحكومية والجوازات E.G",
     "subHeaderText": "جوازات طنطا والمعاملات الحكومية",
-    "footerText": "شكراً لتعاملكم مع مكتب مزايا للجوازات.الرجاء الاحتفاظ بالفاتورة لتقديمها عند الاستلام.الاستلام شخصياً .",
-    "welcomeMessage": "🧾 *{اسم_المكتب}*\n_{الترويسة_الفرعية}_\n\n────────────────────────────\n\n📄 *رقم الفاتورة:* #{رقم_الفاتورة}\n📅 *تاريخ الفاتورة:* {تاريخ_اليوم}\n👤 *الموظف المسؤول:* {الموظف}\n📌 *حالة الفاتورة:* {حالة_الفاتورة}\n🕒 *موعد استلام المعاملة النهائي الفعلي (أيام عمل رسمية):*\n📅 {موعد_التسليم}\n\n────────────────────────────\n\n{تفاصيل_الفاتورة}\n\n────────────────────────────\n\n💰 *المبلغ الإجمالي الكلي للفاتورة:*\n*{السعر} ج.م*\n\n────────────────────────────\n\n{الخاتمة}",
-    "readyMessage": "📑 *{اسم_المكتب}*\n_{الترويسة_الفرعية}_\n\n────────────────────────────\n\nعزيزنا {اسم_العميل}،\nنفيدكم علماً بأن أوراقكم ومعاملاتكم الخاصة بالفاتورة رقم #{رقم_الفاتورة} جاهزة للتسليم الآن بالمكتب ✨\n\n📋 *الخدمات:* {الخدمات}\n🗄️ *مكان الحفظ:* درج رقم ({رقم_الارشيف})\n\nبرجاء التوجه للمكتب للاستلام مع إحضار أصل الفاتورة الحرارية والبطاقة الشخصية سارية.\n\n────────────────────────────\n\n📍 {اسم_المكتب}\n📞 للاستفسار والمتابعة: {هاتف_التواصل}",
-    "readyPassportMessage": "🛂 *{اسم_المكتب}*\n_{الترويسة_الفرعية}_\n\n────────────────────────────\n\nعزيزنا {اسم_العميل}،\nنفيدكم علماً بأن جواز السفر الخاص بكم بالفاتورة رقم #{رقم_الفاتورة} جاهز للاستلام الآن بالمكتب 📑✨\n\n📋 *الخدمات:* {الخدمات}\n🗄️ *مكان الحفظ:* درج رقم ({رقم_الارشيف})\n\n⚠️ *تنبيهات هامة جداً لاستلام جواز السفر:*\n• إحضار أصل بطاقة الرقم القومي سارية للمطابقة.\n• إحضار جواز السفر السابق (إن وجد) للتخريم والإلغاء.\n• إحضار أصل الفاتورة الحرارية للمطابقة.\n• استلام الجواز لصاحب الشأن شخصياً أو لمن له الصفة القانونية المباشرة (الأب للأبناء القصر / الزوج بموجب وثيقة الزواج).\n\n────────────────────────────\n\n📍 {اسم_المكتب}\n📞 للاستفسار والمتابعة: {هاتف_التواصل}",
-    "deliveryMessage": "تم تسليم جواز السفر والأوراق الخاصة بك بنجاح يا {اسم_العميل}.\nرقم الفاتورة: {رقم_الفاتورة}\nنسعد بتقييمكم لخدمات مكتب مزايا للجوازات ونراكم قريباً في معاملات أخرى.",
-    "googleSheetWebhookUrl": "https://script.google.com/macros/s/AKfycbzs-tNIvoZJQOwvb7FgYht4du96_QrDzqTXIiUMAV0iVfvvIkENhxuBXGYfDp-5snc/exec",
+    "footerText": "شكراً لتعاملكم مع مكتب مزايا للجوازات الرجاء الاحتفاظ بالفاتورة لتقديمها عند الاستلام الاستلام شخصياً .",
+    "welcomeMessage": "*{اسم_المكتب}*\n_{الترويسة_الفرعية}_\n──────\n*رقم الفاتورة:* #{رقم_الفاتورة}\n*تاريخ الفاتورة:* {تاريخ_اليوم}\n*الموظف المسؤول:* {الموظف}\n*حالة الفاتورة:* {حالة_الفاتورة}\n*موعد استلام المعاملة النهائي الفعلي (أيام عمل رسمية):*\n{موعد_التسليم}\n──────\n{تفاصيل_الفاتورة}\n──────\n*المبلغ الإجمالي الكلي للفاتورة:*\n*{السعر} ج.م*\n──────\n{الخاتمة}\n\n*سنوافيكم برسالة اخرى بمجرد الانتهاء من التنفيذ*",
+    "readyMessage": "*اوراقكم جاهزة الان:* \nعزيزنا: {اسم_العميل}،\n\n*الخدمات الخاصة بكم*: \n{الخدمات}\nالتى تحمل فاتورة رقم #{رقم_الفاتورة}\n\n*نفيدكم علماً بأن أوراقكم ومعاملاتكم الخاصة بالفاتورة رقم #{رقم_الفاتورة} جاهزة للتسليم الآن بالمكتب*\n\nمكان حفظ الاوراق: درج رقم ({رقم_الارشيف})\nبرجاء التوجه للمكتب خلال مواعيد العمل مع إحضار الفاتورة \n\n*(ونتمنى لكم دوام التوفيق)*\nfacebook.com/mazaya.passport2025",
+    "readyPassportMessage": "*اوراقكم جاهزة الان:* \nعزيزنا: {اسم_العميل}،\n\n*الخدمات الخاصة بكم*: \n{الخدمات}\nالتى تحمل فاتورة رقم #{رقم_الفاتورة}\n\n*نفيدكم علماً بأن بطاقتكم الشخصية وباقى أصول أوراقكم متاحة الان للتسليم بالمكتب خلال مواعيد العمل من 8 صباحا الى 5 مساءا عدا الجمعة والعطلات الرسمية أجازة)*\nوإستلام الجواز الجديد يتم استلامة فى التاريخ الموضح بأعلاه بالرسالة الاولى\n\nومتاح ترك أوراقك لاى يوم اخر كما ترغب\nمكان حفظ الاوراق: درج رقم ({رقم_الارشيف})\nبرجاء التوجه للمكتب خلال مواعيد العمل مع إحضار الفاتورة \n\n*(ونتمنى لكم دوام التوفيق)*\nfacebook.com/mazaya.passport2025",
+    "deliveryMessage": "تم تسليم الأوراق والمستندات الخاصة بك بنجاح يا {اسم_العميل}.\nرقم الفاتورة: {رقم_الفاتورة}\nنسعد بتقييمكم لخدمات مكتب مزايا للجوازات ونراكم قريباً في معاملات أخرى.",
+    "googleSheetWebhookUrl": "https://script.google.com/macros/s/AKfycbysUKVyPKjYc9IzaRUC2GvXylSxC_U92poDYTgzkMqnhjxoH0I0GNc7pWvQi_qhVZSj/exec",
     "autoSyncWebhook": false,
     "googleSheetId": "",
     "googleSheetUrl": "",
     "googleSheetsConnected": true,
-    "contactPhone": "01020304050"
+    "contactPhone": "01020304050",
+    "partialReadyMessage": "*{اسم_المكتب}*\n_{الترويسة_الفرعية}_\n────\n\nعزيزنا {اسم_العميل}،\nنفيدكم علماً بأنه *تم تنفيذ وإنجاز جزء من خدماتكم* الخاصة بالفاتورة رقم #{رقم_الفاتورة} بنجاح\n\n*الخدمة المنجزة:*\n• {الخدمة_المنجزة}\n{تاريخ_الانجاز}\n{ملاحظة_التنفيذ}\n\n*باقي الخدمات قيد المتابعة والتنفيذ تباعاً:*\n{الخدمات_المتبقية}\n\nسنقوم بإشعاركم فور الانتهاء من باقي الخدمات لتسليم المعاملة كاملة بمشيئة الله.",
+    "includeSaturdayAsWeekend": true,
+    "customHolidays": [
+      {
+        "date": "2025-01-07",
+        "name": "عيد الميلاد المجيد"
+      },
+      {
+        "date": "2025-01-25",
+        "name": "ثورة 25 يناير وعيد الشرطة"
+      },
+      {
+        "date": "2025-03-30",
+        "name": "عيد الفطر المبارك (وقفة)"
+      },
+      {
+        "date": "2025-03-31",
+        "name": "عيد الفطر المبارك"
+      },
+      {
+        "date": "2025-04-01",
+        "name": "عيد الفطر المبارك"
+      },
+      {
+        "date": "2025-04-02",
+        "name": "عيد الفطر المبارك"
+      },
+      {
+        "date": "2025-04-21",
+        "name": "شم النسيم"
+      },
+      {
+        "date": "2025-04-25",
+        "name": "عيد تحرير سيناء"
+      },
+      {
+        "date": "2025-05-01",
+        "name": "عيد العمال"
+      },
+      {
+        "date": "2025-06-05",
+        "name": "وقفة عرفات"
+      },
+      {
+        "date": "2025-06-06",
+        "name": "عيد الأضحى المبارك"
+      },
+      {
+        "date": "2025-06-07",
+        "name": "عيد الأضحى المبارك"
+      },
+      {
+        "date": "2025-06-08",
+        "name": "عيد الأضحى المبارك"
+      },
+      {
+        "date": "2025-06-26",
+        "name": "رأس السنة الهجرية"
+      },
+      {
+        "date": "2025-06-30",
+        "name": "ثورة 30 يونيو"
+      },
+      {
+        "date": "2025-07-23",
+        "name": "ثورة 23 يوليو"
+      },
+      {
+        "date": "2025-09-04",
+        "name": "المولد النبوي الشريف"
+      },
+      {
+        "date": "2025-10-06",
+        "name": "عيد القوات المسلحة (6 أكتوبر)"
+      },
+      {
+        "date": "2026-01-07",
+        "name": "عيد الميلاد المجيد"
+      },
+      {
+        "date": "2026-01-25",
+        "name": "ثورة 25 يناير وعيد الشرطة"
+      },
+      {
+        "date": "2026-03-19",
+        "name": "وقفة عيد الفطر المبارك"
+      },
+      {
+        "date": "2026-03-20",
+        "name": "عيد الفطر المبارك"
+      },
+      {
+        "date": "2026-03-21",
+        "name": "عيد الفطر المبارك"
+      },
+      {
+        "date": "2026-03-22",
+        "name": "عيد الفطر المبارك"
+      },
+      {
+        "date": "2026-04-13",
+        "name": "شم النسيم"
+      },
+      {
+        "date": "2026-04-25",
+        "name": "عيد تحرير سيناء"
+      },
+      {
+        "date": "2026-05-01",
+        "name": "عيد العمال"
+      },
+      {
+        "date": "2026-05-26",
+        "name": "وقفة عرفات"
+      },
+      {
+        "date": "2026-05-27",
+        "name": "عيد الأضحى المبارك"
+      },
+      {
+        "date": "2026-05-28",
+        "name": "عيد الأضحى المبارك"
+      },
+      {
+        "date": "2026-05-29",
+        "name": "عيد الأضحى المبارك"
+      },
+      {
+        "date": "2026-06-16",
+        "name": "رأس السنة الهجرية"
+      },
+      {
+        "date": "2026-06-30",
+        "name": "ثورة 30 يونيو"
+      },
+      {
+        "date": "2026-07-23",
+        "name": "ثورة 23 يوليو"
+      },
+      {
+        "date": "2026-08-25",
+        "name": "المولد النبوي الشريف"
+      },
+      {
+        "date": "2026-10-06",
+        "name": "عيد القوات المسلحة (6 أكتوبر)"
+      },
+      {
+        "date": "2027-01-07",
+        "name": "عيد الميلاد المجيد"
+      },
+      {
+        "date": "2027-01-25",
+        "name": "ثورة 25 يناير وعيد الشرطة"
+      },
+      {
+        "date": "2027-03-09",
+        "name": "عيد الفطر المبارك"
+      },
+      {
+        "date": "2027-03-10",
+        "name": "عيد الفطر المبارك"
+      },
+      {
+        "date": "2027-03-11",
+        "name": "عيد الفطر المبارك"
+      },
+      {
+        "date": "2027-05-01",
+        "name": "عيد العمال"
+      },
+      {
+        "date": "2027-05-16",
+        "name": "عيد الأضحى المبارك"
+      },
+      {
+        "date": "2027-06-30",
+        "name": "ثورة 30 يونيو"
+      },
+      {
+        "date": "2027-07-23",
+        "name": "ثورة 23 يوليو"
+      },
+      {
+        "date": "2027-10-06",
+        "name": "عيد القوات المسلحة (6 أكتوبر)"
+      }
+    ]
   },
   "services": [
     {
+      "order": 1,
       "id": "srv-102",
-      "name": "## استخراج جواز سفر عادي",
+      "name": "# استخراج جواز سفر عادي",
       "govPrice": 1200,
       "officeFee": 200,
       "duration": "8 أيام عمل من تاريخ تقديم المستندات",
       "instructions": "يسلم الجواز الجديد لصاحب الشأن او مقدم الطلب من جوازات طنطا طبقا لتعليمات الامن العام وذلك من الساعه 8ص الى 2ظهرا بالجوازات",
-      "deliveryDaysOffset": 9,
+      "deliveryDaysOffset": 8,
       "notes": "يتم تسليم المستندات بمقر المكتب والفرع المخصص."
     },
     {
+      "order": 2,
       "id": "srv-101",
       "name": "# استخراج جواز سفر مستعجل",
-      "govPrice": 1500,
-      "officeFee": 500,
-      "duration": "3 أيام عمل من تاريخ تقديم الطلب واستيفاء الأوراق",
-      "instructions": "يرجى إحضار أصل وصورة بطاقة الرقم القومي سارية، و3 صور شخصية خلفية بيضاء حديثة 4*6، وأصل جواز السفر القديم إن وجد.",
-      "deliveryDaysOffset": 3,
-      "notes": "يرجى الحضور للاستلام شخصياً أو توكيل رسمي بمقر مكتب مزايا لخدمات الجوازات بطنطا."
+      "govPrice": 1400,
+      "officeFee": 200,
+      "duration": "5 أيام عمل من تاريخ تقديم الطلب واستيفاء الأوراق",
+      "instructions": "يسلم الجواز الجديد لصاحب الشأن او مقدم الطلب من جوازات طنطا طبقا لتعليمات الامن العام وذلك من الساعه 8ص الى 2ظهرا بالجوازات",
+      "deliveryDaysOffset": 5,
+      "notes": "يسلم الجواز الجديد لصاحب الشأن او مقدم الطلب من جوازات طنطا طبقا لتعليمات الامن العام وذلك من الساعه 8ص الى 2ظهرا بالجوازات"
     },
     {
-      "id": "srv-103",
-      "name": "ترجمة مستندات رسمية سريعة",
-      "govPrice": 200,
-      "officeFee": 150,
-      "duration": "يوم عمل واحد",
-      "instructions": "تسليم صورة واضحة من المستند المطلوب ترجمته عبر الواتساب أو تسليمه باليد في المكتب.",
-      "deliveryDaysOffset": 1,
-      "notes": "الترجمة معتمدة لدى جميع السفارات والجهات الحكومية المصرية."
-    },
-    {
+      "order": 3,
       "id": "srv-104",
-      "name": "# تجديد جواز سفر منتهي الصلاحية",
-      "govPrice": 1300,
-      "officeFee": 450,
-      "duration": "4 أيام عمل من استلام الأوراق",
-      "instructions": "إحضار جواز السفر القديم المنتهي، بطاقة رقم قومي سارية، شهادة تجنيد للذكور، وصور شخصية حديثة.",
-      "deliveryDaysOffset": 4,
-      "notes": "سيتم الحفظ والأرشفة الفورية للأوراق في أدراج المكتب بمجرد التجهيز."
+      "name": "## جواز فورى خدمات",
+      "govPrice": 1900,
+      "officeFee": 500,
+      "duration": "يومين عمل من استلام الأوراق",
+      "instructions": "يسلم الجواز الجديد لصاحب الشأن او مقدم الطلب من جوازات العباسية طبقا لتعليمات الامن العام من 3ظهرا الى 8 مساءا بالعباسية",
+      "deliveryDaysOffset": 2,
+      "notes": "يسلم الجواز الجديد لصاحب الشأن او مقدم الطلب من جوازات العباسية طبقا لتعليمات الامن العام من 3ظهرا الى 8 مساءا بالعباسية"
+    },
+    {
+      "order": 4,
+      "id": "srv-1791358966765",
+      "name": "## جواز فورى توكيل",
+      "govPrice": 1900,
+      "officeFee": 700,
+      "duration": "يومين عمل من تاريخ استيفاء جميع الاوراق",
+      "instructions": "يسلم الجواز الجديد لصاحب الشأن او مقدم الطلب من مكتب مزايا",
+      "deliveryDaysOffset": 3,
+      "notes": "يسلم الجواز الجديد لصاحب الشأن او مقدم الطلب من مكتب مزايا"
+    },
+    {
+      "order": 5,
+      "id": "srv-1791361046706",
+      "name": "توثيق خارجية مصرية",
+      "govPrice": 350,
+      "officeFee": 150,
+      "duration": "ثلاث ايام عمل من تاريخ قبول الاوراق",
+      "instructions": "سيتم إعلامك هاتفيا او واتساب بعد الانتهاء",
+      "deliveryDaysOffset": 3,
+      "notes": "سيتم إعلامك هاتفيا او واتساب بعد الانتهاء"
+    },
+    {
+      "order": 6,
+      "id": "srv-1791618987021",
+      "name": "استخراج احوال مدنية",
+      "govPrice": 100,
+      "officeFee": 150,
+      "duration": "مدة الاستخراج تانى يوم عمل",
+      "instructions": "مدة الاستخراج تانى يوم عمل ثم يتم استكمال باقى الخدمات عليها",
+      "deliveryDaysOffset": 1,
+      "notes": "مدة الاستخراج تانى يوم عمل ثم يتم استكمال باقى الخدمات عليها"
+    },
+    {
+      "order": 7,
+      "id": "srv-1791626609097",
+      "name": "شهادة تحركات",
+      "govPrice": 650,
+      "officeFee": 350,
+      "duration": "يومين عمل غير متضمنة عطلات",
+      "instructions": "يرجى التاكد من عدم وجود احكام قضائية تمنيع استخراج شهادة التحركات",
+      "deliveryDaysOffset": 2,
+      "notes": "يرجى التاكد من عدم وجود احكام قضائية تمنيع استخراج شهادة التحركات"
+    },
+    {
+      "order": 8,
+      "id": "srv-1791626671895",
+      "name": "شهادة تحركات مترجمة",
+      "govPrice": 800,
+      "officeFee": 500,
+      "duration": "يومين عمل غير متضمنة عطلات",
+      "instructions": "يرجى التاكد من عدم وجود احكام قضائية تمنيع استخراج شهادة التحركات",
+      "deliveryDaysOffset": 2,
+      "notes": "يرجى التاكد من عدم وجود احكام قضائية تمنيع استخراج شهادة التحركات"
+    },
+    {
+      "order": 9,
+      "id": "srv-1791626706844",
+      "name": "شهادة تحركات للحج",
+      "govPrice": 500,
+      "officeFee": 200,
+      "duration": "يومين عمل غير متضمنة عطلات",
+      "instructions": "يرجى التاكد من عدم وجود احكام قضائية تمنيع استخراج شهادة التحركات",
+      "deliveryDaysOffset": 2,
+      "notes": "يرجى التاكد من عدم وجود احكام قضائية تمنيع استخراج شهادة التحركات"
+    },
+    {
+      "order": 10,
+      "id": "srv-1791626799433",
+      "name": "استخراج شهادة جيش",
+      "govPrice": 1000,
+      "officeFee": 500,
+      "duration": "خلال ثلاث ايام عمل غير متضمنة عطلات",
+      "instructions": "خلال ثلاث ايام عمل غير متضمنة عطلات شامل الانتقالات الى معسكر مبارك بالقاهرة",
+      "deliveryDaysOffset": 3,
+      "notes": "خلال ثلاث ايام عمل غير متضمنة عطلات شامل الانتقالات الى معسكر مبارك بالقاهرة"
+    },
+    {
+      "order": 11,
+      "id": "srv-1791626916180",
+      "name": "سفارة الامارات ورقة",
+      "govPrice": 6000,
+      "officeFee": 400,
+      "duration": "مدة التنفيذ 25 يوم عمل غير متضمن عطلات",
+      "instructions": "لا داعى لاستعجال حيث مدة التنفيذ 25 يوم عمل غير متضمنة عطلات جمعة وسبت",
+      "deliveryDaysOffset": 25,
+      "notes": "لا داعى لاستعجال حيث مدة التنفيذ 25 يوم عمل غير متضمنة عطلات جمعة وسبت"
+    },
+    {
+      "order": 12,
+      "id": "srv-1791626977193",
+      "name": "سفارة الامارات ورقتين",
+      "govPrice": 10500,
+      "officeFee": 500,
+      "duration": "مدة التنفيذ 25 يوم عمل غير متضمن عطلات",
+      "instructions": "لا داعى لاستعجال حيث مدة التنفيذ 25 يوم عمل غير متضمنة عطلات جمعة وسبت",
+      "deliveryDaysOffset": 25,
+      "notes": "لا داعى لاستعجال حيث مدة التنفيذ 25 يوم عمل غير متضمنة عطلات جمعة وسبت"
+    },
+    {
+      "order": 13,
+      "id": "srv-1791627245023",
+      "name": "سفارة الامارات ثلاث ورقت",
+      "govPrice": 15000,
+      "officeFee": 700,
+      "duration": "مدة التنفيذ 25 يوم عمل غير متضمن عطلات",
+      "instructions": "لا داعى لاستعجال حيث مدة التنفيذ 25 يوم عمل غير متضمنة عطلات جمعة وسبت",
+      "deliveryDaysOffset": 25,
+      "notes": "لا داعى لاستعجال حيث مدة التنفيذ 25 يوم عمل غير متضمنة عطلات جمعة وسبت"
+    },
+    {
+      "order": 14,
+      "id": "srv-1791627347579",
+      "name": "سفارة السعودية القاهرة",
+      "govPrice": 1000,
+      "officeFee": 400,
+      "duration": "مدة التنفيذ 20 يوم عمل غير متضمنة عطلات جمعة وسبت",
+      "instructions": "لا داعى لاستعجال حيث مدة التنفيذ 10يوم عمل غير متضمنة عطلات جمعة وسبت",
+      "deliveryDaysOffset": 10,
+      "notes": "لا داعى لاستعجال حيث مدة التنفيذ 10يوم عمل غير متضمنة عطلات جمعة وسبت"
+    },
+    {
+      "order": 15,
+      "id": "srv-1791627409546",
+      "name": "سفارة السعودية الاسكندرية",
+      "govPrice": 1200,
+      "officeFee": 800,
+      "duration": "مدة التنفيذ 5 يوم عمل غير متضمنة عطلات جمعة وسبت",
+      "instructions": "لا داعى لاستعجال حيث مدة التنفيذ 5 يوم عمل غير متضمنة عطلات جمعة وسبت",
+      "deliveryDaysOffset": 5,
+      "notes": "لا داعى لاستعجال حيث مدة التنفيذ 5 يوم عمل غير متضمنة عطلات جمعة وسبت"
+    },
+    {
+      "order": 16,
+      "id": "srv-1791627832958",
+      "name": "مصادقة وقنصلية للتخرج",
+      "govPrice": 10000,
+      "officeFee": 500,
+      "duration": "مدة التتنفيذ خلال 20 يوم عمل للمصادقة والقنصلية",
+      "instructions": "لا داعى لاستعجال حيث مدة التنفيذ 20 يوم عمل غير متضمنة عطلات جمعة وسبت- التكلفة متضمنة 9000ج لمصادقة + 1500ج للقنصلية",
+      "deliveryDaysOffset": 20,
+      "notes": "لا داعى لاستعجال حيث مدة التنفيذ 20 يوم عمل غير متضمنة عطلات جمعة وسبت- التكلفة متضمنة 9000ج لمصادقة + 1500ج للقنصلية"
     }
   ],
   "invoices": [
@@ -116,9 +440,14 @@
       ]
     },
     {
-      "date": "2026-10-06",
+      "invoiceId": 102,
+      "date": "Tue Oct 06 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
       "status": "NEW",
       "employeeName": "شريف (المدير)",
+      "archiveDrawer": "",
+      "totalGov": 1500,
+      "totalOffice": 500,
+      "totalAmount": 2000,
       "customers": [
         {
           "arabicName": "السيد عبد السلام قابيل السعدنى",
@@ -138,16 +467,1617 @@
             }
           ]
         }
-      ],
-      "totalGov": 1500,
+      ]
+    },
+    {
+      "invoiceId": 103,
+      "date": "Wed Oct 07 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "READY",
+      "employeeName": "منار",
+      "archiveDrawer": "1",
+      "totalGov": 1200,
+      "totalOffice": 200,
+      "totalAmount": 1400,
+      "customers": [
+        {
+          "arabicName": "سيده رجب محمد احمد",
+          "englishName": "SAYEDA RAGAB MOHAMED AHMED",
+          "englishNameOption": "dictionary",
+          "nationalId": "27109261400786",
+          "birthDate": "26-09-1971",
+          "phone": "01016160919",
+          "profession": "بدون عمل",
+          "services": [
+            {
+              "serviceId": "## استخراج جواز سفر عادي",
+              "quantity": 1,
+              "price": 1400,
+              "deliveryDate": "2026-10-19"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 104,
+      "date": "Wed Oct 07 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "READY",
+      "employeeName": "منار",
+      "archiveDrawer": "1",
+      "totalGov": 1200,
+      "totalOffice": 200,
+      "totalAmount": 1400,
+      "customers": [
+        {
+          "arabicName": "نوران جمال امين عامر",
+          "englishName": "NORAN GAMAL AMIN AMER",
+          "englishNameOption": "dictionary",
+          "nationalId": "29707081600282",
+          "birthDate": "08-07-1997",
+          "phone": "01122191642",
+          "profession": "بكالوريوس ادارة الاعمال",
+          "services": [
+            {
+              "serviceId": "## استخراج جواز سفر عادي",
+              "quantity": 1,
+              "price": 1400,
+              "deliveryDate": "2026-10-19"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 105,
+      "date": "Wed Oct 07 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "READY",
+      "employeeName": "منار",
+      "archiveDrawer": "1",
+      "totalGov": 1200,
+      "totalOffice": 200,
+      "totalAmount": 1400,
+      "customers": [
+        {
+          "arabicName": "احمد ايمن حافظ مدكور",
+          "englishName": "AHMED AYMAN HAFEZ MADKOUR",
+          "englishNameOption": "dictionary",
+          "nationalId": "30107051602831",
+          "birthDate": "05-07-2001",
+          "phone": "01027319367",
+          "profession": "بكالوريوس تجارة",
+          "services": [
+            {
+              "serviceId": "## استخراج جواز سفر عادي",
+              "quantity": 1,
+              "price": 1400,
+              "deliveryDate": "2026-10-19"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 106,
+      "date": "Wed Oct 07 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "NEW",
+      "employeeName": "رندا",
+      "archiveDrawer": "",
+      "totalGov": 1200,
+      "totalOffice": 200,
+      "totalAmount": 1400,
+      "customers": [
+        {
+          "arabicName": "يوسف محمد عطيه محمود محمد الموزي",
+          "englishName": "YOUSSEF MOHAMED ATEIA MAHMOUD MOHAMED ELMOZY",
+          "englishNameOption": "dictionary",
+          "nationalId": "32606171800452",
+          "birthDate": "17-06-2026",
+          "phone": "01007040847",
+          "profession": "طفل",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر عادي",
+              "quantity": 1,
+              "price": 1400,
+              "deliveryDate": "2026-10-18"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 107,
+      "date": "Wed Oct 07 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "READY",
+      "employeeName": "رندا",
+      "archiveDrawer": "1",
+      "totalGov": 1200,
+      "totalOffice": 200,
+      "totalAmount": 1400,
+      "customers": [
+        {
+          "arabicName": "يوسف محمد عطيه محمود محمد الموزي",
+          "englishName": "YOUSSEF MOHAMED ATEIA MAHMOUD MOHAMED ELMOZY",
+          "englishNameOption": "dictionary",
+          "nationalId": "32606171800452",
+          "birthDate": "17-06-2026",
+          "phone": "01007040847",
+          "profession": "طفل",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر عادي",
+              "quantity": 1,
+              "price": 1400,
+              "deliveryDate": "2026-10-18"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 108,
+      "date": "Wed Oct 07 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "READY",
+      "employeeName": "منار",
+      "archiveDrawer": "1",
+      "totalGov": 1200,
+      "totalOffice": 200,
+      "totalAmount": 1400,
+      "customers": [
+        {
+          "arabicName": "احمد عبدالله محمد رفاعى عبدالغفار",
+          "englishName": "AHMED ABDALLAH MOHAMED REFAEY ABDELGHAFAR",
+          "englishNameOption": "dictionary",
+          "nationalId": "30403191601116",
+          "birthDate": "19-03-2004",
+          "phone": "01030336567",
+          "profession": "بكالوريوس تجارة محاسبة",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر عادي",
+              "quantity": 1,
+              "price": 1400,
+              "deliveryDate": "2026-10-18"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 109,
+      "date": "Wed Oct 07 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "READY",
+      "employeeName": "رندا",
+      "archiveDrawer": "1",
+      "totalGov": 1200,
+      "totalOffice": 200,
+      "totalAmount": 1400,
+      "customers": [
+        {
+          "arabicName": "شادي فتحي سعد عوض الخولي",
+          "englishName": "SHADY FAHTY SAAD AWAD ELKHOULY",
+          "englishNameOption": "dictionary",
+          "nationalId": "29709041701551",
+          "birthDate": "04-09-1997",
+          "phone": "01277846546",
+          "profession": "ممارس علاج طبيعي بوزاره الصحه",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر عادي",
+              "quantity": 1,
+              "price": 1400,
+              "deliveryDate": "2026-10-18"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 110,
+      "date": "Wed Oct 07 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "NEW",
+      "employeeName": "شريف (المدير)",
+      "archiveDrawer": "",
+      "totalGov": 350,
+      "totalOffice": 150,
+      "totalAmount": 500,
+      "customers": [
+        {
+          "arabicName": "فؤاد حاتم امين السيد عمار",
+          "englishName": "",
+          "englishNameOption": "dictionary",
+          "nationalId": "",
+          "birthDate": "",
+          "phone": "01157508574",
+          "profession": "",
+          "services": [
+            {
+              "serviceId": "توثيق خارجية مصرية",
+              "quantity": 1,
+              "price": 500,
+              "deliveryDate": "2026-10-13",
+              "fineName": "",
+              "fineAmount": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 111,
+      "date": "Wed Oct 07 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "READY",
+      "employeeName": "شريف (المدير)",
+      "archiveDrawer": "5",
+      "totalGov": 1200,
+      "totalOffice": 200,
+      "totalAmount": 1400,
+      "customers": [
+        {
+          "arabicName": "بتول محمد احمد المتولى ابو اليزيد عماره",
+          "englishName": "نفس ترجمة الجواز السابق",
+          "englishNameOption": "previous",
+          "nationalId": "32607201600263",
+          "birthDate": "20-07-2026",
+          "phone": "01016506182",
+          "profession": "طفله",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر عادي",
+              "quantity": 1,
+              "price": 1400,
+              "deliveryDate": "2026-10-18"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 112,
+      "date": "Wed Oct 07 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "NEW",
+      "employeeName": "منار",
+      "archiveDrawer": "",
+      "totalGov": 2400,
+      "totalOffice": 400,
+      "totalAmount": 2800,
+      "customers": [
+        {
+          "arabicName": "صباح محمود محمد احمد قصب",
+          "englishName": "SABAH MAHMOUD MOHAMED AHMED KASAB",
+          "englishNameOption": "dictionary",
+          "nationalId": "32510121600404",
+          "birthDate": "12-10-2025",
+          "phone": "01553821924",
+          "profession": "طفلة",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر عادي",
+              "quantity": 1,
+              "price": 1400,
+              "deliveryDate": "2026-10-18"
+            }
+          ]
+        },
+        {
+          "arabicName": "نورهان كمال مصطفى ابوعوف",
+          "englishName": "NORHAN KAMAL MOSTAFA ABOUOUF",
+          "englishNameOption": "dictionary",
+          "nationalId": "30411031600264",
+          "birthDate": "03-11-2004",
+          "phone": "01553821924",
+          "profession": "ليسانس دراسات انسانية",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر عادي",
+              "quantity": 1,
+              "price": 1400,
+              "deliveryDate": "2026-10-18"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 113,
+      "date": "Wed Oct 07 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "NEW",
+      "employeeName": "رندا",
+      "archiveDrawer": "",
+      "totalGov": 2900,
       "totalOffice": 500,
-      "totalAmount": 2000,
-      "invoiceId": 102,
-      "notificationSent": false
+      "totalAmount": 3400,
+      "customers": [
+        {
+          "arabicName": "كريم محمد سامي محمد الزغبلاوي",
+          "englishName": "نفس ترجمة الجواز السابق",
+          "englishNameOption": "previous",
+          "nationalId": "30709151601018",
+          "birthDate": "15-09-2007",
+          "phone": "01043906170",
+          "profession": "بدون عمل",
+          "services": [
+            {
+              "serviceId": "## جواز فورى خدمات",
+              "quantity": 1,
+              "price": 3400,
+              "deliveryDate": "2026-10-11",
+              "fineName": "عدم وجود مؤهل و غرامه بدل تالف ",
+              "fineAmount": 1000
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 114,
+      "date": "Wed Oct 07 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "NEW",
+      "employeeName": "منار",
+      "archiveDrawer": "",
+      "totalGov": 1900,
+      "totalOffice": 700,
+      "totalAmount": 2600,
+      "customers": [
+        {
+          "arabicName": "سهير جوده محمد جوده",
+          "englishName": "SOHIR GOUDA MOHAMED GOUDA",
+          "englishNameOption": "dictionary",
+          "nationalId": "26802041500848",
+          "birthDate": "04-02-1968",
+          "phone": "01123968902",
+          "profession": "معلم اول ا بالتربية والتعليم",
+          "services": [
+            {
+              "serviceId": "## جواز فورى توكيل",
+              "quantity": 1,
+              "price": 2600,
+              "deliveryDate": "2026-10-12"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 115,
+      "date": "Wed Oct 07 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "READY",
+      "employeeName": "رندا",
+      "archiveDrawer": "1",
+      "totalGov": 1200,
+      "totalOffice": 200,
+      "totalAmount": 1400,
+      "customers": [
+        {
+          "arabicName": "فوزيه محمد بدوي حميد",
+          "englishName": "FAWZIA MOHAMED BADAWY HEMED",
+          "englishNameOption": "dictionary",
+          "nationalId": "24908021600809",
+          "birthDate": "02-08-1949",
+          "phone": "01210973208",
+          "profession": "لا تعمل",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر عادي",
+              "quantity": 1,
+              "price": 1400,
+              "deliveryDate": "2026-10-18"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 116,
+      "date": "Wed Oct 07 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "READY",
+      "employeeName": "رندا",
+      "archiveDrawer": "1",
+      "totalGov": 1200,
+      "totalOffice": 200,
+      "totalAmount": 1400,
+      "customers": [
+        {
+          "arabicName": "رجب ابراهيم اسماعيل عبدالحافظ",
+          "englishName": "نفس ترجمة الجواز السابق",
+          "englishNameOption": "previous",
+          "nationalId": "27308011602718",
+          "birthDate": "01-08-1973",
+          "phone": "01062707032",
+          "profession": "صاحب مصنع زبيب",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر عادي",
+              "quantity": 1,
+              "price": 1400,
+              "deliveryDate": "2026-10-18"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 117,
+      "date": "Wed Oct 07 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "READY",
+      "employeeName": "منار",
+      "archiveDrawer": "1",
+      "totalGov": 1200,
+      "totalOffice": 200,
+      "totalAmount": 1400,
+      "customers": [
+        {
+          "arabicName": "محمود طارق حماده صالح رخا",
+          "englishName": "MAHMOUD TAREK HAMADA SALEH RAKHA",
+          "englishNameOption": "dictionary",
+          "nationalId": "30403191600098",
+          "birthDate": "19-03-2004",
+          "phone": "01019113965",
+          "profession": "ليسانس اداب مساحةوخرائط",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر عادي",
+              "quantity": 1,
+              "price": 1400,
+              "deliveryDate": "2026-10-18"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 118,
+      "date": "Wed Oct 07 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "READY",
+      "employeeName": "رندا",
+      "archiveDrawer": "1",
+      "totalGov": 1200,
+      "totalOffice": 200,
+      "totalAmount": 1400,
+      "customers": [
+        {
+          "arabicName": "نرمين رشدي الليثي علي سعد",
+          "englishName": "NERMEN ROSHDY ELLETHY ALI SAAD",
+          "englishNameOption": "dictionary",
+          "nationalId": "27604141600065",
+          "birthDate": "14-04-1976",
+          "phone": "01001474888",
+          "profession": "بكالوريوس تجاره",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر عادي",
+              "quantity": 1,
+              "price": 1400,
+              "deliveryDate": "2026-10-18"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 119,
+      "date": "Wed Oct 07 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "READY",
+      "employeeName": "رندا",
+      "archiveDrawer": "1",
+      "totalGov": 1400,
+      "totalOffice": 200,
+      "totalAmount": 1600,
+      "customers": [
+        {
+          "arabicName": "مرفت السيد علي المزين",
+          "englishName": "نفس ترجمة الجواز السابق",
+          "englishNameOption": "previous",
+          "nationalId": "26709041600249",
+          "birthDate": "04-09-1967",
+          "phone": "01009059097",
+          "profession": "دبلوم المعهد الفني التجاري",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر مستعجل",
+              "quantity": 1,
+              "price": 1600,
+              "deliveryDate": "2026-10-14"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 120,
+      "date": "Sat Oct 10 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "READY",
+      "employeeName": "رندا",
+      "archiveDrawer": "5",
+      "totalGov": 1200,
+      "totalOffice": 200,
+      "totalAmount": 1400,
+      "customers": [
+        {
+          "arabicName": "احمد محمد محمد احمد امين",
+          "englishName": "AHMED MOHAMED MOHAMED AHMED AMIN",
+          "englishNameOption": "dictionary",
+          "nationalId": "30105131600896",
+          "birthDate": "13-05-2001",
+          "phone": "01287414542",
+          "profession": "بكالوريوس في علوم التمريض",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر عادي",
+              "quantity": 1,
+              "price": 1400,
+              "deliveryDate": "2026-10-19"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 121,
+      "date": "Sat Oct 10 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "READY",
+      "employeeName": "رندا",
+      "archiveDrawer": "5",
+      "totalGov": 1200,
+      "totalOffice": 200,
+      "totalAmount": 1400,
+      "customers": [
+        {
+          "arabicName": "محمود محمد محمود البلتاجي",
+          "englishName": "نفس ترجمة الجواز السابق",
+          "englishNameOption": "previous",
+          "nationalId": "26107281601358",
+          "birthDate": "28-07-1961",
+          "phone": "01142011472",
+          "profession": "بالمعاش",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر عادي",
+              "quantity": 1,
+              "price": 1400,
+              "deliveryDate": "2026-10-19"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 122,
+      "date": "Sat Oct 10 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "NEW",
+      "employeeName": "شريف (المدير)",
+      "archiveDrawer": "",
+      "totalGov": 900,
+      "totalOffice": 600,
+      "totalAmount": 1500,
+      "customers": [
+        {
+          "arabicName": "ميلاد -على رجب و قسيمة - رجب عبد الرحمن",
+          "englishName": "",
+          "englishNameOption": "dictionary",
+          "nationalId": "",
+          "birthDate": "",
+          "phone": "966537048784",
+          "profession": "",
+          "services": [
+            {
+              "serviceId": "استخراج احوال مدنية",
+              "quantity": 2,
+              "price": 500,
+              "deliveryDate": "2026-10-11",
+              "fineName": "",
+              "fineAmount": 0
+            },
+            {
+              "serviceId": "توثيق خارجية مصرية",
+              "quantity": 2,
+              "price": 1000,
+              "deliveryDate": "2026-10-14",
+              "fineName": "",
+              "fineAmount": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 123,
+      "date": "Sat Oct 10 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "DELIVERED",
+      "employeeName": "رندا",
+      "archiveDrawer": "5",
+      "totalGov": 4800,
+      "totalOffice": 800,
+      "totalAmount": 5600,
+      "customers": [
+        {
+          "arabicName": "ياسين احمد سمير محمود حسنين  اسماعيل",
+          "englishName": "نفس ترجمة الجواز السابق",
+          "englishNameOption": "previous",
+          "nationalId": "31004298801454",
+          "birthDate": "29-04-2010",
+          "phone": "01556111310",
+          "profession": "طالب",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر عادي",
+              "quantity": 1,
+              "price": 1400,
+              "deliveryDate": "2026-10-19"
+            }
+          ]
+        },
+        {
+          "arabicName": "يوسف احمد سمير محمود حسنين",
+          "englishName": "نفس ترجمة الجواز السابق",
+          "englishNameOption": "previous",
+          "nationalId": "30804071601737",
+          "birthDate": "07-04-2008",
+          "phone": "01556111310",
+          "profession": "طالب",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر عادي",
+              "quantity": 1,
+              "price": 1400,
+              "deliveryDate": "2026-10-19"
+            }
+          ]
+        },
+        {
+          "arabicName": "ولاء فريد محمد علي سيد احمد",
+          "englishName": "نفس ترجمة الجواز السابق",
+          "englishNameOption": "previous",
+          "nationalId": "28504081600141",
+          "birthDate": "08-04-1985",
+          "phone": "01556111310",
+          "profession": "ليسانس اداب",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر عادي",
+              "quantity": 1,
+              "price": 1400,
+              "deliveryDate": "2026-10-19"
+            }
+          ]
+        },
+        {
+          "arabicName": "تاليا احمد سمير محمود حسنين اسماعيل",
+          "englishName": "نفس ترجمة الجواز السابق",
+          "englishNameOption": "previous",
+          "nationalId": "31707058800346",
+          "birthDate": "05-07-2017",
+          "phone": "01556111310",
+          "profession": "طالبه",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر عادي",
+              "quantity": 1,
+              "price": 1400,
+              "deliveryDate": "2026-10-19"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 124,
+      "date": "Sat Oct 10 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "NEW",
+      "employeeName": "منار",
+      "archiveDrawer": "",
+      "totalGov": 1650,
+      "totalOffice": 200,
+      "totalAmount": 1850,
+      "customers": [
+        {
+          "arabicName": "عبدالجواد احمد عبدالجواد الجندى",
+          "englishName": "ABDALGAWAAD AHMED ABDALGAWAAD ALGINDI",
+          "englishNameOption": "dictionary",
+          "nationalId": "27508171600192",
+          "birthDate": "17-08-1975",
+          "phone": "01226474137",
+          "profession": "عامل عادى",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر عادي",
+              "quantity": 1,
+              "price": 1850,
+              "deliveryDate": "2026-10-19",
+              "fineName": "عدم وجود مؤهل",
+              "fineAmount": 450
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 125,
+      "date": "Sat Oct 10 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "NEW",
+      "employeeName": "رندا",
+      "archiveDrawer": "",
+      "totalGov": 1400,
+      "totalOffice": 200,
+      "totalAmount": 1600,
+      "customers": [
+        {
+          "arabicName": "احمد محمد القطب الزغبي",
+          "englishName": "AHMED MOHAMED ELKOTB ELZOGHBY",
+          "englishNameOption": "dictionary",
+          "nationalId": "30305011608914",
+          "birthDate": "01-05-2003",
+          "phone": "01025911713",
+          "profession": "عامل عادي",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر مستعجل",
+              "quantity": 1,
+              "price": 1600,
+              "deliveryDate": "2026-10-15"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 126,
+      "date": "Sat Oct 10 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "NEW",
+      "employeeName": "منار",
+      "archiveDrawer": "",
+      "totalGov": 2400,
+      "totalOffice": 400,
+      "totalAmount": 2800,
+      "customers": [
+        {
+          "arabicName": "زنوبه عبدالقادر طه طعيمه",
+          "englishName": "نفس ترجمة الجواز السابق",
+          "englishNameOption": "previous",
+          "nationalId": "25202151601983",
+          "birthDate": "15-02-1952",
+          "phone": "01066883691",
+          "profession": "ربة منزل",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر عادي",
+              "quantity": 1,
+              "price": 1400,
+              "deliveryDate": "2026-10-19"
+            }
+          ]
+        },
+        {
+          "arabicName": "عبدالواحد شلبى موسى شلبي",
+          "englishName": "نفس ترجمة الجواز السابق",
+          "englishNameOption": "previous",
+          "nationalId": "24406021601192",
+          "birthDate": "02-06-1944",
+          "phone": "01066883691",
+          "profession": "مزارع",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر عادي",
+              "quantity": 1,
+              "price": 1400,
+              "deliveryDate": "2026-10-19"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 127,
+      "date": "Sat Oct 10 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "NEW",
+      "employeeName": "رندا",
+      "archiveDrawer": "",
+      "totalGov": 1200,
+      "totalOffice": 200,
+      "totalAmount": 1400,
+      "customers": [
+        {
+          "arabicName": "علاء علي سيداحمد زياده",
+          "englishName": "نفس ترجمة الجواز السابق",
+          "englishNameOption": "previous",
+          "nationalId": "26608081601352",
+          "birthDate": "08-08-1966",
+          "phone": "01065074202",
+          "profession": "بالمعاش",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر عادي",
+              "quantity": 1,
+              "price": 1400,
+              "deliveryDate": "2026-10-19"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 128,
+      "date": "Sat Oct 10 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "READY",
+      "employeeName": "منار",
+      "archiveDrawer": "5",
+      "totalGov": 2400,
+      "totalOffice": 400,
+      "totalAmount": 2800,
+      "customers": [
+        {
+          "arabicName": "ايناس سيف احمد سيف",
+          "englishName": "نفس ترجمة الجواز السابق",
+          "englishNameOption": "previous",
+          "nationalId": "27301011600303",
+          "birthDate": "01-01-1973",
+          "phone": "01068506789",
+          "profession": "مدير عام بمديرية الطب البيطرى",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر عادي",
+              "quantity": 1,
+              "price": 1400,
+              "deliveryDate": "2026-10-19"
+            }
+          ]
+        },
+        {
+          "arabicName": "ادهم ابراهيم نصرالدين محمد السعدى",
+          "englishName": "نفس ترجمة الجواز السابق",
+          "englishNameOption": "previous",
+          "nationalId": "30401241602116",
+          "birthDate": "24-01-2004",
+          "phone": "01068506789",
+          "profession": "بكالوريوس حاسبات ومعلومات",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر عادي",
+              "quantity": 1,
+              "price": 1400,
+              "deliveryDate": "2026-10-19"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 129,
+      "date": "Sat Oct 10 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "NEW",
+      "employeeName": "منار",
+      "archiveDrawer": "",
+      "totalGov": 1200,
+      "totalOffice": 200,
+      "totalAmount": 1400,
+      "customers": [
+        {
+          "arabicName": "حسين فتحى محمد محمود المحروق",
+          "englishName": "نفس ترجمة الجواز السابق",
+          "englishNameOption": "previous",
+          "nationalId": "25609291601455",
+          "birthDate": "29-09-1956",
+          "phone": "01223317576",
+          "profession": "بالمعاش",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر عادي",
+              "quantity": 1,
+              "price": 1400,
+              "deliveryDate": "2026-10-19"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 130,
+      "date": "Sat Oct 10 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "READY",
+      "employeeName": "منار",
+      "archiveDrawer": "5",
+      "totalGov": 1200,
+      "totalOffice": 200,
+      "totalAmount": 1400,
+      "customers": [
+        {
+          "arabicName": "محمد مصطفى محمد درويش",
+          "englishName": "MOHAMED MOSTAFA MOHAMED DARWISH",
+          "englishNameOption": "dictionary",
+          "nationalId": "30004221600797",
+          "birthDate": "22-04-2000",
+          "phone": "01224919440",
+          "profession": "بكالوريوس صيدلة",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر عادي",
+              "quantity": 1,
+              "price": 1400,
+              "deliveryDate": "2026-10-19"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 131,
+      "date": "Sat Oct 10 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "NEW",
+      "employeeName": "منار",
+      "archiveDrawer": "",
+      "totalGov": 1200,
+      "totalOffice": 200,
+      "totalAmount": 1400,
+      "customers": [
+        {
+          "arabicName": "يوسف عبدالمهيمن يوسف السباعى",
+          "englishName": "YOUSSEF ABDELMOHYMEN YOUSSEF ELSIBAI",
+          "englishNameOption": "dictionary",
+          "nationalId": "30403261601534",
+          "birthDate": "26-03-2004",
+          "phone": "01022008863",
+          "profession": "بكالوريوس علوم الحاسب",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر عادي",
+              "quantity": 1,
+              "price": 1400,
+              "deliveryDate": "2026-10-19"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 132,
+      "date": "Sat Oct 10 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "NEW",
+      "employeeName": "منار",
+      "archiveDrawer": "",
+      "totalGov": 1400,
+      "totalOffice": 200,
+      "totalAmount": 1600,
+      "customers": [
+        {
+          "arabicName": "بسمله احمد صديق محمد حسين",
+          "englishName": "BASMLA AHMED SEDEK MOHAMED HUSSEIN",
+          "englishNameOption": "dictionary",
+          "nationalId": "30501011613229",
+          "birthDate": "01-01-2005",
+          "phone": "01034007450",
+          "profession": "طالبة",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر مستعجل",
+              "quantity": 1,
+              "price": 1600,
+              "deliveryDate": "2026-10-15"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 133,
+      "date": "Sat Oct 10 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "READY",
+      "employeeName": "رندا",
+      "archiveDrawer": "5",
+      "totalGov": 1400,
+      "totalOffice": 200,
+      "totalAmount": 1600,
+      "customers": [
+        {
+          "arabicName": "صفاء  السعيد محمد الجينجيهي",
+          "englishName": "SAFAA ELSAID MOHAMED ELGENGEIHI",
+          "englishNameOption": "dictionary",
+          "nationalId": "26808311600244",
+          "birthDate": "31-08-1968",
+          "phone": "01006806513",
+          "profession": "معاون تنفيذ بمحكمه غرب طنطا",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر مستعجل",
+              "quantity": 1,
+              "price": 1600,
+              "deliveryDate": "2026-10-15"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 134,
+      "date": "Sat Oct 10 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "READY",
+      "employeeName": "رندا",
+      "archiveDrawer": "5",
+      "totalGov": 1400,
+      "totalOffice": 200,
+      "totalAmount": 1600,
+      "customers": [
+        {
+          "arabicName": "زينب مصطفي حسين ابراهيم",
+          "englishName": "ZEINAB MOSTAFA HUSSEIN IBRAHEM",
+          "englishNameOption": "dictionary",
+          "nationalId": "27406161600146",
+          "birthDate": "16-06-1974",
+          "phone": "01012147734",
+          "profession": "دبلوم تجاره",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر مستعجل",
+              "quantity": 1,
+              "price": 1600,
+              "deliveryDate": "2026-10-15"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 135,
+      "date": "Sat Oct 10 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "READY",
+      "employeeName": "منار",
+      "archiveDrawer": "5",
+      "totalGov": 1400,
+      "totalOffice": 200,
+      "totalAmount": 1600,
+      "customers": [
+        {
+          "arabicName": "عمر مصطفي مدحت مصطفي كمال محمود المنصوري",
+          "englishName": "OMAR MOSTAFA MEDHAT MOSTAFA KAMAL MAHMOUD ELMANSOURY",
+          "englishNameOption": "dictionary",
+          "nationalId": "32609071600498",
+          "birthDate": "07-09-2026",
+          "phone": "01280778310",
+          "profession": "طفل",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر مستعجل",
+              "quantity": 1,
+              "price": 1600,
+              "deliveryDate": "2026-10-15"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 136,
+      "date": "Sat Oct 10 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "READY",
+      "employeeName": "منار",
+      "archiveDrawer": "5",
+      "totalGov": 1200,
+      "totalOffice": 200,
+      "totalAmount": 1400,
+      "customers": [
+        {
+          "arabicName": "اسماء ابراهيم محمد علي الشيخ",
+          "englishName": "نفس ترجمة الجواز السابق",
+          "englishNameOption": "previous",
+          "nationalId": "29407151602527",
+          "birthDate": "15-07-1994",
+          "phone": "01025909583",
+          "profession": "بكالوريوس علوم تعاونيه زراعيه",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر عادي",
+              "quantity": 1,
+              "price": 1400,
+              "deliveryDate": "2026-10-19"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 137,
+      "date": "Sat Oct 10 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "READY",
+      "employeeName": "رندا",
+      "archiveDrawer": "5",
+      "totalGov": 4200,
+      "totalOffice": 600,
+      "totalAmount": 4800,
+      "customers": [
+        {
+          "arabicName": "زهور احمد السيد خليل",
+          "englishName": "ZOHOUR AHMED ELSAYED KHALIL",
+          "englishNameOption": "dictionary",
+          "nationalId": "28007211602147",
+          "birthDate": "21-07-1980",
+          "phone": "01149553127",
+          "profession": "ليسانس اداب",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر مستعجل",
+              "quantity": 1,
+              "price": 1600,
+              "deliveryDate": "2026-10-15"
+            }
+          ]
+        },
+        {
+          "arabicName": "عزيزة السيد خليل رامية",
+          "englishName": "AZIZA ELSAYED KHALIL RAMIA",
+          "englishNameOption": "dictionary",
+          "nationalId": "25205121601228",
+          "birthDate": "12-05-1952",
+          "phone": "01149553127",
+          "profession": "لا تعمل",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر مستعجل",
+              "quantity": 1,
+              "price": 1600,
+              "deliveryDate": "2026-10-15"
+            }
+          ]
+        },
+        {
+          "arabicName": "حبيبة حسين عبد الواحد حسين ابراهيم",
+          "englishName": "HABIBA HUSSEIN ABD ELWAHED HUSSEIN IBRAHEM",
+          "englishNameOption": "dictionary",
+          "nationalId": "30405091600581",
+          "birthDate": "09-05-2004",
+          "phone": "01149553127",
+          "profession": "طالبة",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر مستعجل",
+              "quantity": 1,
+              "price": 1600,
+              "deliveryDate": "2026-10-15"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 138,
+      "date": "Sat Oct 10 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "NEW",
+      "employeeName": "شريف (المدير)",
+      "archiveDrawer": "",
+      "totalGov": 4300,
+      "totalOffice": 1100,
+      "totalAmount": 5400,
+      "customers": [
+        {
+          "arabicName": "سمر جمال ابراهيم الرفاعى",
+          "englishName": "SAMAR GAMAL IBRAHEM ELREFAIE",
+          "englishNameOption": "dictionary",
+          "nationalId": "29109041600463",
+          "birthDate": "04-09-1991",
+          "phone": "01551544991",
+          "profession": "مصرفى عالى بنك مصر",
+          "services": [
+            {
+              "serviceId": "## جواز فورى توكيل",
+              "quantity": 1,
+              "price": 2600,
+              "deliveryDate": "2026-10-13"
+            }
+          ]
+        },
+        {
+          "arabicName": "السيدة الشبكى محمد متولى",
+          "englishName": "ELSAYDA ELSHOBAKI MOHAMED METWALLY",
+          "englishNameOption": "dictionary",
+          "nationalId": "26305101600282",
+          "birthDate": "10-05-1963",
+          "phone": "01093713780",
+          "profession": "بالمعاش",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر عادي",
+              "quantity": 1,
+              "price": 1400,
+              "deliveryDate": "2026-10-19"
+            }
+          ]
+        },
+        {
+          "arabicName": "سناء الشبكى محمد متولى",
+          "englishName": "SANAA ELSHOBAKI MOHAMED METWALLY",
+          "englishNameOption": "dictionary",
+          "nationalId": "26102071601426",
+          "birthDate": "07-02-1961",
+          "phone": "01558318335",
+          "profession": "بالمعاش",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر عادي",
+              "quantity": 1,
+              "price": 1400,
+              "deliveryDate": "2026-10-19"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "invoiceId": 139,
+      "date": "Sun Oct 11 2026 03:00:00 GMT+0300 (Eastern European Summer Time)",
+      "status": "NEW",
+      "employeeName": "منار",
+      "archiveDrawer": "",
+      "totalGov": 1400,
+      "totalOffice": 200,
+      "totalAmount": 1600,
+      "customers": [
+        {
+          "arabicName": "ناهد صلاح عبدالرازق عمر",
+          "englishName": "NAHED SALAH ABDELRAZEK OMAR",
+          "englishNameOption": "dictionary",
+          "nationalId": "27210211600086",
+          "birthDate": "21-10-1972",
+          "phone": "01015703062",
+          "profession": "بكالوريوس خدمة اجتماعية",
+          "services": [
+            {
+              "serviceId": "# استخراج جواز سفر مستعجل",
+              "quantity": 1,
+              "price": 1600,
+              "deliveryDate": "2026-10-17"
+            }
+          ]
+        }
+      ]
     }
   ],
   "collectionClosings": [],
-  "dictionary": [],
+  "dictionary": [
+    {
+      "arabic": "سيده",
+      "english": "SAYEDA"
+    },
+    {
+      "arabic": "رجب",
+      "english": "RAGAB"
+    },
+    {
+      "arabic": "محمد",
+      "english": "MOHAMED"
+    },
+    {
+      "arabic": "احمد",
+      "english": "AHMED"
+    },
+    {
+      "arabic": "نوران",
+      "english": "NORAN"
+    },
+    {
+      "arabic": "جمال",
+      "english": "GAMAL"
+    },
+    {
+      "arabic": "امين",
+      "english": "AMIN"
+    },
+    {
+      "arabic": "عامر",
+      "english": "AMER"
+    },
+    {
+      "arabic": "ايمن",
+      "english": "AYMAN"
+    },
+    {
+      "arabic": "حافظ",
+      "english": "HAFEZ"
+    },
+    {
+      "arabic": "مدكور",
+      "english": "MADKOUR"
+    },
+    {
+      "arabic": "يوسف",
+      "english": "YOUSSEF"
+    },
+    {
+      "arabic": "عطيه",
+      "english": "ATEIA"
+    },
+    {
+      "arabic": "محمود",
+      "english": "MAHMOUD"
+    },
+    {
+      "arabic": "الموزي",
+      "english": "ELMOZY"
+    },
+    {
+      "arabic": "السيد",
+      "english": "ELSAYED"
+    },
+    {
+      "arabic": "على",
+      "english": "ALI"
+    },
+    {
+      "arabic": "عبدالله",
+      "english": "ABDALLAH"
+    },
+    {
+      "arabic": "رفاعى",
+      "english": "REFAEY"
+    },
+    {
+      "arabic": "عبدالغفار",
+      "english": "ABDELGHAFAR"
+    },
+    {
+      "arabic": "شادي",
+      "english": "SHADY"
+    },
+    {
+      "arabic": "فتحي",
+      "english": "FAHTY"
+    },
+    {
+      "arabic": "سعد",
+      "english": "SAAD"
+    },
+    {
+      "arabic": "عوض",
+      "english": "AWAD"
+    },
+    {
+      "arabic": "الخولي",
+      "english": "ELKHOULY"
+    },
+    {
+      "arabic": "نورهان",
+      "english": "NORHAN"
+    },
+    {
+      "arabic": "ابوعوف",
+      "english": "ABOUOUF"
+    },
+    {
+      "arabic": "كمال",
+      "english": "KAMAL"
+    },
+    {
+      "arabic": "بتول",
+      "english": "BATOOL"
+    },
+    {
+      "arabic": "صباح",
+      "english": "SABAH"
+    },
+    {
+      "arabic": "قصب",
+      "english": "KASAB"
+    },
+    {
+      "arabic": "مصطفى",
+      "english": "MOSTAFA"
+    },
+    {
+      "arabic": "سهير",
+      "english": "SOHIR"
+    },
+    {
+      "arabic": "جوده",
+      "english": "GOUDA"
+    },
+    {
+      "arabic": "فوزيه",
+      "english": "FAWZIA"
+    },
+    {
+      "arabic": "بدوي",
+      "english": "BADAWY"
+    },
+    {
+      "arabic": "حميد",
+      "english": "HEMED"
+    },
+    {
+      "arabic": "طارق",
+      "english": "TAREK"
+    },
+    {
+      "arabic": "حماده",
+      "english": "HAMADA"
+    },
+    {
+      "arabic": "صالح",
+      "english": "SALEH"
+    },
+    {
+      "arabic": "رخا",
+      "english": "RAKHA"
+    },
+    {
+      "arabic": "نرمين",
+      "english": "NERMEN"
+    },
+    {
+      "arabic": "رشدي",
+      "english": "ROSHDY"
+    },
+    {
+      "arabic": "الليثي",
+      "english": "ELLETHY"
+    },
+    {
+      "arabic": "علي",
+      "english": "ALI"
+    },
+    {
+      "arabic": "عبدالجواد",
+      "english": "ABDALGAWAAD"
+    },
+    {
+      "arabic": "الجندى",
+      "english": "ALGINDI"
+    },
+    {
+      "arabic": "القطب",
+      "english": "ELKOTB"
+    },
+    {
+      "arabic": "الزغبي",
+      "english": "ELZOGHBY"
+    },
+    {
+      "arabic": "درويش",
+      "english": "DARWISH"
+    },
+    {
+      "arabic": "عبدالمهيمن",
+      "english": "ABDELMOHYMEN"
+    },
+    {
+      "arabic": "السباعى",
+      "english": "ELSIBAI"
+    },
+    {
+      "arabic": "بسمله",
+      "english": "BASMLA"
+    },
+    {
+      "arabic": "صديق",
+      "english": "SEDEK"
+    },
+    {
+      "arabic": "حسين",
+      "english": "HUSSEIN"
+    },
+    {
+      "arabic": "صفاء",
+      "english": "SAFAA"
+    },
+    {
+      "arabic": "السعيد",
+      "english": "ELSAID"
+    },
+    {
+      "arabic": "الجينجيهي",
+      "english": "ELGENGEIHI"
+    },
+    {
+      "arabic": "زينب",
+      "english": "ZEINAB"
+    },
+    {
+      "arabic": "ابراهيم",
+      "english": "IBRAHEM"
+    },
+    {
+      "arabic": "مصطفي",
+      "english": "MOSTAFA"
+    },
+    {
+      "arabic": "عمر",
+      "english": "OMAR"
+    },
+    {
+      "arabic": "مدحت",
+      "english": "MEDHAT"
+    },
+    {
+      "arabic": "المنصوري",
+      "english": "ELMANSOURY"
+    },
+    {
+      "arabic": "خليل",
+      "english": "KHALIL"
+    },
+    {
+      "arabic": "عزيزة",
+      "english": "AZIZA"
+    },
+    {
+      "arabic": "رامية",
+      "english": "RAMIA"
+    },
+    {
+      "arabic": "حبيبة",
+      "english": "HABIBA"
+    },
+    {
+      "arabic": "عبد",
+      "english": "ABD"
+    },
+    {
+      "arabic": "الواحد",
+      "english": "ELWAHED"
+    },
+    {
+      "arabic": "زهور",
+      "english": "ZOHOUR"
+    },
+    {
+      "arabic": "سمر",
+      "english": "SAMAR"
+    },
+    {
+      "arabic": "الرفاعى",
+      "english": "ELREFAIE"
+    },
+    {
+      "arabic": "السيدة",
+      "english": "ELSAYDA"
+    },
+    {
+      "arabic": "الشبكى",
+      "english": "ELSHOBAKI"
+    },
+    {
+      "arabic": "متولى",
+      "english": "METWALLY"
+    },
+    {
+      "arabic": "سناء",
+      "english": "SANAA"
+    },
+    {
+      "arabic": "ناهد",
+      "english": "NAHED"
+    },
+    {
+      "arabic": "صلاح",
+      "english": "SALAH"
+    },
+    {
+      "arabic": "عبدالرازق",
+      "english": "ABDELRAZEK"
+    }
+  ],
+  "governmentFines": [
+    {
+      "id": "fine-1",
+      "name": "عدم وجود مؤهل",
+      "amount": 450,
+      "notes": "عدم وجود مؤهل"
+    },
+    {
+      "id": "fine-2",
+      "name": "تجديد مبكر",
+      "amount": 550,
+      "notes": "تجديد مبكر"
+    },
+    {
+      "id": "fine-3",
+      "name": "بدل تالف",
+      "amount": 550,
+      "notes": "بدل تالف"
+    },
+    {
+      "id": "fine-1791356531482",
+      "name": "تغيير ترجمة",
+      "amount": 500,
+      "notes": "تغيير ترجمة"
+    }
+  ],
   "employees": [
     {
       "username": "SHERIF",
@@ -208,26 +2138,6 @@
         "canManageServices": true,
         "canViewAmanReport": true
       }
-    }
-  ],
-  "governmentFines": [
-    {
-      "id": "fine-1",
-      "name": "غرامة فقد جواز سفر",
-      "amount": 500,
-      "notes": "تطبق في حالة فقدان جواز السفر السابق واستخراج بدل فاقد"
-    },
-    {
-      "id": "fine-2",
-      "name": "غرامة تالف جواز سفر",
-      "amount": 500,
-      "notes": "تطبق في حالة تلف الجواز القديم أو عدم وضوح بياناته"
-    },
-    {
-      "id": "fine-3",
-      "name": "غرامة تأخير تجديد / عدم استلام سابق",
-      "amount": 300,
-      "notes": "تطبق في حالات التأخير الرسمية المقررة"
     }
   ]
 }
