@@ -148,7 +148,7 @@ export default function ThermalReceipt({ invoice, settings, services, onClose, o
               </div>
               <div className="flex justify-between">
                 <span>تاريخ الفاتورة:</span>
-                <span className="font-mono text-black">{String(invoice.date || "").replace(/\s*GMT[+-]\d+.*$/i, "").trim()}</span>
+                <span className="font-mono text-black">{String(invoice.date || "").replace(/\s*GMT[+-]\d+.*$/i, "").replace(/\s*\([^)]*\)$/i, "").trim()}</span>
               </div>
               <div className="flex justify-between">
                 <span>الموظف المسؤول:</span>

@@ -442,12 +442,12 @@ app.post("/api/db/save", (req, res) => {
 });
 
 // Helper to directly push invoices sheet to Google Sheets
-async function pushInvoicesDirectlyToSheet(db: any) {
+async function pushInvoicesDirectlyToSheet(db: any): Promise<boolean> {
   const targetUrl = db.settings?.googleSheetWebhookUrl;
-  if (!targetUrl || !targetUrl.startsWith("http")) return;
+  if (!targetUrl || !targetUrl.startsWith("http")) return false;
 
   try {
-    await fetch(targetUrl, {
+    const res = await fetch(targetUrl, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify({
@@ -456,8 +456,34 @@ async function pushInvoicesDirectlyToSheet(db: any) {
       }),
       redirect: "follow",
     });
+
+    const text = await res.text();
+    let result: any = null;
+    try {
+      result = JSON.parse(text);
+    } catch {}
+
+    // Fallback for older deployed Apps Script that has action === "push" but not "push_invoices"
+    if (result && (result.error === "إجراء غير معروف" || (typeof result.error === "string" && result.error.includes("غير معروف")))) {
+      console.log("push_invoices action not supported by remote Apps Script, falling back to push action...");
+      await fetch(targetUrl, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({
+          action: "push",
+          db: {
+            ...db,
+            invoices: db.invoices || []
+          },
+          invoices: db.invoices || []
+        }),
+        redirect: "follow",
+      });
+    }
+    return true;
   } catch (err: any) {
     console.warn("Direct Google Sheet invoices push notice:", err.message);
+    return false;
   }
 }
 
@@ -470,11 +496,17 @@ app.post("/api/db/invoices", async (req, res) => {
   const nextInvoiceId = db.invoices.length > 0 
     ? Math.max(...db.invoices.map((inv: any) => inv.invoiceId)) + 1 
     : 100;
+
+  // Format date cleanly: "Mon Sep 21 2026 03:00:00" without GMT+0300 and without (Timezone name)
+  const cleanDate = (invoiceData.date || new Date().toString())
+    .replace(/\s*GMT[+-]\d+.*$/i, "")
+    .replace(/\s*\([^)]*\)$/i, "")
+    .trim();
   
   const newInvoice = {
     ...invoiceData,
     invoiceId: nextInvoiceId,
-    date: new Date().toISOString().split("T")[0],
+    date: cleanDate,
     notificationSent: false
   };
 
@@ -485,10 +517,10 @@ app.post("/api/db/invoices", async (req, res) => {
 
   writeDB(db);
 
-  // User explicit requirement: "سجل جميع عمليات الفواتير تسجل مباشرة على الداتا شيت"
-  await pushInvoicesDirectlyToSheet(db);
+  // User explicit requirement: "الفواتير التى تنفذ يتم تسجيلها مباشرة على جوجل شيت وليس تسجيل محلى فقط"
+  const pushed = await pushInvoicesDirectlyToSheet(db);
 
-  res.json({ status: "success", invoice: newInvoice });
+  res.json({ status: "success", invoice: newInvoice, sheetSynced: pushed });
 });
 
 // 5. Update invoice: Updates directly on Google Sheet

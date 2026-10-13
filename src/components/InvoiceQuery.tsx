@@ -103,7 +103,9 @@ export default function InvoiceQuery({
     if (!dateVal) return "";
     let s = String(dateVal).trim();
     // Remove GMT offset and any timezone text like GMT+0300 (Eastern European Summer Time)
-    s = s.replace(/\s*GMT[+-]\d+.*$/i, "").trim();
+    s = s.replace(/\s*GMT[+-]\d+.*$/i, "")
+         .replace(/\s*\([^)]*\)$/i, "")
+         .trim();
     return s;
   };
 
@@ -112,9 +114,19 @@ export default function InvoiceQuery({
     .filter((inv) => {
       if (searchId && !inv.invoiceId.toString().includes(searchId)) return false;
       
-      // Date Range checks
-      if (dateFrom && inv.date < dateFrom) return false;
-      if (dateTo && inv.date > dateTo) return false;
+      // Date Range checks: supports both YYYY-MM-DD and formatted text dates
+      if (dateFrom || dateTo) {
+        const invDateStr = inv.date || "";
+        const parsedTime = Date.parse(invDateStr);
+        if (!isNaN(parsedTime)) {
+          const iso = new Date(parsedTime).toISOString().split("T")[0];
+          if (dateFrom && iso < dateFrom) return false;
+          if (dateTo && iso > dateTo) return false;
+        } else {
+          if (dateFrom && invDateStr < dateFrom) return false;
+          if (dateTo && invDateStr > dateTo) return false;
+        }
+      }
 
       // Inside customers
       if (searchName || searchNationalId || searchPhone || searchService) {
@@ -133,7 +145,13 @@ export default function InvoiceQuery({
 
       return true;
     })
-    .sort((a, b) => Number(b.invoiceId) - Number(a.invoiceId));
+    .sort((a, b) => {
+      const diff = Number(b.invoiceId) - Number(a.invoiceId);
+      if (diff !== 0) return diff;
+      const bTime = Date.parse(b.date || "") || 0;
+      const aTime = Date.parse(a.date || "") || 0;
+      return bTime - aTime;
+    });
 
   const handleOpenDrawerPrompt = (inv: Invoice) => {
     setPromptDrawerInvoice(inv);

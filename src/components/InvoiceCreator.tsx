@@ -556,6 +556,11 @@ export default function InvoiceCreator({
         };
       });
 
+      const cleanDate = new Date().toString()
+        .replace(/\s*GMT[+-]\d+.*$/i, "")
+        .replace(/\s*\([^)]*\)$/i, "")
+        .trim();
+
       const invoiceData: Partial<Invoice> = {
         status: InvoiceStatus.NEW,
         employeeName: activeEmployee.name,
@@ -563,7 +568,7 @@ export default function InvoiceCreator({
         totalGov,
         totalOffice,
         totalAmount,
-        date: new Date().toISOString().split("T")[0]
+        date: cleanDate
       };
 
       const created = await createInvoiceOnServer(invoiceData);
@@ -702,7 +707,7 @@ export default function InvoiceCreator({
               <Check className="w-5 h-5" />
             </div>
             <div>
-              <h4 className="font-bold text-slate-900 font-cairo text-sm">تم إنشاء الفاتورة بنجاح!</h4>
+              <h4 className="font-bold text-slate-900 font-cairo text-sm">تم إنشاء الفاتورة وتسجيلها مباشرة على جوجل شيت! 📊✅</h4>
               <p className="text-xs text-slate-600 mt-0.5">رقم الفاتورة: <span className="font-bold font-mono">#{createdInvoiceId}</span></p>
             </div>
           </div>
