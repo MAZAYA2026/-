@@ -577,7 +577,19 @@ export default function AmanReport({
     showSaveNotice("تمت إضافة سطر جديد للكشف، اكتب الاسم وسيسجل على جوجل شيت مباشرة بمجرد الخروج من الخلية ✍️");
   };
 
-  // Excel Export to CSV with exact requested format
+  // Helper to format name with sequence number directly prefixed: e.g. "1- محمد شريف"
+  // User explicit requirement: "بالنسبة لعامود مسلسل لا داعى منه ممكن الاستغناء عنة بكتابة العدد قبل الاسم مباشرة كمثال 1- محمد شريف ، توفيرا فى عرض الخلايا لاعطاء المساحة كافية"
+  const formatNameWithNumber = (name: string, num: number): string => {
+    const trimmed = (name || "").trim();
+    if (!trimmed) return `${num}- `;
+    const prefixRegex = new RegExp(`^${num}\\s*[\\-\\.]\\s*`, "i");
+    if (prefixRegex.test(trimmed)) {
+      return trimmed;
+    }
+    return `${num}- ${trimmed}`;
+  };
+
+  // Excel Export to CSV with 3 columns (الاسم, تاريخ الميلاد, الملاحظات)
   const handleExportToExcel = () => {
     const activeRows = displayRows.filter((c) => c.arabicName.trim().length > 0);
     if (activeRows.length === 0) {
@@ -591,14 +603,19 @@ export default function AmanReport({
     let csvContent = "\ufeff";
     csvContent += "قسم جوازات طنطا - كشف حركة التابع للخدمات الجماهيرية\r\n";
     csvContent += `التاريخ: ${todayDisplay}\r\n\r\n`;
-    csvContent += "م,الاسم,تاريخ الميلاد,الملاحظات\r\n";
+    csvContent += "الاسم,تاريخ الميلاد,الملاحظات\r\n";
 
     activeRows.forEach((cust, idx) => {
       const cleanName = cust.arabicName.replace(/,/g, " ");
-      csvContent += `${idx + 1},${cleanName},${cust.birthDate || ""},\r\n`;
+      const formattedName = formatNameWithNumber(cleanName, idx + 1);
+      const noteInfo = resolveAmanDetails(cust, invoices, services);
+      const fullNote = cust.notes && cust.notes !== noteInfo.statusText 
+        ? `${noteInfo.statusText} (${cust.notes})` 
+        : noteInfo.statusText;
+      csvContent += `"${formattedName}","${cust.birthDate || ""}","${(fullNote || "").replace(/"/g, '""')}"\r\n`;
     });
 
-    csvContent += "\r\n,,,توقيع رئيس القسم\r\n";
+    csvContent += "\r\n,,توقيع رئيس القسم\r\n";
 
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -614,8 +631,8 @@ export default function AmanReport({
   const measurementCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Dynamic font sizing for customer name:
-  // User explicit requirement: "لا تقم تصغير حجم الخط للأسم المكتوب الا بعد تخطى طوله 8سم بعدها ابدأ فى التقليل"
-  // Keep font size at default official 20px up to 8cm; start reducing only after exceeding 8cm
+  // User explicit requirement: "كشف امان بالنسبة لتقليل التلقائى لحجم الخط يبدأ بحالة تجاوز الاسم مقاس طولى 9سم اذا تجاوز هذة المقاس ابدأ فى التقليل بحيث الاسم بالكامل يتضمن هذا المقاس"
+  // Keep font size at default official 20px up to 9.0cm; start reducing only after strictly exceeding 9.0cm so the entire name fits within 9.0cm
   const getNameFontSize = (name: string): string => {
     if (!name || !name.trim()) return "20px";
     const clean = name.trim();
@@ -632,33 +649,24 @@ export default function AmanReport({
           const metrics = ctx.measureText(clean);
           const widthInCm = metrics.width / 37.79527559;
 
-          // Do NOT reduce font size until length strictly exceeds 8.0 cm
-          if (widthInCm <= 8.0) {
+          // Do NOT reduce font size until length strictly exceeds 9.0 cm
+          if (widthInCm <= 9.0) {
             return "20px";
           }
-          if (widthInCm <= 8.6) {
-            return "18px";
-          }
-          if (widthInCm <= 9.2) {
-            return "16.5px";
-          }
-          if (widthInCm <= 9.8) {
-            return "15px";
-          }
-          return "14px";
+          // Proportionally scale down font size so the entire text fits within 9.0 cm
+          const scaledSize = Math.max(11, Math.floor((9.0 / widthInCm) * 20 * 10) / 10);
+          return `${scaledSize}px`;
         }
       } catch (e) {
         // Fallback below
       }
     }
 
-    // 2. Character length fallback: at 20px Cairo bold, ~28 characters correspond to 8cm
+    // 2. Character length fallback: at 20px Cairo bold, ~32 characters correspond to 9.0cm
     const len = clean.length;
-    if (len <= 28) return "20px";
-    if (len <= 32) return "18px";
-    if (len <= 36) return "16.5px";
-    if (len <= 40) return "15px";
-    return "14px";
+    if (len <= 32) return "20px";
+    const scaledSize = Math.max(11, Math.floor((32 / len) * 20 * 10) / 10);
+    return `${scaledSize}px`;
   };
 
   // Direct print of the styled A4 pages
@@ -1280,7 +1288,8 @@ export default function AmanReport({
                     </div>
                   </div>
 
-                  {/* Table - 4 Columns: م (1cm), الاسم (9.5cm), تاريخ الميلاد (3.5cm), الملاحظات (باقي المساحة) */}
+                  {/* Table - 3 Columns: الاسم مع المسلسل (10.5cm), تاريخ الميلاد (3.5cm), الملاحظات (باقي المساحة) */}
+                  {/* User requirement: الاستغناء عن عامود مسلسل بكتابة العدد قبل الاسم مباشرة كمثال 1- محمد شريف توفيراً للمساحة */}
                   <table 
                     className="w-full border-2 border-black text-right" 
                     style={{ 
@@ -1292,8 +1301,7 @@ export default function AmanReport({
                     }}
                   >
                     <colgroup>
-                      <col style={{ width: "1cm" }} />
-                      <col style={{ width: "9.5cm" }} />
+                      <col style={{ width: "10.5cm" }} />
                       <col style={{ width: "3.5cm" }} />
                       <col />
                     </colgroup>
@@ -1313,61 +1321,65 @@ export default function AmanReport({
                             className="border border-black group hover:bg-blue-50/20 transition-colors" 
                             style={{ height: "7.1mm", maxHeight: "7.1mm" }}
                           >
-                            {/* 1. Sequence Number */}
-                            <td 
-                              className="border border-black text-center font-bold p-0 bg-slate-50/30" 
-                              style={{ width: "1cm", fontFamily: "'Cairo', sans-serif", fontSize: "20px", fontWeight: "bold", lineHeight: 1.1 }}
-                            >
-                              {absoluteNumber}
-                            </td>
-
-                            {/* 2. Customer Name (Editable In-Place) */}
+                            {/* 1. Customer Name with Sequence Number directly prefixed (e.g. "1- محمد شريف") */}
                             {(() => {
                               const isEnglishDetected = /[a-zA-Z]/.test(rowName);
+                              const printDisplayName = formatNameWithNumber(rowName, absoluteNumber);
+                              const calculatedFontSize = getNameFontSize(printDisplayName);
+                              const hasPrefixedNumberInInput = new RegExp(`^${absoluteNumber}\\s*[\\-\\.]\\s*`).test(rowName.trim());
+
                               return (
                                 <td 
                                   className={`border border-black text-right font-bold p-0 relative transition-all ${
                                     isEnglishDetected ? "bg-amber-100 ring-2 ring-amber-500 z-10" : ""
                                   }`} 
                                   style={{ 
-                                    width: "9.5cm", 
+                                    width: "10.5cm", 
                                     fontFamily: "'Cairo', sans-serif", 
                                     lineHeight: 1.1, 
                                     whiteSpace: "nowrap" 
                                   }}
                                 >
-                                  <div className="relative w-full h-full flex items-center">
-                                    {/* Screen input: Interactive typing & auto-save on blur */}
+                                  <div className="relative w-full h-full flex items-center px-1">
+                                    {/* Screen input: sequence number indicator + typing input */}
+                                    {!hasPrefixedNumberInInput && (
+                                      <span 
+                                        className="shrink-0 font-bold font-mono text-slate-800 ml-1 select-none print:hidden"
+                                        style={{ fontFamily: "'Cairo', sans-serif", fontSize: calculatedFontSize }}
+                                      >
+                                        {absoluteNumber}-
+                                      </span>
+                                    )}
                                     <input
                                       type="text"
                                       value={rowName}
                                       placeholder="اضغط لكتابة الاسم..."
                                       onChange={(e) => handleCellChange(globalIndex, "arabicName", e.target.value)}
                                       onBlur={() => handleCellBlur(globalIndex)}
-                                      className={`w-full h-full border-0 px-1 text-right font-bold transition-colors print:hidden ${
+                                      className={`w-full flex-1 h-full border-0 px-1 text-right font-bold transition-colors print:hidden ${
                                         isEnglishDetected
                                           ? "bg-amber-100 text-amber-950 ring-2 ring-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-600"
                                           : "bg-transparent text-black focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-blue-50/70"
                                       } rounded-xs`}
                                       style={{ 
                                         fontFamily: "'Cairo', sans-serif", 
-                                        fontSize: getNameFontSize(rowName), 
+                                        fontSize: calculatedFontSize, 
                                         fontWeight: "bold", 
                                         lineHeight: 1.1 
                                       }}
                                     />
-                                    {/* Print text: crisp, unclipped text with exact calculated font size */}
+                                    {/* Print text: crisp, unclipped text with exact calculated font size prefixed with number */}
                                     <span
                                       className="hidden print:inline-block w-full text-right font-bold text-black px-1"
                                       style={{ 
                                         fontFamily: "'Cairo', sans-serif", 
-                                        fontSize: getNameFontSize(rowName), 
+                                        fontSize: calculatedFontSize, 
                                         fontWeight: "bold", 
                                         lineHeight: 1.1,
                                         whiteSpace: "nowrap"
                                       }}
                                     >
-                                      {rowName}
+                                      {printDisplayName}
                                     </span>
                                     {isEnglishDetected && (
                                       <span className="print:hidden absolute left-1 top-1/2 -translate-y-1/2 text-[9px] bg-red-600 text-white font-bold px-1.5 py-0.5 rounded shadow-xs pointer-events-none z-20 flex items-center gap-0.5">
