@@ -188,6 +188,7 @@ const initialData = {
     { id: "fine-3", name: "بدل تالف", amount: 550, notes: "بدل تالف" },
     { id: "fine-1791356531482", name: "تغيير ترجمة", amount: 500, notes: "تغيير ترجمة" }
   ],
+  amanPostponedRows: [] as any[],
   settings: {
     headerText: "مكتب مزايا للخدمات الحكومية والجوازات E.G",
     subHeaderText: "جوازات طنطا والمعاملات الحكومية",
@@ -300,6 +301,9 @@ function readDB() {
     const parsed = JSON.parse(data);
     if (!parsed.governmentFines || !Array.isArray(parsed.governmentFines) || parsed.governmentFines.length === 0) {
       parsed.governmentFines = initialData.governmentFines;
+    }
+    if (!parsed.amanPostponedRows || !Array.isArray(parsed.amanPostponedRows)) {
+      parsed.amanPostponedRows = [];
     }
     return parsed;
   } catch (err) {
@@ -1252,7 +1256,8 @@ async function pushToGoogleWebhook(webhookUrl: string, db: any) {
         dictionary: db.dictionary || [],
         invoices: db.invoices || [],
         collectionClosings: db.collectionClosings || [],
-        governmentFines: db.governmentFines || []
+        governmentFines: db.governmentFines || [],
+        amanPostponedRows: db.amanPostponedRows || []
       }),
       redirect: "follow",
     });
@@ -1775,6 +1780,162 @@ app.post("/api/sheets/webhook/pull-aman", async (req, res) => {
     });
   } catch (err: any) {
     res.status(500).json({ error: "فشل جلب بيانات كشف أمان من جوجل شيت: " + err.message });
+  }
+});
+
+// --- Dedicated Aman Postponed Names (الأسماء المرحلة من كشف أمان) Endpoints ---
+// GET all postponed names from local DB
+app.get("/api/db/aman-postponed", (req, res) => {
+  const db = readDB();
+  res.json({
+    status: "success",
+    postponedRows: db.amanPostponedRows || [],
+  });
+});
+
+// POST save / update postponed names
+app.post("/api/db/aman-postponed", async (req, res) => {
+  const { postponedRows, syncWithSheets } = req.body;
+  const db = readDB();
+  if (Array.isArray(postponedRows)) {
+    db.amanPostponedRows = postponedRows;
+    writeDB(db);
+  }
+
+  // If syncWithSheets is requested and webhookUrl is configured
+  let sheetSyncResult: any = null;
+  const webhookUrl = db.settings?.googleSheetWebhookUrl;
+  if (syncWithSheets && webhookUrl && webhookUrl.startsWith("http")) {
+    try {
+      const resp = await fetch(webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({
+          action: "push_postponed_aman",
+          postponedRows: db.amanPostponedRows || [],
+        }),
+        redirect: "follow",
+      });
+      sheetSyncResult = await resp.json().catch(() => ({}));
+    } catch (e: any) {
+      console.warn("Could not sync postponed names to sheet:", e.message);
+    }
+  }
+
+  res.json({
+    status: "success",
+    postponedRows: db.amanPostponedRows || [],
+    sheetSyncResult,
+    message: "تم حفظ الأسماء المرحلة بنجاح",
+  });
+});
+
+// DELETE single postponed name
+app.delete("/api/db/aman-postponed/:id", async (req, res) => {
+  const { id } = req.params;
+  const db = readDB();
+  if (Array.isArray(db.amanPostponedRows)) {
+    db.amanPostponedRows = db.amanPostponedRows.filter((item: any) => item.id !== id);
+    writeDB(db);
+  }
+
+  // Also sync removal to sheet if configured
+  const webhookUrl = db.settings?.googleSheetWebhookUrl;
+  if (webhookUrl && webhookUrl.startsWith("http")) {
+    try {
+      await fetch(webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({
+          action: "push_postponed_aman",
+          postponedRows: db.amanPostponedRows || [],
+        }),
+        redirect: "follow",
+      });
+    } catch (e: any) {
+      console.warn("Could not sync postponed removal to sheet:", e.message);
+    }
+  }
+
+  res.json({
+    status: "success",
+    postponedRows: db.amanPostponedRows || [],
+    message: "تم حذف الاسم من قائمة المؤجلين",
+  });
+});
+
+// Dedicated Webhook Sync Postponed Aman Endpoint
+app.post("/api/sheets/webhook/sync-postponed-aman", async (req, res) => {
+  const { webhookUrl, postponedRows } = req.body;
+  const db = readDB();
+  const targetUrl = webhookUrl || db.settings?.googleSheetWebhookUrl;
+
+  if (!targetUrl || !targetUrl.startsWith("http")) {
+    return res.status(400).json({ error: "الرجاء إدخال رابط سكربت Webhook صالح أولاً في قسم إعدادات جوجل شيت." });
+  }
+
+  try {
+    const rowsToSend = Array.isArray(postponedRows) ? postponedRows : (db.amanPostponedRows || []);
+    db.amanPostponedRows = rowsToSend;
+    writeDB(db);
+
+    const response = await fetch(targetUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        action: "push_postponed_aman",
+        postponedRows: rowsToSend,
+      }),
+      redirect: "follow",
+    });
+
+    const text = await response.text();
+    let data: any = {};
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { message: text };
+    }
+
+    res.json({
+      status: "success",
+      message: data.message || `تم حفظ ${rowsToSend.length} اسماً مرحلاً في ورقة (Aman_Postponed_الأسماء_المرحلة) بجوجل شيت بنجاح! 📑✅`,
+      data,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: "فشل إرسال الأسماء المرحلة إلى السكربت: " + err.message });
+  }
+});
+
+// Dedicated Webhook Pull Postponed Aman Endpoint
+app.post("/api/sheets/webhook/pull-postponed-aman", async (req, res) => {
+  const { webhookUrl } = req.body;
+  const db = readDB();
+  const targetUrl = webhookUrl || db.settings?.googleSheetWebhookUrl;
+
+  if (!targetUrl || !targetUrl.startsWith("http")) {
+    return res.status(400).json({ error: "الرجاء إدخال رابط سكربت Webhook صالح أولاً في قسم إعدادات جوجل شيت." });
+  }
+
+  try {
+    const pulledDB = await pullFromGoogleWebhook(targetUrl);
+    let pulledPostponed: any[] = [];
+    if (pulledDB && Array.isArray(pulledDB.amanPostponedRows) && pulledDB.amanPostponedRows.length > 0) {
+      pulledPostponed = pulledDB.amanPostponedRows;
+      db.amanPostponedRows = pulledPostponed;
+      writeDB(db);
+    } else {
+      pulledPostponed = db.amanPostponedRows || [];
+    }
+
+    res.json({
+      status: "success",
+      postponedRows: pulledPostponed,
+      totalRows: pulledPostponed.length,
+      message: `تم جلب ${pulledPostponed.length} اسماً من الأسماء المرحلة بجوجل شيت بنجاح! 📑📥`
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: "فشل جلب الأسماء المرحلة من جوجل شيت: " + err.message });
   }
 });
 

@@ -1,6 +1,16 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
-import { Invoice, Service, Employee, AppSettings, InvoiceStatus, CustomerInput } from "../types";
-import { updateInvoiceOnServer, createInvoiceOnServer, syncAmanReportToGoogleSheets, fetchAmanReportFromGoogleSheets } from "../lib/api";
+import { Invoice, Service, Employee, AppSettings, InvoiceStatus, CustomerInput, AmanPostponedItem } from "../types";
+import { 
+  updateInvoiceOnServer, 
+  createInvoiceOnServer, 
+  syncAmanReportToGoogleSheets, 
+  fetchAmanReportFromGoogleSheets,
+  fetchPostponedAmanNames,
+  savePostponedAmanNames,
+  deletePostponedAmanName,
+  syncPostponedAmanToGoogleSheets,
+  pullPostponedAmanFromGoogleSheets
+} from "../lib/api";
 import { playLanguageWarningSound } from "../lib/audio";
 import { 
   Calendar, 
@@ -16,7 +26,16 @@ import {
   Check, 
   Save,
   Volume2,
-  CloudDownload
+  CloudDownload,
+  Scissors,
+  FolderInput,
+  X,
+  Trash2,
+  Search,
+  Download,
+  Clock,
+  ArrowRight,
+  UserCheck
 } from "lucide-react";
 
 export interface AmanRowItem {
@@ -172,6 +191,23 @@ export default function AmanReport({
   const [isSaving, setIsSaving] = useState(false);
   const [isLoadingSheets, setIsLoadingSheets] = useState(false);
   const [sheetFetchError, setSheetFetchError] = useState<string | null>(null);
+
+  // Postponed names state (User requirement: قص وحفظ في ورقة خاصة وإدراج لاحقاً)
+  const [postponedList, setPostponedList] = useState<AmanPostponedItem[]>([]);
+  const [isPostponedModalOpen, setIsPostponedModalOpen] = useState(false);
+  const [targetInsertRowIndex, setTargetInsertRowIndex] = useState<number | null>(null);
+  const [postponedSearchQuery, setPostponedSearchQuery] = useState("");
+  const [isLoadingPostponed, setIsLoadingPostponed] = useState(false);
+  const [deleteAfterInsert, setDeleteAfterInsert] = useState(true);
+
+  // Load postponed names on mount
+  useEffect(() => {
+    fetchPostponedAmanNames()
+      .then((items) => {
+        if (Array.isArray(items)) setPostponedList(items);
+      })
+      .catch((err) => console.warn("Failed to load postponed list:", err));
+  }, []);
 
   const reportPrintRef = useRef<HTMLDivElement>(null);
 
@@ -575,6 +611,232 @@ export default function AmanReport({
       },
     ]);
     showSaveNotice("تمت إضافة سطر جديد للكشف، اكتب الاسم وسيسجل على جوجل شيت مباشرة بمجرد الخروج من الخلية ✍️");
+  };
+
+  // User explicit requirement:
+  // "الزرار الاول مهمتة عمل قص لبيانات هذا الصف الاسم وتاريخ الميلاد وتخصيص له مكان حفظ فى شيت الاكسيل ورقة خاصة بهذة البيانات المرحلة والهدف من هذا ان اوقات بنحتاج لحذف بيانات اسم مؤقتا من الورقة اللى هنطبعها وسنحتاج لادراجها فيما بعد باى يوم اخر"
+  const handleCutRow = async (rowIndex: number) => {
+    const row = displayRows[rowIndex];
+    if (!row || !row.arabicName.trim()) {
+      return;
+    }
+
+    const cutName = row.arabicName.trim();
+    const cutBirthDate = row.birthDate.trim();
+    const cutNotes = row.notes.trim();
+
+    const newPostponedItem: AmanPostponedItem = {
+      id: `postponed-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      arabicName: cutName,
+      birthDate: cutBirthDate,
+      notes: cutNotes,
+      originalDate: row.date || dateFrom || todayStr,
+      postponedAt: new Date().toLocaleString("ar-EG"),
+      invoiceId: row.invoiceId,
+      serviceType: row.serviceType,
+      fineName: row.fineName,
+      fineAmount: row.fineAmount,
+      status: "مؤجل",
+    };
+
+    const updatedPostponed = [newPostponedItem, ...postponedList];
+    setPostponedList(updatedPostponed);
+
+    // Clear data from this row so it doesn't appear on today's printout
+    setTableRows((prev) => {
+      const copy = [...prev];
+      if (rowIndex < copy.length) {
+        copy[rowIndex] = {
+          ...copy[rowIndex],
+          arabicName: "",
+          birthDate: "",
+          notes: "",
+          invoiceId: undefined,
+          customerIndex: undefined,
+          isCustomManual: true,
+        };
+      }
+      return copy;
+    });
+
+    if (row.id) {
+      originalValuesRef.current.delete(row.id);
+    }
+
+    // 1. Save to server DB and sync to Google Sheets tab Aman_Postponed_الأسماء_المرحلة
+    try {
+      await savePostponedAmanNames(updatedPostponed, true);
+      if (settings?.googleSheetWebhookUrl) {
+        syncPostponedAmanToGoogleSheets(updatedPostponed, settings.googleSheetWebhookUrl).catch(() => {});
+      }
+    } catch (err) {
+      console.warn("Failed to persist postponed item:", err);
+    }
+
+    // 2. Sync the active report to Google Sheets without this cut person
+    try {
+      const updatedDisplayRows = displayRows.map((r, i) =>
+        i === rowIndex ? { ...r, arabicName: "", birthDate: "", notes: "", invoiceId: undefined } : r
+      );
+      const remainingActive = updatedDisplayRows.filter((r) => r.arabicName.trim().length > 0);
+      await syncAmanReportToGoogleSheets({
+        dateFrom,
+        dateTo,
+        amanRows: remainingActive,
+        webhookUrl: settings?.googleSheetWebhookUrl,
+      });
+    } catch (syncErr) {
+      console.warn("Failed to sync aman report after cut:", syncErr);
+    }
+
+    showSaveNotice(`تم قص وترحيل بيانات (${cutName}) وحفظها في ورقة الأسماء المرحلة بملف الإكسيل بنجاح! ✂️📑`);
+  };
+
+  // User explicit requirement:
+  // "والزرار الثانى لادراج اسم من الاسماء المرحلة دى يقوم باظهار بيانات الاسماء وتاريخ الميلاد المحفوظين بورقة الاكسيل وانا اختار منهم اللى احتاجه يتحط بالكشف"
+  const handleOpenInsertModal = (rowIndex: number | null) => {
+    setTargetInsertRowIndex(rowIndex);
+    setIsPostponedModalOpen(true);
+  };
+
+  const handleInsertPostponedItem = async (item: AmanPostponedItem) => {
+    const rowIndex = targetInsertRowIndex !== null 
+      ? targetInsertRowIndex 
+      : displayRows.findIndex((r) => !r.arabicName.trim());
+
+    const actualRowIndex = rowIndex >= 0 ? rowIndex : displayRows.length;
+
+    // Insert into row
+    setTableRows((prev) => {
+      const copy = [...prev];
+      while (copy.length <= actualRowIndex) {
+        copy.push({
+          id: `manual-${Date.now()}-${copy.length}`,
+          arabicName: "",
+          birthDate: "",
+          notes: "",
+          date: dateFrom,
+          isCustomManual: true,
+        });
+      }
+      copy[actualRowIndex] = {
+        ...copy[actualRowIndex],
+        arabicName: item.arabicName,
+        birthDate: item.birthDate,
+        notes: item.notes,
+        invoiceId: item.invoiceId,
+        serviceType: item.serviceType as any,
+        fineName: item.fineName,
+        fineAmount: item.fineAmount,
+      };
+      return copy;
+    });
+
+    // Update cached original values
+    const rowId = displayRows[actualRowIndex]?.id || `manual-${Date.now()}`;
+    originalValuesRef.current.set(rowId, {
+      arabicName: item.arabicName,
+      birthDate: item.birthDate,
+      notes: item.notes,
+    });
+
+    // Remove from postponed list if toggle enabled
+    let updatedPostponed = postponedList;
+    if (deleteAfterInsert) {
+      updatedPostponed = postponedList.filter((p) => p.id !== item.id);
+      setPostponedList(updatedPostponed);
+      try {
+        await deletePostponedAmanName(item.id);
+        if (settings?.googleSheetWebhookUrl) {
+          syncPostponedAmanToGoogleSheets(updatedPostponed, settings.googleSheetWebhookUrl).catch(() => {});
+        }
+      } catch (err) {
+        console.warn("Failed to delete inserted postponed item:", err);
+      }
+    }
+
+    // Sync updated active report to Google Sheets
+    try {
+      const updatedDisplayRows = displayRows.map((r, i) =>
+        i === actualRowIndex
+          ? {
+              ...r,
+              arabicName: item.arabicName,
+              birthDate: item.birthDate,
+              notes: item.notes,
+              invoiceId: item.invoiceId,
+            }
+          : r
+      );
+      const activeToSync = updatedDisplayRows.filter((r) => r.arabicName.trim().length > 0);
+      await syncAmanReportToGoogleSheets({
+        dateFrom,
+        dateTo,
+        amanRows: activeToSync,
+        webhookUrl: settings?.googleSheetWebhookUrl,
+      });
+    } catch (syncErr) {
+      console.warn("Failed to sync aman report after insertion:", syncErr);
+    }
+
+    showSaveNotice(`تم إدراج بيانات (${item.arabicName}) بالكشف بنجاح! 📥✅`);
+    setIsPostponedModalOpen(false);
+    setTargetInsertRowIndex(null);
+  };
+
+  const handleDeletePostponedItem = async (id: string, name: string) => {
+    if (!window.confirm(`هل أنت متأكد من حذف (${name}) نهائياً من ورقة الأسماء المرحلة؟`)) return;
+    const updated = postponedList.filter((p) => p.id !== id);
+    setPostponedList(updated);
+    try {
+      await deletePostponedAmanName(id);
+      if (settings?.googleSheetWebhookUrl) {
+        syncPostponedAmanToGoogleSheets(updated, settings.googleSheetWebhookUrl).catch(() => {});
+      }
+      showSaveNotice(`تم حذف (${name}) من ورقة الأسماء المرحلة`);
+    } catch (err) {
+      console.warn("Error deleting postponed item:", err);
+    }
+  };
+
+  const handleRefreshPostponedFromSheets = async () => {
+    setIsLoadingPostponed(true);
+    try {
+      const res = await pullPostponedAmanFromGoogleSheets(settings?.googleSheetWebhookUrl);
+      if (res && Array.isArray(res.postponedRows)) {
+        setPostponedList(res.postponedRows);
+        showSaveNotice(`تم جلب وتحديث ${res.postponedRows.length} اسماً مرحلاً من جوجل شيت 📑📥`);
+      }
+    } catch (err: any) {
+      console.warn("Error pulling postponed items:", err);
+      showSaveNotice(`تعذر جلب البيانات من جوجل شيت: ${err.message}`);
+    } finally {
+      setIsLoadingPostponed(false);
+    }
+  };
+
+  const handleExportPostponedToExcel = () => {
+    if (postponedList.length === 0) {
+      alert("لا توجد أسماء مرحلة لتصديرها.");
+      return;
+    }
+    let csvContent = "\ufeff";
+    csvContent += "قسم جوازات طنطا - قائمة الأسماء المرحلة مؤقتاً من كشف أمان\r\n";
+    csvContent += `تاريخ التصدير: ${new Date().toLocaleDateString("ar-EG")}\r\n\r\n`;
+    csvContent += "م,الاسم,تاريخ الميلاد,الملاحظات,تاريخ الكشف الأصلي,وقت الترحيل,رقم الفاتورة,الحالة\r\n";
+
+    postponedList.forEach((item, idx) => {
+      csvContent += `"${idx + 1}","${(item.arabicName || "").replace(/"/g, '""')}","${item.birthDate || ""}","${(item.notes || "").replace(/"/g, '""')}","${item.originalDate || ""}","${item.postponedAt || ""}","${item.invoiceId || ""}","${item.status || "مؤجل"}"\r\n`;
+    });
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `الأسماء_المرحلة_أمان_${todayStr}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   // Helper to format name with sequence number directly prefixed: e.g. "1- محمد شريف"
@@ -1114,6 +1376,24 @@ export default function AmanReport({
 
             <button
               type="button"
+              onClick={() => {
+                setTargetInsertRowIndex(null);
+                setIsPostponedModalOpen(true);
+              }}
+              className="px-3.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+              title="عرض وإدارة قائمة الأسماء المرحلة مؤقتاً والمحفوظة في ورقة الإكسيل"
+            >
+              <Scissors className="w-4 h-4 text-amber-700" />
+              <span>الأسماء المرحلة مؤقتاً</span>
+              {postponedList.length > 0 && (
+                <span className="bg-amber-600 text-white font-mono px-1.5 py-0.5 rounded-full text-[10px] font-bold">
+                  {postponedList.length}
+                </span>
+              )}
+            </button>
+
+            <button
+              type="button"
               disabled={isLoadingSheets}
               onClick={() => loadDataFromGoogleSheet(false)}
               className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
@@ -1275,16 +1555,33 @@ export default function AmanReport({
                 }}
               >
                 <div>
-                  {/* Header Banner - Cairo 20 Bold */}
-                  <div className="flex justify-between items-center border-b-2 border-black pb-1 mb-1 text-black font-cairo">
-                    <div className="text-right" style={{ fontFamily: "'Cairo', sans-serif", fontSize: "20px", fontWeight: "bold" }}>
+                  {/* Header Banner - Single Line Layout (بداية الصف: قسم جوازات طنطا | وسط الصف: كشف حركة التابع للخدمات الجماهيرية | نهاية الصف: التاريخ :     /    / 2026) */}
+                  <div 
+                    className="flex justify-between items-center border-b-2 border-black pb-1 mb-1 text-black font-cairo flex-nowrap whitespace-nowrap overflow-hidden"
+                    style={{ width: "100%", whiteSpace: "nowrap", direction: "rtl" }}
+                  >
+                    {/* بداية الصف من اليمين: قسم جوازات طنطا */}
+                    <div 
+                      className="text-right shrink-0" 
+                      style={{ fontFamily: "'Cairo', sans-serif", fontSize: "17.5px", fontWeight: "bold" }}
+                    >
                       قسم جوازات طنطا
                     </div>
-                    <div className="text-center" style={{ fontFamily: "'Cairo', sans-serif", fontSize: "20px", fontWeight: "bold" }}>
+
+                    {/* وسط الصف: كشف حركة التابع للخدمات الجماهيرية */}
+                    <div 
+                      className="text-center shrink-0 px-2" 
+                      style={{ fontFamily: "'Cairo', sans-serif", fontSize: "17.5px", fontWeight: "bold" }}
+                    >
                       كشف حركة التابع للخدمات الجماهيرية
                     </div>
-                    <div className="text-left" style={{ fontFamily: "'Cairo', sans-serif", fontSize: "20px", fontWeight: "bold" }}>
-                      التاريخ: {headerDateDisplay}
+
+                    {/* نهاية الصف: التاريخ :        /        / 2026 */}
+                    <div 
+                      className="text-left shrink-0 select-none" 
+                      style={{ fontFamily: "'Cairo', sans-serif", fontSize: "17.5px", fontWeight: "bold", whiteSpace: "nowrap", direction: "rtl" }}
+                    >
+                      <span>التاريخ : &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; / &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; / 2026</span>
                     </div>
                   </div>
 
@@ -1304,6 +1601,7 @@ export default function AmanReport({
                       <col style={{ width: "10.5cm" }} />
                       <col style={{ width: "3.5cm" }} />
                       <col />
+                      <col className="print:hidden" style={{ width: "76px" }} />
                     </colgroup>
                     <tbody>
                       {Array.from({ length: ROWS_PER_PAGE }).map((_, rIdx) => {
@@ -1466,6 +1764,40 @@ export default function AmanReport({
                                 );
                               })()}
                             </td>
+
+                            {/* 5. Row Action Buttons (Screen Only - Hidden in Print) */}
+                            {/* User explicit requirement: زرارين جنب كل صف حتى نهاية الورقة (قص وترحيل + إدراج اسم مرحل) */}
+                            <td 
+                              className="print:hidden border border-black/30 p-0 text-center align-middle bg-slate-50/70 select-none"
+                              style={{ width: "76px" }}
+                            >
+                              <div className="flex items-center justify-center gap-1 px-1 h-full">
+                                {/* الزرار الأول: قص وترحيل بيانات هذا الصف الاسم وتاريخ الميلاد */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleCutRow(globalIndex)}
+                                  disabled={!rowName.trim()}
+                                  title={rowName.trim() ? `قص وترحيل (${rowName}) وحفظه في ورقة المؤجلين بالإكسيل` : "الصف فارغ"}
+                                  className={`p-1 rounded-md text-xs font-bold transition-all flex items-center justify-center cursor-pointer ${
+                                    rowName.trim()
+                                      ? "bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 shadow-xs hover:scale-110 active:scale-95"
+                                      : "bg-slate-100 text-slate-300 border border-slate-200 cursor-not-allowed opacity-40"
+                                  }`}
+                                >
+                                  <Scissors className="w-3.5 h-3.5" />
+                                </button>
+
+                                {/* الزرار الثاني: إدراج اسم من الأسماء المرحلة المحفوظة بورقة الإكسيل */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenInsertModal(globalIndex)}
+                                  title={`إدراج اسم من الأسماء المرحلة في هذا الصف (${absoluteNumber})`}
+                                  className="p-1 rounded-md text-xs font-bold bg-blue-100 hover:bg-blue-200 text-blue-900 border border-blue-300 shadow-xs hover:scale-110 active:scale-95 transition-all flex items-center justify-center cursor-pointer"
+                                >
+                                  <FolderInput className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
                           </tr>
                         );
                       })}
@@ -1517,6 +1849,216 @@ export default function AmanReport({
         </div>
       </div>
 
+      {/* Postponed Names Modal (قائمة الأسماء المرحلة مؤقتاً) */}
+      {/* User explicit requirement:
+          "والزرار الثانى لادراج اسم من الاسماء المرحلة دى يقوم باظهار بيانات الاسماء وتاريخ الميلاد المحفوظين بورقة الاكسيل وانا اختار منهم اللى احتاجه يتحط بالكشف"
+      */}
+      {isPostponedModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-fade-in font-cairo">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-3xl overflow-hidden flex flex-col max-h-[90vh]">
+            
+            {/* Modal Header */}
+            <div className="px-5 py-4 bg-gradient-to-r from-amber-500 to-amber-600 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <span className="p-2 bg-white/20 rounded-xl">
+                  <Scissors className="w-5 h-5 text-white" />
+                </span>
+                <div>
+                  <h3 className="font-black text-base sm:text-lg">
+                    قائمة الأسماء المرحلة مؤقتاً من كشف أمان
+                  </h3>
+                  <p className="text-xs text-amber-100 font-normal">
+                    {targetInsertRowIndex !== null 
+                      ? `اختر الاسم المراد إدراجه في الصف رقم (${targetInsertRowIndex + 1})`
+                      : "إدارة واستعراض الأسماء المرحلة المحفوظة في ورقة الإكسيل المخصصة"}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsPostponedModalOpen(false);
+                  setTargetInsertRowIndex(null);
+                }}
+                className="p-1.5 bg-white/10 hover:bg-white/20 rounded-xl text-white transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Sub-toolbar: Search & Actions */}
+            <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={postponedSearchQuery}
+                  onChange={(e) => setPostponedSearchQuery(e.target.value)}
+                  placeholder="بحث في الأسماء وتواريخ الميلاد المرحلة..."
+                  className="w-full pl-3 pr-9 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  disabled={isLoadingPostponed}
+                  onClick={handleRefreshPostponedFromSheets}
+                  className="px-3 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs disabled:opacity-50"
+                  title="تحديث الأسماء من ورقة الإكسيل بجوجل شيت"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingPostponed ? "animate-spin text-amber-600" : ""}`} />
+                  {isLoadingPostponed ? "جاري التحديث..." : "تحديث من شيت 🔄"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleExportPostponedToExcel}
+                  className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                  title="تصدير ورقة الأسماء المرحلة إلى ملف CSV"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5" />
+                  تصدير إكسيل
+                </button>
+              </div>
+            </div>
+
+            {/* Option toggle: remove from postponed upon insertion */}
+            <div className="px-5 py-2.5 bg-amber-50/70 border-b border-amber-200/60 flex items-center justify-between text-xs text-amber-950 font-bold">
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={deleteAfterInsert}
+                  onChange={(e) => setDeleteAfterInsert(e.target.checked)}
+                  className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500 accent-amber-600 cursor-pointer"
+                />
+                <span>حذف الاسم من قائمة المؤجلين تلقائياً بعد إدراجه في الكشف</span>
+              </label>
+              <span className="text-[11px] text-amber-800 font-normal">
+                المحفوظين حالياً: {postponedList.length} عميل
+              </span>
+            </div>
+
+            {/* Content List */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-2">
+              {(() => {
+                const filtered = postponedList.filter((item) => {
+                  if (!postponedSearchQuery.trim()) return true;
+                  const q = postponedSearchQuery.trim().toLowerCase();
+                  return (
+                    item.arabicName.toLowerCase().includes(q) ||
+                    item.birthDate.includes(q) ||
+                    (item.notes && item.notes.toLowerCase().includes(q))
+                  );
+                });
+
+                if (filtered.length === 0) {
+                  return (
+                    <div className="py-12 text-center text-slate-500 font-cairo">
+                      <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto mb-3">
+                        <Scissors className="w-6 h-6" />
+                      </div>
+                      <p className="font-bold text-sm text-slate-700">لا توجد أسماء مرحلة حالياً</p>
+                      <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+                        عند الضغط على زر القص ✂️ بجانب أي اسم في الكشف، سيتم نقله وحفظه هنا وفي ورقة الإكسيل المخصصة لتتمكن من إدراجه في أي وقت آخر.
+                      </p>
+                    </div>
+                  );
+                }
+
+                return filtered.map((item, idx) => (
+                  <div
+                    key={item.id || idx}
+                    className="p-3 bg-white hover:bg-amber-50/40 border border-slate-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-colors shadow-2xs"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="w-7 h-7 rounded-lg bg-slate-100 text-slate-700 font-mono font-bold text-xs flex items-center justify-center shrink-0">
+                        {idx + 1}
+                      </span>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-black text-slate-900 text-sm font-cairo">
+                            {item.arabicName}
+                          </h4>
+                          {item.serviceType && (
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                              item.serviceType === "مستعجل" 
+                                ? "bg-amber-100 text-amber-800" 
+                                : "bg-emerald-100 text-emerald-800"
+                            }`}>
+                              {item.serviceType}
+                            </span>
+                          )}
+                          {item.fineName && (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-purple-100 text-purple-800">
+                              غرامة: {item.fineName}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-3 text-[11px] text-slate-500 mt-1">
+                          <span>📅 مواليد: <strong className="text-slate-800 font-mono">{item.birthDate || "غير محدد"}</strong></span>
+                          <span>|</span>
+                          <span>📌 تاريخ الترحيل: {item.postponedAt || item.originalDate || "—"}</span>
+                          {item.notes && item.notes !== item.serviceType && (
+                            <>
+                              <span>|</span>
+                              <span className="text-slate-600">📝 {item.notes}</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+                      <button
+                        type="button"
+                        onClick={() => handleInsertPostponedItem(item)}
+                        className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                      >
+                        <FolderInput className="w-3.5 h-3.5" />
+                        <span>
+                          {targetInsertRowIndex !== null 
+                            ? `إدراج في الصف (${targetInsertRowIndex + 1})`
+                            : "إدراج بالكشف"}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDeletePostponedItem(item.id, item.arabicName)}
+                        title="حذف من قائمة المؤجلين"
+                        className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ));
+              })()}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-5 py-3 bg-slate-100 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-600">
+              <span className="font-semibold text-center sm:text-right">
+                💾 يتم الحفظ والتخزين بورقة (Aman_Postponed_الأسماء_المرحلة) في ملف الإكسيل بجوجل شيت مباشرة
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsPostponedModalOpen(false);
+                  setTargetInsertRowIndex(null);
+                }}
+                className="px-4 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold rounded-xl transition-colors cursor-pointer"
+              >
+                إغلاق
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
+

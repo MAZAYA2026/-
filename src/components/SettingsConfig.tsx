@@ -510,6 +510,40 @@ function doPost(e) {
         } catch(cwErr) {}
       }
 
+      // --- Sheet 8: Aman_Postponed_الأسماء_المرحلة ---
+      var postRowsList = (contents.amanPostponedRows || (contents.db && contents.db.amanPostponedRows)) || [];
+      if (Array.isArray(postRowsList) && postRowsList.length > 0) {
+        var postSheet = getOrCreateSheet(ss, "Aman_Postponed_الأسماء_المرحلة");
+        postSheet.clearContents();
+        var postHeaders = ["م", "الاسم", "تاريخ الميلاد", "الملاحظات (النوع والغرامة)", "تاريخ الكشف الأصلي", "تاريخ ووقت الترحيل", "رقم الفاتورة", "الحالة"];
+        var postRows = [postHeaders];
+        for (var pi = 0; pi < postRowsList.length; pi++) {
+          var pItem = postRowsList[pi];
+          postRows.push([
+            pi + 1,
+            pItem.arabicName || "",
+            pItem.birthDate || "",
+            pItem.notes || "",
+            pItem.originalDate || "",
+            pItem.postponedAt || "",
+            pItem.invoiceId || "",
+            pItem.status || "مؤجل"
+          ]);
+        }
+        postSheet.getRange(1, 1, postRows.length, postHeaders.length).setValues(postRows);
+        formatHeader(postSheet, postHeaders.length);
+        try {
+          postSheet.setColumnWidth(1, 60);
+          postSheet.setColumnWidth(2, 280);
+          postSheet.setColumnWidth(3, 140);
+          postSheet.setColumnWidth(4, 250);
+          postSheet.setColumnWidth(5, 130);
+          postSheet.setColumnWidth(6, 160);
+          postSheet.setColumnWidth(7, 100);
+          postSheet.setColumnWidth(8, 100);
+        } catch(cwErr) {}
+      }
+
       return ContentService.createTextOutput(JSON.stringify({ 
         status: "success", 
         message: "تم تحديث وحفظ كافة البيانات في ملف جوجل شيت بنجاح! 🚀" 
@@ -650,6 +684,48 @@ function doPost(e) {
       return ContentService.createTextOutput(JSON.stringify({ 
         status: "success", 
         message: "تم حفظ وتحديث كشف أمان في ورقة (Aman_كشف_حركة_الخدمات_الجماهيرية) بملف جوجل شيت بنجاح! 📑✅" 
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // 5.5 Direct Specific Aman Postponed Names Push
+    if (action === "push_postponed_aman") {
+      var pRowsList = contents.postponedRows || [];
+      var pSheet = getOrCreateSheet(ss, "Aman_Postponed_الأسماء_المرحلة");
+      pSheet.clearContents();
+      var pHeaders = ["م", "الاسم", "تاريخ الميلاد", "الملاحظات (النوع والغرامة)", "تاريخ الكشف الأصلي", "تاريخ ووقت الترحيل", "رقم الفاتورة", "الحالة"];
+      var pRows = [pHeaders];
+      for (var pr = 0; pr < pRowsList.length; pr++) {
+        var prItem = pRowsList[pr];
+        if (prItem && (prItem.arabicName || prItem.birthDate || prItem.notes)) {
+          pRows.push([
+            pr + 1,
+            prItem.arabicName || "",
+            prItem.birthDate || "",
+            prItem.notes || "",
+            prItem.originalDate || "",
+            prItem.postponedAt || "",
+            prItem.invoiceId || "",
+            prItem.status || "مؤجل"
+          ]);
+        }
+      }
+      if (pRows.length > 0) {
+        pSheet.getRange(1, 1, pRows.length, pHeaders.length).setValues(pRows);
+        formatHeader(pSheet, pHeaders.length);
+        try {
+          pSheet.setColumnWidth(1, 60);
+          pSheet.setColumnWidth(2, 280);
+          pSheet.setColumnWidth(3, 140);
+          pSheet.setColumnWidth(4, 250);
+          pSheet.setColumnWidth(5, 130);
+          pSheet.setColumnWidth(6, 160);
+          pSheet.setColumnWidth(7, 100);
+          pSheet.setColumnWidth(8, 100);
+        } catch(cwErr) {}
+      }
+      return ContentService.createTextOutput(JSON.stringify({ 
+        status: "success", 
+        message: "تم حفظ وتحديث ورقة الأسماء المرحلة (Aman_Postponed_الأسماء_المرحلة) بملف جوجل شيت بنجاح! 📑✂️" 
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
@@ -1025,6 +1101,39 @@ function doGet(e) {
                 }
               }
             }
+          }
+        }
+      }
+    }
+
+    // 8. Read Aman Postponed Report (Aman_Postponed_الأسماء_المرحلة)
+    var postReportSheet = ss.getSheetByName("Aman_Postponed_الأسماء_المرحلة") || 
+                          ss.getSheetByName("الأسماء_المرحلة_أمان") || 
+                          ss.getSheetByName("الأسماء_المرحلة");
+    db.amanPostponedRows = [];
+    if (postReportSheet) {
+      var pValRange = postReportSheet.getDataRange().getValues();
+      if (pValRange && pValRange.length > 1) {
+        for (var pRowIdx = 1; pRowIdx < pValRange.length; pRowIdx++) {
+          var pRow = pValRange[pRowIdx];
+          var pName = String(pRow[1] || "").trim();
+          var pBirth = String(pRow[2] || "").trim();
+          var pNotes = String(pRow[3] || "").trim();
+          var pOrigDate = String(pRow[4] || "").trim();
+          var pPostAt = String(pRow[5] || "").trim();
+          var pInvId = pRow[6] !== undefined && pRow[6] !== "" ? Number(pRow[6]) : undefined;
+          var pStatus = String(pRow[7] || "مؤجل").trim();
+          if (pName || pBirth) {
+            db.amanPostponedRows.push({
+              id: "postponed-" + pRowIdx + "-" + Date.now(),
+              arabicName: pName,
+              birthDate: pBirth,
+              notes: pNotes,
+              originalDate: pOrigDate,
+              postponedAt: pPostAt,
+              invoiceId: pInvId,
+              status: pStatus
+            });
           }
         }
       }

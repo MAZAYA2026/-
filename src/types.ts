@@ -114,3 +114,17 @@ export interface AppSettings {
   customHolidays?: HolidayItem[]; // العطلات الرسمية المخصصة والمضافة
   includeSaturdayAsWeekend?: boolean; // اعتبار يوم السبت عطلة أسبوعية للمصالح الحكومية (افتراضياً: نعم)
 }
+
+export interface AmanPostponedItem {
+  id: string;
+  arabicName: string;
+  birthDate: string;
+  notes: string;
+  originalDate: string; // تاريخ الكشف الأصلي (YYYY-MM-DD)
+  postponedAt: string; // وقت وتاريخ الترحيل
+  invoiceId?: number;
+  serviceType?: string;
+  fineName?: string;
+  fineAmount?: number;
+  status?: "مؤجل" | "تم_الإدراج";
+}

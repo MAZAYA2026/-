@@ -1,4 +1,4 @@
-import { Invoice, Service, DictionaryItem, CollectionClosing, Employee, AppSettings, GovernmentFine } from "../types";
+import { Invoice, Service, DictionaryItem, CollectionClosing, Employee, AppSettings, GovernmentFine, AmanPostponedItem } from "../types";
 
 export interface DBPayload {
   services: Service[];
@@ -443,6 +443,76 @@ export async function fetchAmanReportFromGoogleSheets(params?: {
   if (!response.ok) {
     const errData = await response.json().catch(() => ({}));
     throw new Error(errData.error || "فشل جلب بيانات كشف أمان من جوجل شيت");
+  }
+  return response.json();
+}
+
+export async function fetchPostponedAmanNames(): Promise<AmanPostponedItem[]> {
+  const response = await fetch("/api/db/aman-postponed");
+  if (!response.ok) {
+    throw new Error("فشل جلب قائمة الأسماء المرحلة من الخادم");
+  }
+  const result = await response.json();
+  return result.postponedRows || [];
+}
+
+export async function savePostponedAmanNames(
+  postponedRows: AmanPostponedItem[], 
+  syncWithSheets: boolean = true
+): Promise<AmanPostponedItem[]> {
+  const response = await fetch("/api/db/aman-postponed", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ postponedRows, syncWithSheets }),
+  });
+  if (!response.ok) {
+    throw new Error("فشل حفظ الأسماء المرحلة");
+  }
+  const result = await response.json();
+  return result.postponedRows || [];
+}
+
+export async function deletePostponedAmanName(id: string): Promise<AmanPostponedItem[]> {
+  const response = await fetch(`/api/db/aman-postponed/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    throw new Error("فشل حذف الاسم المرحل");
+  }
+  const result = await response.json();
+  return result.postponedRows || [];
+}
+
+export async function syncPostponedAmanToGoogleSheets(
+  postponedRows: AmanPostponedItem[], 
+  webhookUrl?: string
+): Promise<{ status: string; message: string }> {
+  const response = await fetch("/api/sheets/webhook/sync-postponed-aman", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ postponedRows, webhookUrl }),
+  });
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || "فشل تسجيل الأسماء المرحلة في جوجل شيت");
+  }
+  return response.json();
+}
+
+export async function pullPostponedAmanFromGoogleSheets(webhookUrl?: string): Promise<{
+  status: string;
+  postponedRows: AmanPostponedItem[];
+  totalRows: number;
+  message: string;
+}> {
+  const response = await fetch("/api/sheets/webhook/pull-postponed-aman", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ webhookUrl }),
+  });
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || "فشل جلب الأسماء المرحلة من جوجل شيت");
   }
   return response.json();
 }
