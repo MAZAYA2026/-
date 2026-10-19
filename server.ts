@@ -492,6 +492,84 @@ async function pushInvoicesDirectlyToSheet(db: any): Promise<boolean> {
   }
 }
 
+// User explicit requirement:
+// "عند عمل الفواتير التى تبدأ ب# قم بتسجيل البيانات المطلوب لورقة امان فى ورقة الشيت الخاصة بذلك
+// بحيث اى تعديل فى ورقة امان سواء حذف او ترحيل او استدعاء بيتم من الورقة المخصصة لشيت امان وليس من الفاتورة نفسها فى كل مرة"
+function syncInvoiceToAmanReport(invoice: any, db: any) {
+  if (!invoice || !Array.isArray(invoice.customers)) return false;
+  if (!Array.isArray(db.amanReport)) {
+    db.amanReport = [];
+  }
+  let modified = false;
+  invoice.customers.forEach((cust: any, cIdx: number) => {
+    if (!cust.services || !Array.isArray(cust.services)) return;
+    const amanSrv = cust.services.find((s: any) => {
+      const sName = String(s.serviceId || "").trim();
+      return sName.startsWith("#") && !sName.startsWith("##");
+    });
+    if (amanSrv) {
+      const srvName = String(amanSrv.serviceId || "");
+      const isUrgent = srvName.includes("مستعجل") || srvName.includes("عاجل") || srvName.includes("فورى");
+      const hasFine = !!(amanSrv.fineName || (amanSrv.fineAmount && amanSrv.fineAmount > 0));
+      const finePart = hasFine
+        ? ("يوجد غرامة" + (amanSrv.fineName ? " (" + amanSrv.fineName + ")" : ""))
+        : "لا توجد غرامة";
+      let noteText = (isUrgent ? "مستعجل" : "عادي") + " - " + finePart;
+      if (amanSrv.notes) noteText += " | " + amanSrv.notes;
+
+      // Extract birthDate from nationalId if missing
+      let bDate = (cust.birthDate || "").trim();
+      if (!bDate && cust.nationalId && cust.nationalId.length >= 7) {
+        const cleanId = cust.nationalId.replace(/\D/g, "");
+        if (cleanId.length >= 7) {
+          const centuryDigit = parseInt(cleanId[0]);
+          const yy = cleanId.substring(1, 3);
+          const mm = cleanId.substring(3, 5);
+          const dd = cleanId.substring(5, 7);
+          const year = (centuryDigit === 3 ? 2000 : 1900) + parseInt(yy);
+          bDate = `${year}/${mm}/${dd}`;
+        }
+      }
+
+      const existingIdx = db.amanReport.findIndex((r: any) => 
+        (r.invoiceId === invoice.invoiceId && r.customerIndex === cIdx) ||
+        (r.invoiceId === invoice.invoiceId && r.arabicName?.trim() === cust.arabicName?.trim())
+      );
+
+      const amanItem = {
+        id: `inv-${invoice.invoiceId}-c-${cIdx}`,
+        arabicName: cust.arabicName || "",
+        birthDate: bDate,
+        notes: noteText,
+        invoiceId: invoice.invoiceId,
+        customerIndex: cIdx,
+        date: invoice.date || "",
+        serviceType: isUrgent ? "مستعجل" : "عادي",
+        hasFine,
+        fineName: amanSrv.fineName || "",
+        fineAmount: amanSrv.fineAmount || 0,
+      };
+
+      if (existingIdx !== -1) {
+        db.amanReport[existingIdx] = {
+          ...db.amanReport[existingIdx],
+          arabicName: amanItem.arabicName,
+          birthDate: amanItem.birthDate,
+          date: amanItem.date,
+          serviceType: amanItem.serviceType,
+          hasFine: amanItem.hasFine,
+          fineName: amanItem.fineName,
+          fineAmount: amanItem.fineAmount,
+        };
+      } else {
+        db.amanReport.push(amanItem);
+      }
+      modified = true;
+    }
+  });
+  return modified;
+}
+
 // 4. Create invoice endpoint: Records directly to Google Sheet
 app.post("/api/db/invoices", async (req, res) => {
   const db = readDB();
@@ -519,6 +597,9 @@ app.post("/api/db/invoices", async (req, res) => {
 
   // Automatically learn customer names into the dictionary
   autoLearnCustomerNames(newInvoice.customers, db);
+
+  // User requirement: Automatically register services starting with # into Aman Report
+  syncInvoiceToAmanReport(newInvoice, db);
 
   writeDB(db);
 
@@ -548,6 +629,9 @@ app.put("/api/db/invoices/:id", async (req, res) => {
   // Automatically learn customer names into the dictionary
   autoLearnCustomerNames(db.invoices[index].customers, db);
 
+  // User requirement: Automatically register services starting with # into Aman Report
+  syncInvoiceToAmanReport(db.invoices[index], db);
+
   writeDB(db);
 
   // User explicit requirement: Record directly on Google Sheet
@@ -567,6 +651,9 @@ app.delete("/api/db/invoices/:id", async (req, res) => {
   }
 
   db.invoices = filtered;
+  if (Array.isArray(db.amanReport)) {
+    db.amanReport = db.amanReport.filter((r: any) => r.invoiceId !== invoiceId);
+  }
   writeDB(db);
 
   // User explicit requirement: Record directly on Google Sheet
@@ -1708,14 +1795,20 @@ app.post("/api/sheets/webhook/pull-aman", async (req, res) => {
       return extracted;
     };
 
-    // If Aman sheet in Google Sheets was empty, extract Aman transactions directly from Google Sheets invoices
-    if (rawAman.length === 0 && pulledDB && Array.isArray(pulledDB.invoices) && pulledDB.invoices.length > 0) {
-      rawAman = extractFromInvoices(pulledDB.invoices);
+    // 1. Prefer pulledDB.amanReport from Google Sheets
+    // 2. If empty in pulled sheet, use local db.amanReport
+    // 3. User explicit requirement: "بيانات كشف امان تجيبة من ورقة الشيت الخاصة به وليس من الفاتورة نفسها فى كل مرة"
+    if (rawAman.length === 0 && db && Array.isArray(db.amanReport) && db.amanReport.length > 0) {
+      rawAman = db.amanReport;
     }
 
-    // Fallback to local invoices if still empty
-    if (rawAman.length === 0 && db && Array.isArray(db.invoices) && db.invoices.length > 0) {
-      rawAman = extractFromInvoices(db.invoices);
+    // Only on brand-new setup where neither sheet nor db had any Aman report:
+    if (rawAman.length === 0 && (!db.amanReport || db.amanReport.length === 0)) {
+      if (pulledDB && Array.isArray(pulledDB.invoices) && pulledDB.invoices.length > 0) {
+        rawAman = extractFromInvoices(pulledDB.invoices);
+      } else if (db && Array.isArray(db.invoices) && db.invoices.length > 0) {
+        rawAman = extractFromInvoices(db.invoices);
+      }
     }
 
     // Enrich rows with serviceType and fine details from invoices if not already present
@@ -1781,6 +1874,52 @@ app.post("/api/sheets/webhook/pull-aman", async (req, res) => {
   } catch (err: any) {
     res.status(500).json({ error: "فشل جلب بيانات كشف أمان من جوجل شيت: " + err.message });
   }
+});
+
+// --- Dedicated Aman Report Local Endpoints ---
+// GET all Aman report rows from local DB cache
+app.get("/api/db/aman", (req, res) => {
+  const db = readDB();
+  res.json({
+    status: "success",
+    rows: db.amanReport || [],
+  });
+});
+
+// POST save Aman report rows (Dedicated Save Button: "الحفظ يكون بتخصيص زرار للحفظ بعد ما اخلص كل المطلوب اضغط حفظ")
+app.post("/api/db/aman", async (req, res) => {
+  const { rows, syncWithSheets } = req.body;
+  const db = readDB();
+  if (Array.isArray(rows)) {
+    db.amanReport = rows;
+    writeDB(db);
+  }
+
+  let sheetSyncResult: any = null;
+  const webhookUrl = db.settings?.googleSheetWebhookUrl;
+  if (syncWithSheets && webhookUrl && webhookUrl.startsWith("http")) {
+    try {
+      const resp = await fetch(webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({
+          action: "push_aman",
+          amanRows: db.amanReport || [],
+        }),
+        redirect: "follow",
+      });
+      sheetSyncResult = await resp.json().catch(() => ({}));
+    } catch (e: any) {
+      console.warn("Could not sync aman rows to sheet:", e.message);
+    }
+  }
+
+  res.json({
+    status: "success",
+    rows: db.amanReport || [],
+    sheetSyncResult,
+    message: "تم حفظ وتحديث كشف أمان في ورقة الشيت بنجاح! 💾✅",
+  });
 });
 
 // --- Dedicated Aman Postponed Names (الأسماء المرحلة من كشف أمان) Endpoints ---

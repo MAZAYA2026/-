@@ -5,6 +5,8 @@ import {
   createInvoiceOnServer, 
   syncAmanReportToGoogleSheets, 
   fetchAmanReportFromGoogleSheets,
+  fetchLocalAmanReport,
+  saveLocalAmanReport,
   fetchPostponedAmanNames,
   savePostponedAmanNames,
   deletePostponedAmanName,
@@ -200,6 +202,21 @@ export default function AmanReport({
   const [isLoadingPostponed, setIsLoadingPostponed] = useState(false);
   const [deleteAfterInsert, setDeleteAfterInsert] = useState(true);
 
+  // Manual save tracking (User requirement: الحفظ بزر مخصص بعد الانتهاء وليس لحظياً بمجرد الخروج من الخلية)
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+
+  // Print Date Dialog states (User requirement: قبل الطباعة يسأل عن تاريخ اليوم أو تاريخ مخصص يحدده يدوياً)
+  const [isPrintDateModalOpen, setIsPrintDateModalOpen] = useState(false);
+  const [printDateMode, setPrintDateMode] = useState<"today" | "custom">("today");
+  const [customPrintDate, setCustomPrintDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().split("T")[0];
+  });
+  const [selectedPrintDateHeader, setSelectedPrintDateHeader] = useState<string>(() => {
+    return new Date().toISOString().split("T")[0].replace(/-/g, "/");
+  });
+
   // Load postponed names on mount
   useEffect(() => {
     fetchPostponedAmanNames()
@@ -281,86 +298,90 @@ export default function AmanReport({
   // Track original values to detect real changes onBlur
   const originalValuesRef = useRef<Map<string, { arabicName: string; birthDate: string; notes: string }>>(new Map());
 
-  // Function to load data directly from Google Sheets
-  const loadDataFromGoogleSheet = useCallback(async (isSilent = false) => {
-    const webhookUrl = settings?.googleSheetWebhookUrl;
-    if (!webhookUrl || !webhookUrl.startsWith("http")) {
-      // If webhook is not configured yet, fallback to baseCustomers
-      setTableRows(baseCustomers);
-      baseCustomers.forEach((b) => {
-        originalValuesRef.current.set(b.id, {
-          arabicName: b.arabicName,
-          birthDate: b.birthDate,
-          notes: b.notes,
-        });
-      });
-      return;
-    }
-
+  // Function to load data directly from the dedicated Aman Sheet / Database
+  // User explicit requirement:
+  // "عايز بيانات ومحتوى كشف امان تجيبة من ورقة الشيت الخاصة والمسجل بها الكشف وليس من بيانات الفاتورة نفسها"
+  const loadDataFromDedicatedSheet = useCallback(async (isSilent = false) => {
     if (!isSilent) setIsLoadingSheets(true);
     setSheetFetchError(null);
 
     try {
-      const res = await fetchAmanReportFromGoogleSheets({
-        dateFrom,
-        dateTo,
-        webhookUrl,
+      const webhookUrl = settings?.googleSheetWebhookUrl;
+      let loadedRows: any[] = [];
+
+      // 1. Try fetching from Google Sheet dedicated tab if webhook is configured
+      if (webhookUrl && webhookUrl.startsWith("http")) {
+        try {
+          const res = await fetchAmanReportFromGoogleSheets({
+            dateFrom,
+            dateTo,
+            webhookUrl,
+          });
+          if (res && Array.isArray(res.rows) && res.rows.length > 0) {
+            loadedRows = res.rows;
+          }
+        } catch (sheetErr: any) {
+          console.warn("Google Sheet pull notice:", sheetErr.message);
+        }
+      }
+
+      // 2. If Google Sheet tab was empty or webhook not configured, load from dedicated server database
+      if (loadedRows.length === 0) {
+        const localRows = await fetchLocalAmanReport().catch(() => []);
+        if (Array.isArray(localRows) && localRows.length > 0) {
+          const fromYMD = normalizeDateToYMD(dateFrom);
+          const toYMD = normalizeDateToYMD(dateTo);
+          loadedRows = localRows.filter((r: any) => {
+            if (!r.date) return true;
+            const rYMD = normalizeDateToYMD(r.date);
+            if (!rYMD) return true;
+            return rYMD >= fromYMD && rYMD <= toYMD;
+          });
+        }
+      }
+
+      // 3. Only if both dedicated sheet and database are empty (first time run), fallback to base customers
+      if (loadedRows.length === 0 && baseCustomers.length > 0) {
+        loadedRows = baseCustomers;
+      }
+
+      const processed: AmanRowItem[] = loadedRows.map((row, idx) => {
+        const details = resolveAmanDetails(row, invoices, services);
+        return {
+          id: row.id || `sheet-${idx}`,
+          arabicName: row.arabicName || "",
+          birthDate: row.birthDate || "",
+          notes: row.notes || "",
+          date: row.date || dateFrom,
+          invoiceId: row.invoiceId,
+          customerIndex: row.customerIndex,
+          isCustomManual: !row.invoiceId,
+          serviceType: details.serviceType,
+          hasFine: details.hasFine,
+          fineName: details.fineName,
+          fineAmount: details.fineAmount,
+        };
       });
 
-      if (res && Array.isArray(res.rows) && res.rows.length > 0) {
-        const loaded: AmanRowItem[] = res.rows.map((row, idx) => {
-          const details = resolveAmanDetails(row, invoices, services);
-          return {
-            id: row.id || `sheet-${idx}`,
-            arabicName: row.arabicName || "",
-            birthDate: row.birthDate || "",
-            notes: row.notes || "",
-            date: row.date || dateFrom,
-            invoiceId: row.invoiceId,
-            isCustomManual: !row.invoiceId,
-            serviceType: details.serviceType,
-            hasFine: details.hasFine,
-            fineName: details.fineName,
-            fineAmount: details.fineAmount,
-          };
-        });
+      setTableRows(processed);
+      setHasUnsavedChanges(false);
 
-        setTableRows(loaded);
-        originalValuesRef.current.clear();
-        loaded.forEach((r) => {
-          originalValuesRef.current.set(r.id, {
-            arabicName: r.arabicName,
-            birthDate: r.birthDate,
-            notes: r.notes,
-          });
-        });
-        setSaveStatus(`تم جلب وتحميل بيانات كشف أمان من جوجل شيت مباشرة (${loaded.length} عميل) 📊📥`);
+      if (!isSilent && processed.length > 0) {
+        setSaveStatus(`تم تحميل ${processed.length} عميل من ورقة كشف أمان المخصصة بنجاح 📊📥`);
         setTimeout(() => setSaveStatus(null), 3500);
-      } else {
-        // Sheet has no rows yet for this range, fallback to invoice base customers if any
-        setTableRows(baseCustomers);
-        baseCustomers.forEach((b) => {
-          originalValuesRef.current.set(b.id, {
-            arabicName: b.arabicName,
-            birthDate: b.birthDate,
-            notes: b.notes,
-          });
-        });
       }
     } catch (err: any) {
-      console.warn("Direct Google Sheet fetch for Aman Report:", err.message);
-      setSheetFetchError(err.message || "تعذر جلب البيانات من جوجل شيت");
-      // Fallback to baseCustomers on network failure
-      setTableRows(baseCustomers);
+      console.warn("Load dedicated Aman sheet error:", err.message);
+      setSheetFetchError(err.message || "تعذر جلب بيانات كشف أمان");
     } finally {
       setIsLoadingSheets(false);
     }
   }, [dateFrom, dateTo, settings?.googleSheetWebhookUrl, baseCustomers, invoices, services]);
 
-  // Load from Google Sheet directly upon component opening or whenever the date range changes
+  // Load from dedicated sheet upon opening or date change
   useEffect(() => {
-    loadDataFromGoogleSheet();
-  }, [dateFrom, dateTo, loadDataFromGoogleSheet]);
+    loadDataFromDedicatedSheet();
+  }, [dateFrom, dateTo, loadDataFromDedicatedSheet]);
 
   // Rows per official A4 print page
   const ROWS_PER_PAGE = 35;
@@ -417,9 +438,11 @@ export default function AmanReport({
       playLanguageWarningSound();
     }
 
+    setHasUnsavedChanges(true);
+
     setTableRows((prev) => {
       const copy = [...prev];
-      // Expand if typing in an empty padded slot
+      // Expand if typing in an empty padded slot beyond tableRows
       while (copy.length <= rowIndex) {
         copy.push({
           id: `manual-${Date.now()}-${copy.length}`,
@@ -438,160 +461,46 @@ export default function AmanReport({
     });
   };
 
-  // Trigger auto-save on blur
-  const handleCellBlur = async (rowIndex: number) => {
-    const row = displayRows[rowIndex];
-    if (!row) return;
+  // User explicit requirement:
+  // "عايز طريقة الحفظ فى شيت امان متكونش لحظية ومتكونش مجرد الخروج من الخلية انما الحفظ يكون بتخصيص زرار للحفظ بعد ما اخلص كل المطلوب اضغط حفظ"
+  // "اى تعديل فى ورقة امان سواء حذف او ترحيل او استدعاء بيتم من الورقة المخصصة لشيت امان وليس من الفاتورة نفسها فى كل مرة"
+  const handleCellBlur = (_rowIndex: number) => {
+    // No auto-save on blur. Edits remain in state until user clicks the dedicated Save button.
+  };
 
-    const trimmedName = row.arabicName.trim();
-    const trimmedBirthDate = row.birthDate.trim();
-    const trimmedNotes = row.notes.trim();
-
-    // Check if row had cached original value
-    const orig = originalValuesRef.current.get(row.id);
-    if (orig) {
-      if (
-        orig.arabicName === trimmedName &&
-        orig.birthDate === trimmedBirthDate &&
-        orig.notes === trimmedNotes
-      ) {
-        return; // No change made
-      }
-    } else {
-      // For empty row, if nothing was entered, ignore
-      if (!trimmedName && !trimmedBirthDate && !trimmedNotes) {
-        return;
-      }
-    }
-
+  // Dedicated Save Aman Sheet Handler:
+  const handleSaveAmanSheet = async () => {
     setIsSaving(true);
     try {
-      // 1. Prepare updated active rows for direct registration on Google Sheets
-      const updatedDisplayRows = displayRows.map((r, i) => 
-        i === rowIndex 
-          ? { ...r, arabicName: trimmedName, birthDate: trimmedBirthDate, notes: trimmedNotes } 
-          : r
-      );
-      const activeRowsToRecord = updatedDisplayRows.filter((r) => r.arabicName.trim().length > 0);
+      const activeRowsToRecord = tableRows
+        .filter((r) => r.arabicName && r.arabicName.trim().length > 0)
+        .map((r, idx) => ({
+          ...r,
+          index: idx + 1,
+        }));
 
-      // 2. Also keep linked invoice in sync if invoiceId exists
-      if (row.invoiceId !== undefined && row.customerIndex !== undefined) {
-        const targetInvoice = invoices.find((inv) => inv.invoiceId === row.invoiceId);
-        if (targetInvoice && targetInvoice.customers[row.customerIndex]) {
-          const updatedCustomers = targetInvoice.customers.map((c, cIdx) => {
-            if (cIdx !== row.customerIndex) return c;
-            return {
-              ...c,
-              arabicName: trimmedName || c.arabicName,
-              birthDate: trimmedBirthDate || c.birthDate,
-              services: c.services.map((s) => {
-                if (s.serviceId.startsWith("#") && !s.serviceId.startsWith("##")) {
-                  return { ...s, notes: trimmedNotes };
-                }
-                return s;
-              }),
-            };
-          });
+      // 1. Save to dedicated Aman sheet in server database
+      await saveLocalAmanReport(activeRowsToRecord, true);
 
-          const updatedInvoice = {
-            ...targetInvoice,
-            customers: updatedCustomers,
-          };
-
-          try {
-            const savedInv = await updateInvoiceOnServer(targetInvoice.invoiceId, updatedInvoice);
-            onInvoiceUpdated?.(savedInv);
-          } catch (e) {
-            console.warn("Notice: invoice server update:", e);
-          }
-        }
-      } 
-      // Case 2: New entry in an empty row
-      else if (trimmedName.length > 0 && !row.invoiceId) {
-        const defaultAmanService = services.find(
-          (s) => s.name.startsWith("#") && !s.name.startsWith("##")
-        ) || {
-          id: "# استخراج جواز سفر",
-          name: "# استخراج جواز سفر",
-          govPrice: 0,
-          officeFee: 0,
-        };
-
-        const newCustomer: CustomerInput = {
-          arabicName: trimmedName,
-          englishName: "",
-          englishNameOption: "gemini",
-          nationalId: "",
-          birthDate: trimmedBirthDate,
-          phone: "",
-          profession: "",
-          services: [
-            {
-              serviceId: defaultAmanService.name || defaultAmanService.id,
-              quantity: 1,
-              price: (defaultAmanService.govPrice || 0) + (defaultAmanService.officeFee || 0),
-              deliveryDate: dateFrom,
-              notes: trimmedNotes,
-            },
-          ],
-        };
-
-        const newInvoiceData: Partial<Invoice> = {
-          date: row.date || dateFrom || todayStr,
-          status: InvoiceStatus.NEW,
-          employeeName: activeEmployee?.name || "الموظف",
-          customers: [newCustomer],
-          totalGov: defaultAmanService.govPrice || 0,
-          totalOffice: defaultAmanService.officeFee || 0,
-          totalAmount: (defaultAmanService.govPrice || 0) + (defaultAmanService.officeFee || 0),
-        };
-
+      // 2. Sync to Google Sheets dedicated tab if webhook configured
+      if (settings?.googleSheetWebhookUrl) {
         try {
-          const createdInv = await createInvoiceOnServer(newInvoiceData);
-          onInvoiceCreated?.(createdInv);
-          const newRowId = `inv-${createdInv.invoiceId}-c-0`;
-          setTableRows((prev) => {
-            const copy = [...prev];
-            if (copy[rowIndex]) {
-              copy[rowIndex] = {
-                ...copy[rowIndex],
-                id: newRowId,
-                invoiceId: createdInv.invoiceId,
-                customerIndex: 0,
-                isCustomManual: false,
-              };
-            }
-            return copy;
+          await syncAmanReportToGoogleSheets({
+            dateFrom,
+            dateTo,
+            amanRows: activeRowsToRecord,
+            webhookUrl: settings.googleSheetWebhookUrl,
           });
-        } catch (e) {
-          console.warn("Notice: invoice create:", e);
+        } catch (syncErr: any) {
+          console.warn("Aman Sheet direct push notice:", syncErr);
         }
       }
 
-      // Update cached values
-      originalValuesRef.current.set(row.id, {
-        arabicName: trimmedName,
-        birthDate: trimmedBirthDate,
-        notes: trimmedNotes,
-      });
-
-      // 3. User explicit requirement: "بيانات كشف امان تسجل على الداتا شيت مباشرة وليس تخزين محلى"
-      // Record directly to Google Sheets database sheet
-      try {
-        await syncAmanReportToGoogleSheets({
-          dateFrom,
-          dateTo,
-          amanRows: activeRowsToRecord,
-          webhookUrl: settings?.googleSheetWebhookUrl,
-        });
-        showSaveNotice(`تم تسجيل (${trimmedName}) على الداتا شيت بجوجل شيت مباشرة بنجاح 📑📊✓`);
-      } catch (syncErr: any) {
-        console.warn("Aman Sheet direct push error:", syncErr);
-        showSaveNotice(`تم الحفظ (يرجى التحقق من اتصال جوجل شيت: ${syncErr.message}) ⚠️`);
-      }
+      setHasUnsavedChanges(false);
+      showSaveNotice(`تم حفظ وتحديث كشف أمان في ورقة الشيت بنجاح (${activeRowsToRecord.length} عميل) 💾✅`);
     } catch (err: any) {
-      console.error("Direct sheet recording failed on blur:", err);
-      showSaveNotice(`خطأ أثناء التسجيل: ${err.message}`);
+      console.error("Save aman sheet failed:", err);
+      showSaveNotice(`خطأ أثناء حفظ كشف أمان: ${err.message} ⚠️`);
     } finally {
       setIsSaving(false);
     }
@@ -610,11 +519,13 @@ export default function AmanReport({
         isCustomManual: true,
       },
     ]);
-    showSaveNotice("تمت إضافة سطر جديد للكشف، اكتب الاسم وسيسجل على جوجل شيت مباشرة بمجرد الخروج من الخلية ✍️");
+    setHasUnsavedChanges(true);
+    showSaveNotice("تمت إضافة سطر جديد للكشف. اكتب البيانات ثم اضغط 'حفظ التغييرات في كشف أمان' 💾");
   };
 
   // User explicit requirement:
-  // "الزرار الاول مهمتة عمل قص لبيانات هذا الصف الاسم وتاريخ الميلاد وتخصيص له مكان حفظ فى شيت الاكسيل ورقة خاصة بهذة البيانات المرحلة والهدف من هذا ان اوقات بنحتاج لحذف بيانات اسم مؤقتا من الورقة اللى هنطبعها وسنحتاج لادراجها فيما بعد باى يوم اخر"
+  // "الزرار الاول مهمتة عمل قص لبيانات هذا الصف الاسم وتاريخ الميلاد وتخصيص له مكان حفظ فى شيت الاكسيل ورقة خاصة بهذة البيانات المرحلة"
+  // "وكمان عايز لما اقص بيانات صف للترحيل فى ورقة الاسماء المرحلة عايزة يظبط باقى المسلسل فى الكشف يعنى يقوم برفع باقى البيانات المعروضة لفوق ليكون مطابق تمام لنفس ورقة الشيت وعلشان ميكونش فى صفوف فارغة"
   const handleCutRow = async (rowIndex: number) => {
     const row = displayRows[rowIndex];
     if (!row || !row.arabicName.trim()) {
@@ -642,28 +553,19 @@ export default function AmanReport({
     const updatedPostponed = [newPostponedItem, ...postponedList];
     setPostponedList(updatedPostponed);
 
-    // Clear data from this row so it doesn't appear on today's printout
+    // Remove this row completely from tableRows so all subsequent rows are shifted up!
+    // No empty gaps in the middle of active rows, and serial numbering recalculates sequentially:
     setTableRows((prev) => {
       const copy = [...prev];
       if (rowIndex < copy.length) {
-        copy[rowIndex] = {
-          ...copy[rowIndex],
-          arabicName: "",
-          birthDate: "",
-          notes: "",
-          invoiceId: undefined,
-          customerIndex: undefined,
-          isCustomManual: true,
-        };
+        copy.splice(rowIndex, 1);
       }
       return copy;
     });
 
-    if (row.id) {
-      originalValuesRef.current.delete(row.id);
-    }
+    setHasUnsavedChanges(true);
 
-    // 1. Save to server DB and sync to Google Sheets tab Aman_Postponed_الأسماء_المرحلة
+    // Persist postponed item to server & Google Sheets tab
     try {
       await savePostponedAmanNames(updatedPostponed, true);
       if (settings?.googleSheetWebhookUrl) {
@@ -673,23 +575,7 @@ export default function AmanReport({
       console.warn("Failed to persist postponed item:", err);
     }
 
-    // 2. Sync the active report to Google Sheets without this cut person
-    try {
-      const updatedDisplayRows = displayRows.map((r, i) =>
-        i === rowIndex ? { ...r, arabicName: "", birthDate: "", notes: "", invoiceId: undefined } : r
-      );
-      const remainingActive = updatedDisplayRows.filter((r) => r.arabicName.trim().length > 0);
-      await syncAmanReportToGoogleSheets({
-        dateFrom,
-        dateTo,
-        amanRows: remainingActive,
-        webhookUrl: settings?.googleSheetWebhookUrl,
-      });
-    } catch (syncErr) {
-      console.warn("Failed to sync aman report after cut:", syncErr);
-    }
-
-    showSaveNotice(`تم قص وترحيل بيانات (${cutName}) وحفظها في ورقة الأسماء المرحلة بملف الإكسيل بنجاح! ✂️📑`);
+    showSaveNotice(`تم قص وترحيل (${cutName}) وحفظه في ورقة الأسماء المرحلة، ورُفعت باقي الصفوف لأعلى لتعديل المسلسل! ✂️⬆️ (اضغط "حفظ التغييرات" لتثبيت الكشف 💾)`);
   };
 
   // User explicit requirement:
@@ -700,50 +586,40 @@ export default function AmanReport({
   };
 
   const handleInsertPostponedItem = async (item: AmanPostponedItem) => {
-    const rowIndex = targetInsertRowIndex !== null 
-      ? targetInsertRowIndex 
-      : displayRows.findIndex((r) => !r.arabicName.trim());
-
-    const actualRowIndex = rowIndex >= 0 ? rowIndex : displayRows.length;
-
-    // Insert into row
-    setTableRows((prev) => {
-      const copy = [...prev];
-      while (copy.length <= actualRowIndex) {
-        copy.push({
-          id: `manual-${Date.now()}-${copy.length}`,
-          arabicName: "",
-          birthDate: "",
-          notes: "",
-          date: dateFrom,
-          isCustomManual: true,
-        });
-      }
-      copy[actualRowIndex] = {
-        ...copy[actualRowIndex],
-        arabicName: item.arabicName,
-        birthDate: item.birthDate,
-        notes: item.notes,
-        invoiceId: item.invoiceId,
-        serviceType: item.serviceType as any,
-        fineName: item.fineName,
-        fineAmount: item.fineAmount,
-      };
-      return copy;
-    });
-
-    // Update cached original values
-    const rowId = displayRows[actualRowIndex]?.id || `manual-${Date.now()}`;
-    originalValuesRef.current.set(rowId, {
+    const newRow: AmanRowItem = {
+      id: `manual-${Date.now()}`,
       arabicName: item.arabicName,
       birthDate: item.birthDate,
       notes: item.notes,
+      date: dateFrom,
+      invoiceId: item.invoiceId,
+      serviceType: item.serviceType as any,
+      fineName: item.fineName,
+      fineAmount: item.fineAmount,
+      hasFine: !!(item.fineName || (item.fineAmount && item.fineAmount > 0)),
+      isCustomManual: true,
+    };
+
+    setTableRows((prev) => {
+      const copy = [...prev];
+      if (targetInsertRowIndex !== null && targetInsertRowIndex < copy.length) {
+        // If target slot is an existing empty row, replace it; otherwise insert at position
+        if (!copy[targetInsertRowIndex].arabicName.trim()) {
+          copy[targetInsertRowIndex] = newRow;
+        } else {
+          copy.splice(targetInsertRowIndex, 0, newRow);
+        }
+      } else {
+        copy.push(newRow);
+      }
+      return copy;
     });
 
+    setHasUnsavedChanges(true);
+
     // Remove from postponed list if toggle enabled
-    let updatedPostponed = postponedList;
     if (deleteAfterInsert) {
-      updatedPostponed = postponedList.filter((p) => p.id !== item.id);
+      const updatedPostponed = postponedList.filter((p) => p.id !== item.id);
       setPostponedList(updatedPostponed);
       try {
         await deletePostponedAmanName(item.id);
@@ -755,31 +631,7 @@ export default function AmanReport({
       }
     }
 
-    // Sync updated active report to Google Sheets
-    try {
-      const updatedDisplayRows = displayRows.map((r, i) =>
-        i === actualRowIndex
-          ? {
-              ...r,
-              arabicName: item.arabicName,
-              birthDate: item.birthDate,
-              notes: item.notes,
-              invoiceId: item.invoiceId,
-            }
-          : r
-      );
-      const activeToSync = updatedDisplayRows.filter((r) => r.arabicName.trim().length > 0);
-      await syncAmanReportToGoogleSheets({
-        dateFrom,
-        dateTo,
-        amanRows: activeToSync,
-        webhookUrl: settings?.googleSheetWebhookUrl,
-      });
-    } catch (syncErr) {
-      console.warn("Failed to sync aman report after insertion:", syncErr);
-    }
-
-    showSaveNotice(`تم إدراج بيانات (${item.arabicName}) بالكشف بنجاح! 📥✅`);
+    showSaveNotice(`تم إدراج بيانات (${item.arabicName}) بالكشف بنجاح! 📥 (تذكر الضغط على "حفظ التغييرات" 💾)`);
     setIsPostponedModalOpen(false);
     setTargetInsertRowIndex(null);
   };
@@ -931,8 +783,32 @@ export default function AmanReport({
     return `${scaledSize}px`;
   };
 
+  // User explicit requirement:
+  // "عايز قبل الضغط على زرار طباعه يسألنى عايز تظهر فى الورقة تاريخ اليوم فى الطباعه ام بتاريخ اخر لان اوقات بنحتاج طباعه الكشف وسنستخدمة بعد يوم او يومين"
+  const handleOpenPrintModal = () => {
+    setIsPrintDateModalOpen(true);
+  };
+
+  const handleConfirmPrint = (mode: "today" | "custom", customDateValue?: string) => {
+    let headerValue = todayStr.replace(/-/g, "/");
+    if (mode === "custom") {
+      const selected = customDateValue || customPrintDate || todayStr;
+      headerValue = selected.replace(/-/g, "/");
+    } else {
+      headerValue = todayStr.replace(/-/g, "/");
+    }
+
+    setSelectedPrintDateHeader(headerValue);
+    setIsPrintDateModalOpen(false);
+
+    // Give React a tick to update DOM with selectedPrintDateHeader
+    setTimeout(() => {
+      executePrint();
+    }, 150);
+  };
+
   // Direct print of the styled A4 pages
-  const handlePrintA4 = () => {
+  const executePrint = () => {
     const printContent = reportPrintRef.current?.innerHTML;
     if (!printContent) return;
 
@@ -1364,11 +1240,32 @@ export default function AmanReport({
 
           {/* Action Buttons */}
           <div className="flex items-center gap-2 flex-wrap">
+            {/* Dedicated Save Aman Sheet Button (User requirement: الحفظ بزر مخصص بعد الانتهاء وليس بمجرد الخروج من الخلية) */}
+            <button
+              type="button"
+              disabled={isSaving}
+              onClick={handleSaveAmanSheet}
+              className={`px-4 py-2 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs ${
+                hasUnsavedChanges
+                  ? "bg-emerald-600 hover:bg-emerald-700 text-white ring-2 ring-emerald-400 shadow-md animate-pulse"
+                  : "bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300"
+              }`}
+              title="حفظ وتثبيت كافة التعديلات في ورقة كشف أمان وشيت الإكسيل"
+            >
+              <Save className={`w-4 h-4 ${isSaving ? "animate-spin text-emerald-300" : ""}`} />
+              <span>{isSaving ? "جاري الحفظ..." : "حفظ التغييرات في كشف أمان 💾"}</span>
+              {hasUnsavedChanges && (
+                <span className="bg-amber-300 text-amber-950 px-1.5 py-0.5 rounded-full text-[10px] font-black">
+                  تعديلات غير محفوظة
+                </span>
+              )}
+            </button>
+
             <button
               type="button"
               onClick={handleAddNewRow}
               className="px-3.5 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs"
-              title="إضافة سطر جديد للكتابة والتسجيل المباشر"
+              title="إضافة سطر جديد للكتابة في الكشف"
             >
               <Plus className="w-4 h-4" />
               إضافة سطر جديد ➕
@@ -1395,12 +1292,12 @@ export default function AmanReport({
             <button
               type="button"
               disabled={isLoadingSheets}
-              onClick={() => loadDataFromGoogleSheet(false)}
+              onClick={() => loadDataFromDedicatedSheet(false)}
               className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
-              title="إعادة تحميل البيانات مباشرة من جوجل شيت"
+              title="إعادة تحميل البيانات مباشرة من ورقة كشف أمان"
             >
               <RefreshCw className={`w-4 h-4 ${isLoadingSheets ? "animate-spin text-blue-600" : ""}`} />
-              {isLoadingSheets ? "جاري الجلب من شيت..." : "تحديث من جوجل شيت 🔄"}
+              {isLoadingSheets ? "جاري الجلب من شيت..." : "تحديث من شيت أمان 🔄"}
             </button>
 
             <button
@@ -1414,8 +1311,9 @@ export default function AmanReport({
 
             <button
               type="button"
-              onClick={handlePrintA4}
+              onClick={handleOpenPrintModal}
               className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-xs cursor-pointer"
+              title="طباعة الكشف مع خيارات تحديد تاريخ اليوم أو تاريخ مخصص أو تركه فارغاً"
             >
               <Printer className="w-4 h-4" />
               طباعة الكشف A4 (35 صف)
@@ -1427,9 +1325,9 @@ export default function AmanReport({
         {/* Tip & hint note */}
         <div className="bg-blue-50/70 border border-blue-100 rounded-xl px-3.5 py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-blue-900">
           <div className="flex items-center gap-2">
-            <span className="font-bold">💡 التسجيل المباشر على جوجل شيت:</span>
+            <span className="font-bold">💡 الحفظ والتعديل في كشف أمان:</span>
             <span>
-              يتم جلب البيانات وتحميلها من ورقة الداتا شيت بجوجل شيت مباشرة، وعند كتابة أو تعديل أي اسم يتم تسجيله لحظياً ومباشرة على جوجل شيت دون تخزين محلي.
+              يتم استدعاء وحفظ بيانات كشف أمان من الورقة المخصصة لشيت أمان، ويمكنك التعديل والقص والإدراج بحرية ثم الضغط على زر &quot;حفظ التغييرات في كشف أمان&quot; 💾 لحفظ التعديلات في الإكسيل.
             </span>
           </div>
           <span className="font-mono font-bold shrink-0 bg-blue-100 text-blue-800 px-2 py-0.5 rounded-md text-[11px]">
@@ -1576,12 +1474,12 @@ export default function AmanReport({
                       كشف حركة التابع للخدمات الجماهيرية
                     </div>
 
-                    {/* نهاية الصف: التاريخ :        /        / 2026 */}
+                    {/* نهاية الصف: التاريخ المختار قبل الطباعة */}
                     <div 
                       className="text-left shrink-0 select-none" 
                       style={{ fontFamily: "'Cairo', sans-serif", fontSize: "17.5px", fontWeight: "bold", whiteSpace: "nowrap", direction: "rtl" }}
                     >
-                      <span>التاريخ : &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; / &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; / 2026</span>
+                      <span>التاريخ : {selectedPrintDateHeader || todayStr.replace(/-/g, "/")}</span>
                     </div>
                   </div>
 
@@ -2051,6 +1949,138 @@ export default function AmanReport({
                 className="px-4 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold rounded-xl transition-colors cursor-pointer"
               >
                 إغلاق
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* Print Date Dialog Modal (User requirement: قبل الطباعة يسأل عن تاريخ اليوم أو تاريخ مخصص آخر أو تركه فارغاً للكتابة باليد) */}
+      {isPrintDateModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-fade-in font-cairo">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden flex flex-col">
+            
+            {/* Modal Header */}
+            <div className="px-5 py-4 bg-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <span className="p-2 bg-white/10 rounded-xl">
+                  <Printer className="w-5 h-5 text-white" />
+                </span>
+                <div>
+                  <h3 className="font-black text-base sm:text-lg">تاريخ الطباعة لكشف أمان</h3>
+                  <p className="text-xs text-slate-300">حدد التاريخ المراد ظهوره أعلى كشف أمان المطبوع</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsPrintDateModalOpen(false)}
+                className="p-1.5 bg-white/10 hover:bg-white/20 rounded-xl text-white transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 space-y-4">
+              <p className="text-xs font-bold text-slate-700">
+                حدد التاريخ الذي ترغب في ظهوره أعلى كشف أمان قبل إتمام الطباعة:
+              </p>
+
+              <div className="space-y-2.5">
+                {/* Option 1: Today's date */}
+                <label 
+                  onClick={() => setPrintDateMode("today")}
+                  className={`flex items-start gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition-all ${
+                    printDateMode === "today" 
+                      ? "border-blue-600 bg-blue-50/70 shadow-xs" 
+                      : "border-slate-200 hover:border-slate-300 bg-white"
+                  }`}
+                >
+                  <input 
+                    type="radio" 
+                    name="printDateOpt" 
+                    checked={printDateMode === "today"} 
+                    onChange={() => setPrintDateMode("today")}
+                    className="mt-0.5 text-blue-600 focus:ring-blue-500 accent-blue-600 cursor-pointer"
+                  />
+                  <div className="flex-1">
+                    <span className="block font-black text-xs sm:text-sm text-slate-900">
+                      1. طباعة بتاريخ اليوم الحالي
+                    </span>
+                    <span className="block text-xs font-mono font-bold text-blue-700 mt-0.5">
+                      {todayStr.replace(/-/g, "/")}
+                    </span>
+                  </div>
+                </label>
+
+                {/* Option 2: Custom date (chosen manually) */}
+                <label 
+                  onClick={() => setPrintDateMode("custom")}
+                  className={`flex items-start gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition-all ${
+                    printDateMode === "custom" 
+                      ? "border-blue-600 bg-blue-50/70 shadow-xs" 
+                      : "border-slate-200 hover:border-slate-300 bg-white"
+                  }`}
+                >
+                  <input 
+                    type="radio" 
+                    name="printDateOpt" 
+                    checked={printDateMode === "custom"} 
+                    onChange={() => setPrintDateMode("custom")}
+                    className="mt-0.5 text-blue-600 focus:ring-blue-500 accent-blue-600 cursor-pointer"
+                  />
+                  <div className="flex-1 space-y-2">
+                    <span className="block font-black text-xs sm:text-sm text-slate-900">
+                      2. تحديد تاريخ يدوي للطباعة
+                    </span>
+                    <p className="text-[11px] text-slate-500">
+                      حدد التاريخ المراد ظهوره في الترويسة في حال استخدام الكشف بعد يوم أو يومين
+                    </p>
+                    <input 
+                      type="date"
+                      value={customPrintDate}
+                      onChange={(e) => {
+                        setCustomPrintDate(e.target.value);
+                        setPrintDateMode("custom");
+                      }}
+                      className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </label>
+              </div>
+
+              {/* Header preview */}
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs space-y-1">
+                <span className="font-bold text-slate-500 block text-[11px]">معاينة شكل الترويسة أعلى الورقة المطبوعة:</span>
+                <div className="bg-white border border-black/40 px-3 py-1.5 rounded text-[11.5px] font-bold flex justify-between items-center text-slate-900 font-cairo">
+                  <span>قسم جوازات طنطا</span>
+                  <span>كشف حركة التابع للخدمات الجماهيرية</span>
+                  <span className="text-black font-bold">
+                    التاريخ : {printDateMode === "today" 
+                      ? todayStr.replace(/-/g, "/") 
+                      : (customPrintDate || todayStr).replace(/-/g, "/")}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer Actions */}
+            <div className="px-5 py-3.5 bg-slate-100 border-t border-slate-200 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setIsPrintDateModalOpen(false)}
+                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={() => handleConfirmPrint(printDateMode, customPrintDate)}
+                className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+              >
+                <Printer className="w-4 h-4" />
+                <span>متابعة للطباعة الآن</span>
               </button>
             </div>
 

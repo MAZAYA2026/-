@@ -447,6 +447,31 @@ export async function fetchAmanReportFromGoogleSheets(params?: {
   return response.json();
 }
 
+export async function fetchLocalAmanReport(): Promise<any[]> {
+  const response = await fetch("/api/db/aman");
+  if (!response.ok) {
+    throw new Error("فشل جلب بيانات كشف أمان من الخادم");
+  }
+  const result = await response.json();
+  return result.rows || [];
+}
+
+export async function saveLocalAmanReport(
+  rows: any[], 
+  syncWithSheets: boolean = true
+): Promise<{ status: string; message: string }> {
+  const response = await fetch("/api/db/aman", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rows, syncWithSheets }),
+  });
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || "فشل حفظ بيانات كشف أمان");
+  }
+  return response.json();
+}
+
 export async function fetchPostponedAmanNames(): Promise<AmanPostponedItem[]> {
   const response = await fetch("/api/db/aman-postponed");
   if (!response.ok) {
