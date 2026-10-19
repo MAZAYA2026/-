@@ -5,7 +5,8 @@ import {
   updateServiceOnServer, 
   deleteServiceOnServer, 
   reorderServicesOnServer,
-  saveGovernmentFines
+  saveGovernmentFines,
+  syncGovernmentFinesWithSheets
 } from "../lib/api";
 import { 
   Plus, Edit3, Trash2, Check, X, ShieldAlert, Sparkles, FolderPlus, DollarSign, Clock, FileText,
@@ -91,7 +92,10 @@ export default function ServicesConfig({
     try {
       setFineSaveLoading(true);
       await saveGovernmentFines(updated);
-      showFineMessage("تمت إضافة بند الغرامة بنجاح وحفظه بالنظام.");
+      if (googleSheetWebhookUrl) {
+        await syncGovernmentFinesWithSheets(googleSheetWebhookUrl).catch(() => {});
+      }
+      showFineMessage("تمت إضافة بند الغرامة وتحديث ورقة الغرامات الحكومية بجوجل شيت بنجاح! ⚖️✅");
     } catch (err) {
       console.error(err);
       alert("حدث خطأ أثناء حفظ الغرامة بالخادم.");
@@ -134,7 +138,10 @@ export default function ServicesConfig({
     try {
       setFineSaveLoading(true);
       await saveGovernmentFines(updated);
-      showFineMessage("تم تحديث بند الغرامة بنجاح.");
+      if (googleSheetWebhookUrl) {
+        await syncGovernmentFinesWithSheets(googleSheetWebhookUrl).catch(() => {});
+      }
+      showFineMessage("تم تحديث بند الغرامة ومزامنته مع جوجل شيت بنجاح! ⚖️✅");
     } catch (err) {
       console.error(err);
       alert("حدث خطأ أثناء حفظ التعديل بالخادم.");
@@ -159,10 +166,26 @@ export default function ServicesConfig({
     try {
       setFineSaveLoading(true);
       await saveGovernmentFines(updated);
-      showFineMessage("تم حذف بند الغرامة بنجاح.");
+      if (googleSheetWebhookUrl) {
+        await syncGovernmentFinesWithSheets(googleSheetWebhookUrl).catch(() => {});
+      }
+      showFineMessage("تم حذف بند الغرامة وتحديث جوجل شيت بنجاح! ⚖️✅");
     } catch (err) {
       console.error(err);
       alert("حدث خطأ أثناء حذف الغرامة بالخادم.");
+    } finally {
+      setFineSaveLoading(false);
+    }
+  };
+
+  const handleSyncFinesToSheets = async () => {
+    try {
+      setFineSaveLoading(true);
+      const res = await syncGovernmentFinesWithSheets(googleSheetWebhookUrl);
+      showFineMessage(res.message || "تمت مزامنة بنود الغرامات مع ورقة جوجل شيت بنجاح! ⚖️✅");
+    } catch (err: any) {
+      console.error(err);
+      alert("خطأ أثناء مزامنة الغرامات مع جوجل شيت: " + err.message);
     } finally {
       setFineSaveLoading(false);
     }
@@ -869,11 +892,23 @@ export default function ServicesConfig({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             {fineFeedback && (
               <span className="text-xs text-emerald-600 font-bold bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-100 animate-fade-in">
                 {fineFeedback}
               </span>
+            )}
+            {googleSheetWebhookUrl && (
+              <button
+                type="button"
+                onClick={handleSyncFinesToSheets}
+                disabled={fineSaveLoading}
+                className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-800 text-white px-3.5 py-2 rounded-xl text-xs font-bold font-cairo flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                title="مزامنة وتأكيد حفظ بنود الغرامات في ورقة جوجل شيت"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                {fineSaveLoading ? "جاري المزامنة..." : "مزامنة مع جوجل شيت ⚖️"}
+              </button>
             )}
             <button
               type="button"

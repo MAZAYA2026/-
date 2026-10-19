@@ -101,7 +101,7 @@ export default function InvoiceCreator({
       return "";
     }
 
-    return `${dd}-${mm}-${year}`; // DD-MM-YYYY
+    return `${year}/${mm}/${dd}`; // YYYY/MM/DD
   };
 
   // Detect language mismatch across any active customer input fields
@@ -887,14 +887,23 @@ export default function InvoiceCreator({
                         )}
                       </div>
 
-                      {/* Calculated Birth Date */}
+                      {/* Calculated / Editable Birth Date */}
                       <div className="space-y-1.5">
-                        <label className="text-xs font-bold text-slate-500 font-cairo flex items-center gap-1">
-                          تاريخ الميلاد المحسوب <span className="text-[9px] text-slate-400">(مستخرج تلقائياً)</span>
+                        <label className="text-xs font-bold text-slate-700 font-cairo flex items-center justify-between">
+                          <span>تاريخ الميلاد <span className="text-[9px] text-slate-400">(مستخرج تلقائياً أو معدل)</span></span>
                         </label>
-                        <div className="w-full bg-slate-100 border border-slate-200 text-slate-600 rounded-xl px-3 py-2.5 text-xs font-mono font-bold flex items-center gap-2">
-                          <Calendar className="w-4 h-4 text-slate-400" />
-                          <span>{customer.birthDate || "ادخل الرقم القومي لحسابه"}</span>
+                        <div className="relative flex items-center">
+                          <input
+                            type="text"
+                            value={customer.birthDate}
+                            onChange={(e) => {
+                              const updated = [...customers];
+                              updated[cIdx].birthDate = e.target.value;
+                              setCustomers(updated);
+                            }}
+                            placeholder="YYYY/MM/DD (أو من الرقم القومي)"
+                            className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-3 py-2.5 text-xs font-mono font-bold focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                          />
                         </div>
                       </div>
 

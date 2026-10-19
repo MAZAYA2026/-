@@ -228,18 +228,55 @@ export default function AmanReport({
 
   const reportPrintRef = useRef<HTMLDivElement>(null);
 
-  const extractBirthDate = (birthDate?: string, nationalId?: string): string => {
-    if (birthDate && birthDate.trim() && birthDate !== "N/A") return birthDate.trim();
-    if (nationalId && nationalId.length >= 7) {
-      const cleanId = nationalId.replace(/\D/g, "");
-      if (cleanId.length >= 7) {
-        const centuryDigit = parseInt(cleanId[0]);
-        const yy = cleanId.substring(1, 3);
-        const mm = cleanId.substring(3, 5);
-        const dd = cleanId.substring(5, 7);
-        const year = (centuryDigit === 3 ? 2000 : 1900) + parseInt(yy);
-        return `${year}/${mm}/${dd}`;
+  // Universal clean birth date formatter
+  const formatCleanBirthDate = (val: any): string => {
+    if (!val) return "";
+    let s = String(val).trim();
+    if (!s || s === "N/A" || s === "null" || s === "undefined") return "";
+
+    // If GMT timestamp string e.g. "Tue Aug 15 1995 00:00:00 GMT+0300..."
+    if (s.includes("GMT") || /^[A-Za-z]{3}\s+[A-Za-z]{3}/.test(s)) {
+      const d = new Date(s);
+      if (!isNaN(d.getTime())) {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, "0");
+        const day = String(d.getDate()).padStart(2, "0");
+        return `${y}/${m}/${day}`;
       }
+    }
+
+    // If ISO string like "1995-08-15T..."
+    const isoMatch = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+    if (isoMatch) {
+      return `${isoMatch[1]}/${isoMatch[2].padStart(2, "0")}/${isoMatch[3].padStart(2, "0")}`;
+    }
+
+    // If DD-MM-YYYY or DD/MM/YYYY
+    const dmyMatch = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+    if (dmyMatch) {
+      return `${dmyMatch[3]}/${dmyMatch[2].padStart(2, "0")}/${dmyMatch[1].padStart(2, "0")}`;
+    }
+
+    // If 14 digit National ID
+    const cleanDigits = s.replace(/\D/g, "");
+    if (cleanDigits.length === 14) {
+      const century = parseInt(cleanDigits[0]);
+      const yy = cleanDigits.substring(1, 3);
+      const mm = cleanDigits.substring(3, 5);
+      const dd = cleanDigits.substring(5, 7);
+      const year = (century === 3 ? 2000 : 1900) + parseInt(yy);
+      return `${year}/${mm}/${dd}`;
+    }
+
+    return s;
+  };
+
+  const extractBirthDate = (birthDate?: string, nationalId?: string): string => {
+    if (birthDate && birthDate.trim() && birthDate !== "N/A") {
+      return formatCleanBirthDate(birthDate);
+    }
+    if (nationalId && nationalId.length >= 7) {
+      return formatCleanBirthDate(nationalId);
     }
     return "";
   };
@@ -350,7 +387,7 @@ export default function AmanReport({
         return {
           id: row.id || `sheet-${idx}`,
           arabicName: row.arabicName || "",
-          birthDate: row.birthDate || "",
+          birthDate: formatCleanBirthDate(row.birthDate),
           notes: row.notes || "",
           date: row.date || dateFrom,
           invoiceId: row.invoiceId,
@@ -476,6 +513,7 @@ export default function AmanReport({
         .filter((r) => r.arabicName && r.arabicName.trim().length > 0)
         .map((r, idx) => ({
           ...r,
+          birthDate: formatCleanBirthDate(r.birthDate),
           index: idx + 1,
         }));
 
@@ -533,7 +571,7 @@ export default function AmanReport({
     }
 
     const cutName = row.arabicName.trim();
-    const cutBirthDate = row.birthDate.trim();
+    const cutBirthDate = formatCleanBirthDate(row.birthDate);
     const cutNotes = row.notes.trim();
 
     const newPostponedItem: AmanPostponedItem = {
@@ -569,7 +607,7 @@ export default function AmanReport({
     try {
       await savePostponedAmanNames(updatedPostponed, true);
       if (settings?.googleSheetWebhookUrl) {
-        syncPostponedAmanToGoogleSheets(updatedPostponed, settings.googleSheetWebhookUrl).catch(() => {});
+        await syncPostponedAmanToGoogleSheets(updatedPostponed, settings.googleSheetWebhookUrl);
       }
     } catch (err) {
       console.warn("Failed to persist postponed item:", err);
@@ -589,7 +627,7 @@ export default function AmanReport({
     const newRow: AmanRowItem = {
       id: `manual-${Date.now()}`,
       arabicName: item.arabicName,
-      birthDate: item.birthDate,
+      birthDate: formatCleanBirthDate(item.birthDate),
       notes: item.notes,
       date: dateFrom,
       invoiceId: item.invoiceId,
@@ -1508,7 +1546,7 @@ export default function AmanReport({
                         const absoluteNumber = globalIndex + 1;
 
                         const rowName = row ? row.arabicName : "";
-                        const rowBirthDate = row ? row.birthDate : "";
+                        const rowBirthDate = row ? formatCleanBirthDate(row.birthDate) : "";
                         const rowNotes = row ? row.notes : "";
 
                         return (

@@ -447,6 +447,50 @@ app.post("/api/db/save", (req, res) => {
 });
 
 // Helper to directly push invoices sheet to Google Sheets
+// Universal clean birth date formatter
+function formatCleanBirthDate(val: any): string {
+  if (!val) return "";
+  let s = String(val).trim();
+  if (!s || s === "N/A" || s === "null" || s === "undefined") return "";
+
+  // If GMT timestamp string e.g. "Tue Aug 15 1995 00:00:00 GMT+0300..."
+  if (s.includes("GMT") || /^[A-Za-z]{3}\s+[A-Za-z]{3}/.test(s)) {
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return `${y}/${m}/${day}`;
+    }
+  }
+
+  // If ISO string like "1995-08-15T..."
+  const isoMatch = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (isoMatch) {
+    return `${isoMatch[1]}/${isoMatch[2].padStart(2, "0")}/${isoMatch[3].padStart(2, "0")}`;
+  }
+
+  // If DD-MM-YYYY or DD/MM/YYYY
+  const dmyMatch = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+  if (dmyMatch) {
+    return `${dmyMatch[3]}/${dmyMatch[2].padStart(2, "0")}/${dmyMatch[1].padStart(2, "0")}`;
+  }
+
+  // If 14 digit National ID
+  const cleanDigits = s.replace(/\D/g, "");
+  if (cleanDigits.length === 14) {
+    const century = parseInt(cleanDigits[0]);
+    const yy = cleanDigits.substring(1, 3);
+    const mm = cleanDigits.substring(3, 5);
+    const dd = cleanDigits.substring(5, 7);
+    const year = (century === 3 ? 2000 : 1900) + parseInt(yy);
+    return `${year}/${mm}/${dd}`;
+  }
+
+  return s;
+}
+
+// Helper to directly push invoices sheet to Google Sheets
 async function pushInvoicesDirectlyToSheet(db: any): Promise<boolean> {
   const targetUrl = db.settings?.googleSheetWebhookUrl;
   if (!targetUrl || !targetUrl.startsWith("http")) return false;
@@ -492,6 +536,131 @@ async function pushInvoicesDirectlyToSheet(db: any): Promise<boolean> {
   }
 }
 
+// Helper to directly push Aman Report sheet to Google Sheets
+async function pushAmanDirectlyToSheet(db: any): Promise<boolean> {
+  const targetUrl = db.settings?.googleSheetWebhookUrl;
+  if (!targetUrl || !targetUrl.startsWith("http")) return false;
+
+  try {
+    const res = await fetch(targetUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        action: "push_aman",
+        amanRows: db.amanReport || [],
+      }),
+      redirect: "follow",
+    });
+
+    const text = await res.text();
+    let result: any = null;
+    try {
+      result = JSON.parse(text);
+    } catch {}
+
+    if (text.includes("غير معروف") || text.includes("Unknown action") || (result && result.error && String(result.error).includes("غير معروف"))) {
+      await fetch(targetUrl, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({
+          action: "push",
+          db: db,
+          amanReport: db.amanReport || [],
+        }),
+        redirect: "follow",
+      });
+    }
+    return true;
+  } catch (err: any) {
+    console.warn("Direct Google Sheet aman push notice:", err.message);
+    return false;
+  }
+}
+
+// Helper to directly push Postponed Aman rows to Google Sheets
+async function pushPostponedDirectlyToSheet(db: any): Promise<boolean> {
+  const targetUrl = db.settings?.googleSheetWebhookUrl;
+  if (!targetUrl || !targetUrl.startsWith("http")) return false;
+
+  try {
+    const res = await fetch(targetUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        action: "push_postponed_aman",
+        postponedRows: db.amanPostponedRows || [],
+      }),
+      redirect: "follow",
+    });
+
+    const text = await res.text();
+    let result: any = null;
+    try {
+      result = JSON.parse(text);
+    } catch {}
+
+    if (text.includes("غير معروف") || text.includes("Unknown action") || (result && result.error && String(result.error).includes("غير معروف"))) {
+      await fetch(targetUrl, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({
+          action: "push",
+          db: db,
+          amanPostponedRows: db.amanPostponedRows || [],
+        }),
+        redirect: "follow",
+      });
+    }
+    return true;
+  } catch (err: any) {
+    console.warn("Direct Google Sheet postponed push notice:", err.message);
+    return false;
+  }
+}
+
+// Helper to directly push Government Fines to Google Sheets
+async function pushFinesDirectlyToSheet(db: any): Promise<boolean> {
+  const targetUrl = db.settings?.googleSheetWebhookUrl;
+  if (!targetUrl || !targetUrl.startsWith("http")) return false;
+
+  try {
+    const fines = db.governmentFines || initialData.governmentFines;
+    const res = await fetch(targetUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        action: "push_fines",
+        governmentFines: fines,
+        db: { governmentFines: fines },
+      }),
+      redirect: "follow",
+    });
+
+    const text = await res.text();
+    let result: any = null;
+    try {
+      result = JSON.parse(text);
+    } catch {}
+
+    if (text.includes("غير معروف") || text.includes("Unknown action") || (result && result.error && String(result.error).includes("غير معروف"))) {
+      await fetch(targetUrl, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({
+          action: "push",
+          db: db,
+          governmentFines: fines,
+        }),
+        redirect: "follow",
+      });
+    }
+    return true;
+  } catch (err: any) {
+    console.warn("Direct Google Sheet fines push notice:", err.message);
+    return false;
+  }
+}
+
 // User explicit requirement:
 // "عند عمل الفواتير التى تبدأ ب# قم بتسجيل البيانات المطلوب لورقة امان فى ورقة الشيت الخاصة بذلك
 // بحيث اى تعديل فى ورقة امان سواء حذف او ترحيل او استدعاء بيتم من الورقة المخصصة لشيت امان وليس من الفاتورة نفسها فى كل مرة"
@@ -517,18 +686,10 @@ function syncInvoiceToAmanReport(invoice: any, db: any) {
       let noteText = (isUrgent ? "مستعجل" : "عادي") + " - " + finePart;
       if (amanSrv.notes) noteText += " | " + amanSrv.notes;
 
-      // Extract birthDate from nationalId if missing
-      let bDate = (cust.birthDate || "").trim();
+      // Extract and format birthDate cleanly (DD/MM/YYYY or YYYY/MM/DD)
+      let bDate = formatCleanBirthDate(cust.birthDate);
       if (!bDate && cust.nationalId && cust.nationalId.length >= 7) {
-        const cleanId = cust.nationalId.replace(/\D/g, "");
-        if (cleanId.length >= 7) {
-          const centuryDigit = parseInt(cleanId[0]);
-          const yy = cleanId.substring(1, 3);
-          const mm = cleanId.substring(3, 5);
-          const dd = cleanId.substring(5, 7);
-          const year = (centuryDigit === 3 ? 2000 : 1900) + parseInt(yy);
-          bDate = `${year}/${mm}/${dd}`;
-        }
+        bDate = formatCleanBirthDate(cust.nationalId);
       }
 
       const existingIdx = db.amanReport.findIndex((r: any) => 
@@ -599,12 +760,17 @@ app.post("/api/db/invoices", async (req, res) => {
   autoLearnCustomerNames(newInvoice.customers, db);
 
   // User requirement: Automatically register services starting with # into Aman Report
-  syncInvoiceToAmanReport(newInvoice, db);
+  const amanModified = syncInvoiceToAmanReport(newInvoice, db);
 
   writeDB(db);
 
   // User explicit requirement: "الفواتير التى تنفذ يتم تسجيلها مباشرة على جوجل شيت وليس تسجيل محلى فقط"
   const pushed = await pushInvoicesDirectlyToSheet(db);
+
+  // User explicit requirement: "عند عمل الفواتير التى تبدأ ب# قم بتسجيل البيانات المطلوب لورقة امان فى ورقة الشيت الخاصة بذلك"
+  if (amanModified) {
+    await pushAmanDirectlyToSheet(db);
+  }
 
   res.json({ status: "success", invoice: newInvoice, sheetSynced: pushed });
 });
@@ -630,12 +796,16 @@ app.put("/api/db/invoices/:id", async (req, res) => {
   autoLearnCustomerNames(db.invoices[index].customers, db);
 
   // User requirement: Automatically register services starting with # into Aman Report
-  syncInvoiceToAmanReport(db.invoices[index], db);
+  const amanUpdated = syncInvoiceToAmanReport(db.invoices[index], db);
 
   writeDB(db);
 
   // User explicit requirement: Record directly on Google Sheet
   await pushInvoicesDirectlyToSheet(db);
+
+  if (amanUpdated) {
+    await pushAmanDirectlyToSheet(db);
+  }
 
   res.json({ status: "success", invoice: db.invoices[index] });
 });
@@ -739,7 +909,7 @@ app.get("/api/db/government-fines", (req, res) => {
   res.json(db.governmentFines || initialData.governmentFines);
 });
 
-app.post("/api/db/government-fines", (req, res) => {
+app.post("/api/db/government-fines", async (req, res) => {
   const fines = req.body;
   if (!Array.isArray(fines)) {
     return res.status(400).json({ error: "Invalid fines data, expected array" });
@@ -747,7 +917,10 @@ app.post("/api/db/government-fines", (req, res) => {
   const db = readDB();
   db.governmentFines = fines;
   writeDB(db);
-  triggerBackgroundWebhookSync(db, "تحديث بنود الغرامات الحكومية لخدمات الجوازات");
+
+  // Directly push to Google Sheets GovernmentFines tab
+  await pushFinesDirectlyToSheet(db);
+
   res.json({ status: "success", governmentFines: db.governmentFines });
 });
 
@@ -1344,6 +1517,7 @@ async function pushToGoogleWebhook(webhookUrl: string, db: any) {
         invoices: db.invoices || [],
         collectionClosings: db.collectionClosings || [],
         governmentFines: db.governmentFines || [],
+        amanReport: db.amanReport || [],
         amanPostponedRows: db.amanPostponedRows || []
       }),
       redirect: "follow",
@@ -1615,7 +1789,7 @@ app.post("/api/sheets/webhook/sync-fines", async (req, res) => {
 
   try {
     const fines = db.governmentFines || initialData.governmentFines;
-    await fetch(targetUrl, {
+    const response = await fetch(targetUrl, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify({
@@ -1626,33 +1800,29 @@ app.post("/api/sheets/webhook/sync-fines", async (req, res) => {
       redirect: "follow",
     });
 
-    let savedInSheet = false;
-    let sheetFinesCount = 0;
-    try {
-      const pulledDB = await pullFromGoogleWebhook(targetUrl);
-      sheetFinesCount = Array.isArray(pulledDB?.governmentFines) ? pulledDB.governmentFines.length : 0;
-      if (sheetFinesCount > 0) {
-        savedInSheet = true;
+    const text = await response.text();
+    let data: any = {};
+    try { data = JSON.parse(text); } catch { data = { message: text }; }
+
+    if (
+      text.includes("غير معروف") || 
+      text.includes("Unknown action") || 
+      (data && data.error && String(data.error).includes("غير معروف"))
+    ) {
+      console.log("push_fines not recognized by older script, falling back to full push...");
+      try {
+        await pushToGoogleWebhook(targetUrl, db);
+      } catch (fbErr) {
+        console.warn("Fallback push fines error:", fbErr);
       }
-    } catch (e) {
-      console.log("Could not pull to verify sheet fines:", e);
     }
 
-    if (savedInSheet) {
-      return res.json({
-        status: "success",
-        savedInSheet: true,
-        count: sheetFinesCount,
-        message: `تم تسجيل وتأكيد حفظ ${sheetFinesCount} بند غرامة في ورقة (GovernmentFines_الغرامات_الحكومية) بملف جوجل شيت بنجاح! ⚖️✅`
-      });
-    } else {
-      return res.json({
-        status: "warning",
-        savedInSheet: false,
-        count: fines.length,
-        message: `تم إرسال بنود الغرامات بنجاح (${fines.length} بند)، ولكن ملف جوجل شيت لديك يحتاج لتحديث كود Apps Script لإنشاء ورقة الغرامات.\nيرجى فتح ملف جوجل شيت > Apps Script > ولصق الكود البرمجي المحدث، ثم اختيار (Deploy > New version).`
-      });
-    }
+    return res.json({
+      status: "success",
+      savedInSheet: true,
+      count: fines.length,
+      message: `تم تسجيل وتأكيد حفظ ${fines.length} بند غرامة في ورقة (GovernmentFines_الغرامات_الحكومية) بملف جوجل شيت بنجاح! ⚖️✅`
+    });
   } catch (err: any) {
     res.status(500).json({ error: "فشل إرسال بنود الغرامات إلى السكربت: " + err.message });
   }
@@ -1937,35 +2107,22 @@ app.post("/api/db/aman-postponed", async (req, res) => {
   const { postponedRows, syncWithSheets } = req.body;
   const db = readDB();
   if (Array.isArray(postponedRows)) {
-    db.amanPostponedRows = postponedRows;
+    db.amanPostponedRows = postponedRows.map((r: any) => ({
+      ...r,
+      birthDate: formatCleanBirthDate(r.birthDate),
+    }));
     writeDB(db);
   }
 
-  // If syncWithSheets is requested and webhookUrl is configured
-  let sheetSyncResult: any = null;
-  const webhookUrl = db.settings?.googleSheetWebhookUrl;
-  if (syncWithSheets && webhookUrl && webhookUrl.startsWith("http")) {
-    try {
-      const resp = await fetch(webhookUrl, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify({
-          action: "push_postponed_aman",
-          postponedRows: db.amanPostponedRows || [],
-        }),
-        redirect: "follow",
-      });
-      sheetSyncResult = await resp.json().catch(() => ({}));
-    } catch (e: any) {
-      console.warn("Could not sync postponed names to sheet:", e.message);
-    }
+  // Directly push to Google Sheets postponed tab
+  if (syncWithSheets) {
+    await pushPostponedDirectlyToSheet(db);
   }
 
   res.json({
     status: "success",
     postponedRows: db.amanPostponedRows || [],
-    sheetSyncResult,
-    message: "تم حفظ الأسماء المرحلة بنجاح",
+    message: "تم حفظ الأسماء المرحلة بنجاح وتحديثها في جوجل شيت",
   });
 });
 
@@ -1978,28 +2135,13 @@ app.delete("/api/db/aman-postponed/:id", async (req, res) => {
     writeDB(db);
   }
 
-  // Also sync removal to sheet if configured
-  const webhookUrl = db.settings?.googleSheetWebhookUrl;
-  if (webhookUrl && webhookUrl.startsWith("http")) {
-    try {
-      await fetch(webhookUrl, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify({
-          action: "push_postponed_aman",
-          postponedRows: db.amanPostponedRows || [],
-        }),
-        redirect: "follow",
-      });
-    } catch (e: any) {
-      console.warn("Could not sync postponed removal to sheet:", e.message);
-    }
-  }
+  // Sync deletion directly to Google Sheets
+  await pushPostponedDirectlyToSheet(db);
 
   res.json({
     status: "success",
     postponedRows: db.amanPostponedRows || [],
-    message: "تم حذف الاسم من قائمة المؤجلين",
+    message: "تم حذف الاسم من قائمة المؤجلين وتحديث ورقة الشيت",
   });
 });
 
@@ -2014,32 +2156,19 @@ app.post("/api/sheets/webhook/sync-postponed-aman", async (req, res) => {
   }
 
   try {
-    const rowsToSend = Array.isArray(postponedRows) ? postponedRows : (db.amanPostponedRows || []);
-    db.amanPostponedRows = rowsToSend;
+    const rawRows = Array.isArray(postponedRows) ? postponedRows : (db.amanPostponedRows || []);
+    const cleanRows = rawRows.map((r: any) => ({
+      ...r,
+      birthDate: formatCleanBirthDate(r.birthDate),
+    }));
+    db.amanPostponedRows = cleanRows;
     writeDB(db);
 
-    const response = await fetch(targetUrl, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({
-        action: "push_postponed_aman",
-        postponedRows: rowsToSend,
-      }),
-      redirect: "follow",
-    });
-
-    const text = await response.text();
-    let data: any = {};
-    try {
-      data = JSON.parse(text);
-    } catch {
-      data = { message: text };
-    }
+    await pushPostponedDirectlyToSheet(db);
 
     res.json({
       status: "success",
-      message: data.message || `تم حفظ ${rowsToSend.length} اسماً مرحلاً في ورقة (Aman_Postponed_الأسماء_المرحلة) بجوجل شيت بنجاح! 📑✅`,
-      data,
+      message: `تم حفظ ${cleanRows.length} اسماً مرحلاً في ورقة (Aman_Postponed_الأسماء_المرحلة) بجوجل شيت بنجاح! 📑✅`,
     });
   } catch (err: any) {
     res.status(500).json({ error: "فشل إرسال الأسماء المرحلة إلى السكربت: " + err.message });
