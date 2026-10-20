@@ -11,7 +11,9 @@ import {
   savePostponedAmanNames,
   deletePostponedAmanName,
   syncPostponedAmanToGoogleSheets,
-  pullPostponedAmanFromGoogleSheets
+  pullPostponedAmanFromGoogleSheets,
+  cutAndPostponeAmanRow,
+  insertPostponedAmanRow
 } from "../lib/api";
 import { playLanguageWarningSound } from "../lib/audio";
 import { 
@@ -108,7 +110,7 @@ export function resolveAmanDetails(
   let fineAmount = Number(row.fineAmount) || 0;
   const rowNotes = (row.notes || "").trim();
 
-  // Find linked customer from fresh invoices list if possible
+  // Find linked customer from fresh invoices list if needed
   let targetInv = row.invoiceId ? invoices.find((i) => i.invoiceId === row.invoiceId) : undefined;
   if (!targetInv && row.arabicName) {
     targetInv = invoices.find((i) => i.customers?.some((c) => c.arabicName?.trim() === row.arabicName?.trim()));
@@ -135,16 +137,14 @@ export function resolveAmanDetails(
         const isUrgent = fullName.includes("مستعجل") || fullName.includes("عاجل") || fullName.includes("فورى");
         serviceType = isUrgent ? "مستعجل" : "عادي";
 
-        if (amanSrv.fineName && amanSrv.fineName.trim().length > 0) {
-          hasFine = true;
+        if (!fineName && amanSrv.fineName && amanSrv.fineName.trim().length > 0) {
           fineName = amanSrv.fineName.trim();
-          fineAmount = amanSrv.fineAmount || 0;
-        } else if (amanSrv.fineAmount && amanSrv.fineAmount > 0) {
-          hasFine = true;
+        }
+        if (!fineAmount && amanSrv.fineAmount && amanSrv.fineAmount > 0) {
           fineAmount = amanSrv.fineAmount;
-          if (!fineName) fineName = "غرامة حكومية";
-        } else if (hasFine === undefined) {
-          hasFine = false;
+        }
+        if (hasFine === undefined) {
+          hasFine = !!(fineName || fineAmount > 0);
         }
       }
     }
@@ -166,22 +166,22 @@ export function resolveAmanDetails(
     serviceType = "مستعجل";
   }
 
-  // Canonical fine name matching if fine matches any entry in governmentFines
+  // Exact matching against configured governmentFines ONLY (never substring match, to prevent reverting custom/renamed fines to old names)
   if (governmentFines && Array.isArray(governmentFines) && fineName) {
-    const matchedFine = governmentFines.find(
-      (f) => f.name.trim() === fineName || (fineName.includes(f.name.trim()) && f.name.trim().length > 3)
-    );
+    const matchedFine = governmentFines.find((f) => f.name.trim() === fineName);
     if (matchedFine) {
       fineName = matchedFine.name.trim();
       if (!fineAmount) fineAmount = matchedFine.amount;
     }
   }
 
-  // User requirement: In case of NO fines, do NOT write "لا توجد غرامة".
-  // Only write the fine when it is actually present!
+  // User explicit requirements:
+  // 1. "عمود الملاحظات لا تضع به المهنة"
+  // 2. "وفى حالة عدم وجود غرامات لا تكتب لا توجد غرامة حيث الطبيعى طالما مفيش غرامة لا يذكر لها اسم وتكتب فقط الغرامة فى حالة تواجدها"
+  // 3. "مسميات الغرامات تسجل بنفس المسمى بالضبط"
   let fineLabel = "";
   if (hasFine && (fineName || fineAmount > 0)) {
-    const cleanFineName = fineName || "غرامة حكومية";
+    const cleanFineName = (fineName || "غرامة حكومية").trim();
     fineLabel = cleanFineName.startsWith("غرامة") ? cleanFineName : `غرامة ${cleanFineName}`;
   }
 
@@ -625,7 +625,10 @@ export default function AmanReport({
 
     // Remove this row completely from tableRows so all subsequent rows are shifted up!
     const newTableRows = [...tableRows];
-    if (rowIndex < newTableRows.length) {
+    const matchIdx = newTableRows.findIndex(r => r.id === row.id || (r.arabicName?.trim() === cutName && r.birthDate === cutBirthDate));
+    if (matchIdx !== -1) {
+      newTableRows.splice(matchIdx, 1);
+    } else if (rowIndex < newTableRows.length) {
       newTableRows.splice(rowIndex, 1);
     }
     setTableRows(newTableRows);
@@ -650,24 +653,16 @@ export default function AmanReport({
 
     // User requirement: ACTUALLY transfer from Aman sheet to Postponed sheet on both DB and Google Sheets!
     try {
-      // 1. Update Aman sheet (row removed, serials adjusted)
-      await saveLocalAmanReport(activeRowsToRecord, true);
-      if (settings?.googleSheetWebhookUrl) {
-        syncAmanReportToGoogleSheets({
-          dateFrom,
-          dateTo,
-          amanRows: activeRowsToRecord,
-          webhookUrl: settings.googleSheetWebhookUrl,
-        }).catch((e) => console.warn("Aman sheet sync notice:", e));
-      }
+      const res = await cutAndPostponeAmanRow({
+        activeRows: activeRowsToRecord,
+        postponedRows: updatedPostponed,
+      });
 
-      // 2. Update Postponed sheet (row added)
-      await savePostponedAmanNames(updatedPostponed, true);
-      if (settings?.googleSheetWebhookUrl) {
-        syncPostponedAmanToGoogleSheets(updatedPostponed, settings.googleSheetWebhookUrl).catch((e) => console.warn("Postponed sheet sync notice:", e));
+      if (res.sheetSynced) {
+        showSaveNotice(`تم قص وترحيل (${cutName}) ونقله فعلياً من ورقة كشف أمان إلى ورقة الأسماء المرحلة بملف الشيت بنجاح! ✂️📑`);
+      } else {
+        showSaveNotice(`تم قص وترحيل (${cutName}) وحفظه في قائمة الأسماء المرحلة محلياً بنجاح! ✂️ (تأكد من نشر سكربت جوجل شيت للمزامنة السحابية)`);
       }
-
-      showSaveNotice(`تم قص وترحيل (${cutName}) ونقله فعلياً من ورقة كشف أمان إلى ورقة الأسماء المرحلة بملف الشيت بنجاح! ✂️📑`);
     } catch (err: any) {
       console.warn("Transfer sync notice:", err);
       showSaveNotice(`تم ترحيل (${cutName}) محلياً ✂️ (تنبيه المزامنة: ${err.message})`);
@@ -747,25 +742,19 @@ export default function AmanReport({
 
     // Actually transfer between sheets on DB and Google Sheets!
     try {
-      await saveLocalAmanReport(activeRowsToRecord, true);
-      if (settings?.googleSheetWebhookUrl) {
-        syncAmanReportToGoogleSheets({
-          dateFrom,
-          dateTo,
-          amanRows: activeRowsToRecord,
-          webhookUrl: settings.googleSheetWebhookUrl,
-        }).catch(() => {});
-      }
+      const res = await insertPostponedAmanRow({
+        activeRows: activeRowsToRecord,
+        postponedRows: updatedPostponed,
+      });
 
-      if (deleteAfterInsert) {
-        await savePostponedAmanNames(updatedPostponed, true);
-        if (settings?.googleSheetWebhookUrl) {
-          syncPostponedAmanToGoogleSheets(updatedPostponed, settings.googleSheetWebhookUrl).catch(() => {});
-        }
+      if (res.sheetSynced) {
+        showSaveNotice(`تم نقل وإدراج (${item.arabicName}) في كشف أمان وتحديث ورقتي الشيت بنجاح! 📥📑`);
+      } else {
+        showSaveNotice(`تم نقل وإدراج (${item.arabicName}) في كشف أمان محلياً بنجاح! 📥 (تأكد من نشر سكربت جوجل شيت للمزامنة السحابية)`);
       }
-      showSaveNotice(`تم نقل وإدراج (${item.arabicName}) في كشف أمان وتحديث ورقتي الشيت بنجاح! 📥📑`);
     } catch (err: any) {
       console.warn("Insert transfer notice:", err);
+      showSaveNotice(`تم إدراج (${item.arabicName}) في كشف أمان محلياً 📥 (تنبيه المزامنة: ${err.message})`);
     }
   };
 

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { Invoice, InvoiceStatus, AppSettings, Service, Employee, CustomerInput, GovernmentFine } from "../types";
+import { Invoice, InvoiceStatus, AppSettings, Service, Employee, CustomerInput, GovernmentFine, DEFAULT_APPLICANT_CAPACITIES } from "../types";
 import { updateInvoiceOnServer, deleteInvoiceOnServer, importInvoicesFromGoogleSheet } from "../lib/api";
 import { calculateWorkingDaysDeliveryDate, getArabicDayName, recalculateCustomerServicesDeliveryDates } from "../lib/businessDays";
 import { generateWhatsAppWelcomeMessage, generateWhatsAppReadyMessage, generateWhatsAppPartialReadyMessage, getWhatsAppUrl } from "../lib/whatsapp";
@@ -27,6 +27,9 @@ export default function InvoiceQuery({
   onInvoicesLoaded,
   governmentFines = []
 }: InvoiceQueryProps) {
+  const applicantCapacityOptions = (settings.applicantCapacities && settings.applicantCapacities.length > 0)
+    ? settings.applicantCapacities
+    : DEFAULT_APPLICANT_CAPACITIES;
   // Search parameters
   const [searchId, setSearchId] = useState("");
   const [searchName, setSearchName] = useState("");
@@ -700,6 +703,12 @@ export default function InvoiceQuery({
                         </div>
                       )}
 
+                      {cust.applicantCapacity && (
+                        <div className="text-[10px] text-blue-700 font-bold font-cairo pr-3">
+                          صفة مقدم الطلب: {cust.applicantCapacity}
+                        </div>
+                      )}
+
                       {/* Customer services list */}
                       <div className="mt-2 space-y-2 pl-1">
                         {cust.services.map((s, sIdx) => {
@@ -1109,7 +1118,7 @@ export default function InvoiceQuery({
                     />
                   </div>
 
-                  <div className="grid md:grid-cols-2 gap-4">
+                  <div className="grid md:grid-cols-3 gap-4">
                     <div className="space-y-1">
                       <label className="text-[11px] font-bold text-slate-600">الرقم القومي:</label>
                       <input 
@@ -1127,6 +1136,20 @@ export default function InvoiceQuery({
                         onChange={(e) => handleEditCustomerField(cIdx, "profession", e.target.value)}
                         className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs"
                       />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold text-slate-600">صفة مقدم الطلب:</label>
+                      <select 
+                        value={cust.applicantCapacity || applicantCapacityOptions[0] || "بنفسه"} 
+                        onChange={(e) => handleEditCustomerField(cIdx, "applicantCapacity", e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold font-cairo cursor-pointer"
+                      >
+                        {applicantCapacityOptions.map((opt) => (
+                          <option key={opt} value={opt}>
+                            {opt}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                   </div>
 

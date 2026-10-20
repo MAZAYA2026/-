@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { AppSettings, Employee, DictionaryItem } from "../types";
+import { AppSettings, Employee, DictionaryItem, DEFAULT_APPLICANT_CAPACITIES } from "../types";
+import { APPS_SCRIPT_CODE } from "../lib/appsScriptTemplate";
 import { 
   updateSettingsOnServer, 
   testGoogleWebhook,
@@ -41,7 +42,10 @@ import {
   RotateCcw,
   ArrowRightLeft,
   Clock,
-  Info
+  Info,
+  UserCheck,
+  ArrowUp,
+  ArrowDown
 } from "lucide-react";
 import { 
   DEFAULT_OFFICIAL_HOLIDAYS, 
@@ -135,7 +139,8 @@ export default function SettingsConfig({
         autoSyncWebhook: false,
         googleSheetsConnected: !!(googleSheetWebhookUrl.trim() || googleSheetUrl.trim() || settings.googleSheetsConnected),
         includeSaturdayAsWeekend: includeSaturdayAsWeekend,
-        customHolidays: holidaysToSave
+        customHolidays: holidaysToSave,
+        applicantCapacities: applicantCapacities.filter(c => c && c.trim())
       };
 
       const result = await updateSettingsOnServer(payload);
@@ -148,6 +153,118 @@ export default function SettingsConfig({
     } finally {
       setHolidaySaveLoading(false);
     }
+  };
+
+  // Applicant capacity configuration state & handlers (صفة مقدم الطلب لمعاملات الجوازات # و ##)
+  const [applicantCapacities, setApplicantCapacities] = useState<string[]>(() => {
+    if (settings.applicantCapacities && settings.applicantCapacities.length > 0) {
+      return settings.applicantCapacities;
+    }
+    return DEFAULT_APPLICANT_CAPACITIES;
+  });
+  const [newCapacityInput, setNewCapacityInput] = useState("");
+  const [editingCapacityIdx, setEditingCapacityIdx] = useState<number | null>(null);
+  const [editCapacityValue, setEditCapacityValue] = useState("");
+  const [capacityFeedback, setCapacityFeedback] = useState("");
+  const [capacitySaveLoading, setCapacitySaveLoading] = useState(false);
+
+  const handleSaveCapacitiesDirectly = async (capacitiesToSave: string[] = applicantCapacities) => {
+    setCapacitySaveLoading(true);
+    setCapacityFeedback("");
+    try {
+      const payload: AppSettings = {
+        ...settings,
+        headerText: headerText.trim(),
+        subHeaderText: subHeaderText.trim(),
+        contactPhone: contactPhone.trim(),
+        welcomeMessage: welcomeMessage.trim(),
+        readyMessage: readyMessage.trim(),
+        readyPassportMessage: readyPassportMessage.trim(),
+        partialReadyMessage: partialReadyMessage.trim(),
+        deliveryMessage: deliveryMessage.trim(),
+        googleSheetId: settings.googleSheetId || "",
+        googleSheetUrl: googleSheetUrl.trim(),
+        googleSheetWebhookUrl: googleSheetWebhookUrl.trim(),
+        autoSyncWebhook: false,
+        footerText: footerText.trim(),
+        googleSheetsConnected: !!(googleSheetWebhookUrl.trim() || googleSheetUrl.trim() || settings.googleSheetsConnected),
+        includeSaturdayAsWeekend: includeSaturdayAsWeekend,
+        customHolidays: customHolidays,
+        applicantCapacities: capacitiesToSave.filter(c => c && c.trim())
+      };
+
+      const result = await updateSettingsOnServer(payload);
+      onSettingsUpdated(result);
+      setCapacityFeedback("تم حفظ وتحديث مسميات صفة مقدم الطلب بنجاح! 💾✨");
+      setTimeout(() => setCapacityFeedback(""), 3500);
+    } catch (err) {
+      console.error(err);
+      alert("حدث خطأ أثناء حفظ مسميات صفة مقدم الطلب.");
+    } finally {
+      setCapacitySaveLoading(false);
+    }
+  };
+
+  const handleAddCapacity = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const trimmed = newCapacityInput.trim();
+    if (!trimmed) return;
+    if (applicantCapacities.includes(trimmed)) {
+      alert("هذا المسمى موجود بالفعل في القائمة.");
+      return;
+    }
+    const updated = [...applicantCapacities, trimmed];
+    setApplicantCapacities(updated);
+    setNewCapacityInput("");
+    await handleSaveCapacitiesDirectly(updated);
+  };
+
+  const handleStartEditCapacity = (idx: number) => {
+    setEditingCapacityIdx(idx);
+    setEditCapacityValue(applicantCapacities[idx]);
+  };
+
+  const handleSaveEditCapacity = async () => {
+    if (editingCapacityIdx === null) return;
+    const trimmed = editCapacityValue.trim();
+    if (!trimmed) {
+      alert("لا يمكن ترك المسمى فارغاً.");
+      return;
+    }
+    const updated = [...applicantCapacities];
+    updated[editingCapacityIdx] = trimmed;
+    setApplicantCapacities(updated);
+    setEditingCapacityIdx(null);
+    setEditCapacityValue("");
+    await handleSaveCapacitiesDirectly(updated);
+  };
+
+  const handleDeleteCapacity = async (idx: number) => {
+    const itemToDelete = applicantCapacities[idx];
+    if (!confirm(`هل أنت متأكد من حذف صفة "${itemToDelete}" من القائمة المنسدلة؟`)) return;
+    const updated = applicantCapacities.filter((_, i) => i !== idx);
+    setApplicantCapacities(updated);
+    if (editingCapacityIdx === idx) {
+      setEditingCapacityIdx(null);
+    }
+    await handleSaveCapacitiesDirectly(updated);
+  };
+
+  const handleMoveCapacity = async (idx: number, direction: "up" | "down") => {
+    const targetIdx = direction === "up" ? idx - 1 : idx + 1;
+    if (targetIdx < 0 || targetIdx >= applicantCapacities.length) return;
+    const updated = [...applicantCapacities];
+    const temp = updated[idx];
+    updated[idx] = updated[targetIdx];
+    updated[targetIdx] = temp;
+    setApplicantCapacities(updated);
+    await handleSaveCapacitiesDirectly(updated);
+  };
+
+  const handleResetCapacities = async () => {
+    if (!confirm("هل تريد استعادة قائمة صفات مقدم الطلب الافتراضية (بنفسه، الأب، الأم، الزوج...)؟")) return;
+    setApplicantCapacities(DEFAULT_APPLICANT_CAPACITIES);
+    await handleSaveCapacitiesDirectly(DEFAULT_APPLICANT_CAPACITIES);
   };
 
   const [saving, setSaving] = useState(false);
@@ -244,989 +361,7 @@ export default function SettingsConfig({
   };
 
   // Comprehensive Google Apps Script code for all data (Invoices, Services, Closings, Settings, Dictionary)
-  const appsScriptCode = `// سكربت الربط التلقائي وقاعدة البيانات الشاملة لمكتب مزايا مع جوجل شيت
-function doPost(e) {
-  try {
-    var contents = {};
-    if (e && e.postData && e.postData.contents) {
-      try {
-        contents = JSON.parse(e.postData.contents);
-      } catch(parseErr) {
-        contents = { action: "push" };
-      }
-    }
-    
-    var action = contents.action || "push";
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-
-    // 0. Test Connection
-    if (action === "test") {
-      return ContentService.createTextOutput(JSON.stringify({ 
-        status: "success", 
-        message: "تم الاتصال بنجاح بملف جوجل شيت وقاعدة البيانات جاهزة ومستعدة للتخزين! 📊" 
-      })).setMimeType(ContentService.MimeType.JSON);
-    }
-
-    // 1. Push / Sync All Data
-    if (action === "push" || action === "sync") {
-      var db = contents.db || contents;
-
-      // --- Sheet 1: Invoices_الفواتير ---
-      if (db.invoices && Array.isArray(db.invoices)) {
-        var invSheet = getOrCreateSheet(ss, "Invoices_الفواتير");
-        invSheet.clearContents();
-        var invHeaders = [
-          "رقم الفاتورة", "التاريخ", "الحالة", "الموظف", "مكان الحفظ (رقم الدرج)", 
-          "رسوم حكومية", "رسوم مكتب", "الإجمالي الكلي", "أسماء العملاء", "أرقام الهواتف", 
-          "الخدمات المطلوبة", "تفاصيل العملاء كاملة (JSON)"
-        ];
-        var invRows = [invHeaders];
-        for (var i = 0; i < db.invoices.length; i++) {
-          var inv = db.invoices[i];
-          var custNames = [];
-          var custPhones = [];
-          var servicesList = [];
-          if (inv.customers && Array.isArray(inv.customers)) {
-            for (var k = 0; k < inv.customers.length; k++) {
-              var c = inv.customers[k];
-              custNames.push(c.arabicName + (c.englishName ? " (" + c.englishName + ")" : ""));
-              if (c.phone) custPhones.push(c.phone);
-              if (c.services && Array.isArray(c.services)) {
-                for (var sIdx = 0; sIdx < c.services.length; sIdx++) {
-                  servicesList.push(c.services[sIdx].serviceId + " x" + (c.services[sIdx].quantity || 1));
-                }
-              }
-            }
-          }
-          invRows.push([
-            inv.invoiceId || "",
-            inv.date || "",
-            inv.status || "",
-            inv.employeeName || "",
-            inv.archiveDrawer || "",
-            inv.totalGov || 0,
-            inv.totalOffice || 0,
-            inv.totalAmount || 0,
-            custNames.join(" | "),
-            custPhones.join(" | "),
-            servicesList.join(" , "),
-            JSON.stringify(inv.customers || [])
-          ]);
-        }
-        if (invRows.length > 0) {
-          invSheet.getRange(1, 1, invRows.length, invRows[0].length).setValues(invRows);
-          formatHeader(invSheet, invHeaders.length);
-        }
-      }
-
-      // --- Sheet 2: Services_الخدمات_والاسعار ---
-      if (db.services && Array.isArray(db.services)) {
-        var srvSheet = getOrCreateSheet(ss, "Services_الخدمات_والاسعار");
-        srvSheet.clearContents();
-        var srvHeaders = ["الترتيب", "المعرف ID", "اسم الخدمة", "السعر الحكومي", "رسوم المكتب", "إجمالي السعر", "مدة التنفيذ", "تعليمات التسليم", "إزاحة أيام التسليم", "ملاحظات للعميل"];
-        var srvRows = [srvHeaders];
-        for (var s = 0; s < db.services.length; s++) {
-          var srv = db.services[s];
-          srvRows.push([
-            srv.order || (s + 1),
-            srv.id || "",
-            srv.name || "",
-            srv.govPrice || 0,
-            srv.officeFee || 0,
-            (Number(srv.govPrice) || 0) + (Number(srv.officeFee) || 0),
-            srv.duration || "",
-            srv.instructions || "",
-            srv.deliveryDaysOffset || 0,
-            srv.notes || ""
-          ]);
-        }
-        if (srvRows.length > 0) {
-          srvSheet.getRange(1, 1, srvRows.length, srvRows[0].length).setValues(srvRows);
-          formatHeader(srvSheet, srvHeaders.length);
-        }
-      }
-
-      // --- Sheet 3: Closings_تقفيل_الخزينة ---
-      if (db.collectionClosings && Array.isArray(db.collectionClosings)) {
-        var clsSheet = getOrCreateSheet(ss, "Closings_تقفيل_الخزينة");
-        clsSheet.clearContents();
-        var clsHeaders = ["المعرف ID", "تاريخ الإغلاق", "تم الإغلاق بواسطة", "الإيراد الكلي", "صافي أرباح المكتب", "المبلغ النقدي المحصل", "المبلغ الآجل", "ملاحظات"];
-        var clsRows = [clsHeaders];
-        for (var c = 0; c < db.collectionClosings.length; c++) {
-          var cls = db.collectionClosings[c];
-          clsRows.push([
-            cls.id || "",
-            cls.closeDate || "",
-            cls.closedBy || "",
-            cls.revenue || 0,
-            cls.profit || 0,
-            cls.cashAmount || 0,
-            cls.deferredAmount || 0,
-            cls.notes || ""
-          ]);
-        }
-        if (clsRows.length > 0) {
-          clsSheet.getRange(1, 1, clsRows.length, clsRows[0].length).setValues(clsRows);
-          formatHeader(clsSheet, clsHeaders.length);
-        }
-      }
-
-      // --- Sheet 4: Settings_الاعدادات_والرسائل ---
-      if (db.settings) {
-        var stSheet = getOrCreateSheet(ss, "Settings_الاعدادات_والرسائل");
-        stSheet.clearContents();
-        var stHeaders = ["بند الإعداد (Setting Name)", "القيمة المحفوظة (Value)", "المعرف البرمجي (Key)"];
-        var stRows = [
-          stHeaders,
-          ["اسم وبيانات المكتب بالترويسة", db.settings.headerText || "", "headerText"],
-          ["الترويسة الفرعية", db.settings.subHeaderText || "", "subHeaderText"],
-          ["رسالة الترحيب واستلام الطلب", db.settings.welcomeMessage || "", "welcomeMessage"],
-          ["قالب رسالة جاهزية الأوراق للاستلام (العامة)", db.settings.readyMessage || "", "readyMessage"],
-          ["قالب رسالة جاهزية جوازات السفر (#)", db.settings.readyPassportMessage || "", "readyPassportMessage"],
-          ["قالب رسالة الإنجاز الجزئي للخدمات", db.settings.partialReadyMessage || "", "partialReadyMessage"],
-          ["قالب رسالة تم التسليم بنجاح", db.settings.deliveryMessage || "", "deliveryMessage"],
-          ["تذييل الفاتورة المطبوعة", db.settings.footerText || "", "footerText"],
-          ["إعدادات النظام كاملة (JSON)", JSON.stringify(db.settings || {}), "settings_json"]
-        ];
-        stSheet.getRange(1, 1, stRows.length, stRows[0].length).setValues(stRows);
-        formatHeader(stSheet, stHeaders.length);
-        try {
-          stSheet.setColumnWidth(1, 240);
-          stSheet.setColumnWidth(2, 450);
-          stSheet.setColumnWidth(3, 160);
-        } catch(cwErr) {}
-      }
-
-      // --- Sheet 5: Dictionary_قاموس_الاسماء ---
-      var dictData = db.dictionary || contents.dictionary;
-      if (dictData && Array.isArray(dictData)) {
-        var dictSheet = ss.getSheetByName("Dictionary_قاموس_الاسماء") || 
-                        ss.getSheetByName("Dictionary") || 
-                        ss.getSheetByName("قاموس_الاسماء") || 
-                        ss.insertSheet("Dictionary_قاموس_الاسماء");
-        dictSheet.clearContents();
-        var dictHeaders = ["م", "الاسم بالعربي", "الاسم بالإنجليزي (معايير الجوازات)"];
-        var dictRows = [dictHeaders];
-        for (var d = 0; d < dictData.length; d++) {
-          dictRows.push([
-            d + 1,
-            dictData[d].arabic || "", 
-            dictData[d].english || ""
-          ]);
-        }
-        if (dictRows.length > 0) {
-          dictSheet.getRange(1, 1, dictRows.length, dictRows[0].length).setValues(dictRows);
-          formatHeader(dictSheet, dictHeaders.length);
-          try {
-            dictSheet.setColumnWidth(1, 60);
-            dictSheet.setColumnWidth(2, 220);
-            dictSheet.setColumnWidth(3, 260);
-          } catch(cwErr) {}
-        }
-      }
-
-      // --- Sheet 6: GovernmentFines_الغرامات_الحكومية ---
-      var finesData = db.governmentFines || contents.governmentFines;
-      if (finesData && Array.isArray(finesData)) {
-        var fineSheet = getOrCreateSheet(ss, "GovernmentFines_الغرامات_الحكومية");
-        fineSheet.clearContents();
-        var fineHeaders = ["المعرف ID", "اسم بند الغرامة الحكومية", "المبلغ الافتراضي (ج.م)", "شروط وملاحظات التطبيق"];
-        var fineRows = [fineHeaders];
-        for (var f = 0; f < finesData.length; f++) {
-          fineRows.push([
-            finesData[f].id || ("fine-" + (f + 1)),
-            finesData[f].name || "",
-            Number(finesData[f].amount) || 0,
-            finesData[f].notes || ""
-          ]);
-        }
-        if (fineRows.length > 0) {
-          fineSheet.getRange(1, 1, fineRows.length, fineRows[0].length).setValues(fineRows);
-          formatHeader(fineSheet, fineHeaders.length);
-          try {
-            fineSheet.setColumnWidth(1, 100);
-            fineSheet.setColumnWidth(2, 250);
-            fineSheet.setColumnWidth(3, 160);
-            fineSheet.setColumnWidth(4, 350);
-          } catch(cwErr) {}
-        }
-      }
-
-      // --- Sheet 7: Aman_كشف_حركة_الخدمات_الجماهيرية ---
-      var amanSheet = findOrCreateSheet(ss, ["Aman_كشف_حركة_الخدمات_الجماهيرية", "Aman", "كشف_امان", "كشف امان", "كشف أمان", "أمان", "امان"], "Aman_كشف_حركة_الخدمات_الجماهيرية");
-      amanSheet.clearContents();
-      var amanHeaders = ["م", "الاسم", "تاريخ الميلاد", "الملاحظات (النوع والغرامة)", "رقم الفاتورة", "التاريخ"];
-      var amanRows = [amanHeaders];
-      var rawAmanInput = contents.amanRows || contents.amanReport || (contents.db && (contents.db.amanReport || contents.db.amanRows)) || [];
-      if (Array.isArray(rawAmanInput) && rawAmanInput.length > 0) {
-        for (var ar = 0; ar < rawAmanInput.length; ar++) {
-          var aItem = rawAmanInput[ar];
-          if (aItem && (aItem.arabicName || aItem.birthDate || aItem.notes)) {
-            amanRows.push([
-              ar + 1,
-              aItem.arabicName || "",
-              formatSheetDate(aItem.birthDate),
-              aItem.notes || "",
-              aItem.invoiceId || "",
-              formatSheetDate(aItem.date)
-            ]);
-          }
-        }
-      } else if (db.invoices && Array.isArray(db.invoices)) {
-        var aCounter = 1;
-        for (var ai = 0; ai < db.invoices.length; ai++) {
-          var aInv = db.invoices[ai];
-          if (aInv.customers && Array.isArray(aInv.customers)) {
-            for (var ac = 0; ac < aInv.customers.length; ac++) {
-              var aCust = aInv.customers[ac];
-              var isAman = false;
-              var aNote = "";
-              if (aCust.services && Array.isArray(aCust.services)) {
-                for (var asIdx = 0; asIdx < aCust.services.length; asIdx++) {
-                  var sId = String(aCust.services[asIdx].serviceId || "");
-                  if (sId.indexOf("#") === 0 && sId.indexOf("##") !== 0) {
-                    isAman = true;
-                    var sType = (sId.indexOf("مستعجل") !== -1 || sId.indexOf("عاجل") !== -1 || sId.indexOf("فورى") !== -1) ? "مستعجل" : "عادي";
-                    var fName = String(aCust.services[asIdx].fineName || "").trim();
-                    var fAmt = Number(aCust.services[asIdx].fineAmount) || 0;
-                    var finePart = (fName || fAmt > 0) ? (" - " + (fName ? (fName.indexOf("غرامة") === 0 ? fName : "غرامة " + fName) : "غرامة حكومية")) : "";
-                    aNote = sType + finePart;
-                    break;
-                  }
-                }
-              }
-              if (isAman) {
-                amanRows.push([
-                  aCounter++,
-                  aCust.arabicName || "",
-                  formatSheetDate(aCust.birthDate),
-                  aNote || "",
-                  aInv.invoiceId || "",
-                  formatSheetDate(aInv.date)
-                ]);
-              }
-            }
-          }
-        }
-      }
-      if (amanRows.length > 0) {
-        amanSheet.getRange(1, 1, amanRows.length, amanRows[0].length).setValues(amanRows);
-        formatHeader(amanSheet, amanHeaders.length);
-        try {
-          amanSheet.setColumnWidth(1, 60);
-          amanSheet.setColumnWidth(2, 280);
-          amanSheet.setColumnWidth(3, 140);
-          amanSheet.setColumnWidth(4, 250);
-          amanSheet.setColumnWidth(5, 110);
-          amanSheet.setColumnWidth(6, 120);
-        } catch(cwErr) {}
-      }
-
-      // --- Sheet 8: Aman_Postponed_الأسماء_المرحلة ---
-      var postRowsList = contents.postponedRows || contents.amanPostponedRows || (contents.db && (contents.db.amanPostponedRows || contents.db.postponedRows)) || [];
-      if (Array.isArray(postRowsList)) {
-        var postSheet = findOrCreateSheet(ss, ["Aman_Postponed_الأسماء_المرحلة", "Aman_Postponed", "الأسماء_المرحلة", "الاسماء المرحلة", "الأسماء المرحلة", "المؤجلين", "المرحلين"], "Aman_Postponed_الأسماء_المرحلة");
-        postSheet.clearContents();
-        var postHeaders = ["م", "الاسم", "تاريخ الميلاد", "الملاحظات (النوع والغرامة)", "تاريخ الكشف الأصلي", "تاريخ ووقت الترحيل", "رقم الفاتورة", "الحالة"];
-        var postRows = [postHeaders];
-        for (var pi = 0; pi < postRowsList.length; pi++) {
-          var pItem = postRowsList[pi];
-          if (pItem && (pItem.arabicName || pItem.birthDate)) {
-            postRows.push([
-              postRows.length,
-              pItem.arabicName || "",
-              formatSheetDate(pItem.birthDate),
-              pItem.notes || "",
-              formatSheetDate(pItem.originalDate),
-              pItem.postponedAt || "",
-              pItem.invoiceId || "",
-              pItem.status || "مؤجل"
-            ]);
-          }
-        }
-        postSheet.getRange(1, 1, postRows.length, postHeaders.length).setValues(postRows);
-        formatHeader(postSheet, postHeaders.length);
-        try {
-          postSheet.setColumnWidth(1, 60);
-          postSheet.setColumnWidth(2, 280);
-          postSheet.setColumnWidth(3, 140);
-          postSheet.setColumnWidth(4, 250);
-          postSheet.setColumnWidth(5, 130);
-          postSheet.setColumnWidth(6, 160);
-          postSheet.setColumnWidth(7, 100);
-          postSheet.setColumnWidth(8, 100);
-        } catch(cwErr) {}
-      }
-
-      return ContentService.createTextOutput(JSON.stringify({ 
-        status: "success", 
-        message: "تم تحديث وحفظ كافة البيانات في ملف جوجل شيت بنجاح! 🚀" 
-      })).setMimeType(ContentService.MimeType.JSON);
-    }
-
-    // 2. Direct Specific Settings Push
-    if (action === "push_settings") {
-      var stData = contents.settings || (contents.db && contents.db.settings) || {};
-      var sSheet = getOrCreateSheet(ss, "Settings_الاعدادات_والرسائل");
-      sSheet.clearContents();
-      var sHeaders = ["بند الإعداد (Setting Name)", "القيمة المحفوظة (Value)", "المعرف البرمجي (Key)"];
-      var sRows = [
-        sHeaders,
-        ["اسم وبيانات المكتب بالترويسة", stData.headerText || "", "headerText"],
-        ["الترويسة الفرعية", stData.subHeaderText || "", "subHeaderText"],
-        ["رسالة الترحيب واستلام الطلب", stData.welcomeMessage || "", "welcomeMessage"],
-        ["قالب رسالة جاهزية الأوراق للاستلام (العامة)", stData.readyMessage || "", "readyMessage"],
-        ["قالب رسالة جاهزية جوازات السفر (#)", stData.readyPassportMessage || "", "readyPassportMessage"],
-        ["قالب رسالة الإنجاز الجزئي للخدمات", stData.partialReadyMessage || "", "partialReadyMessage"],
-        ["قالب رسالة تم التسليم بنجاح", stData.deliveryMessage || "", "deliveryMessage"],
-        ["تذييل الفاتورة المطبوعة", stData.footerText || "", "footerText"],
-        ["إعدادات النظام كاملة (JSON)", JSON.stringify(stData || {}), "settings_json"]
-      ];
-      sSheet.getRange(1, 1, sRows.length, sRows[0].length).setValues(sRows);
-      formatHeader(sSheet, sHeaders.length);
-      try {
-        sSheet.setColumnWidth(1, 240);
-        sSheet.setColumnWidth(2, 450);
-        sSheet.setColumnWidth(3, 160);
-      } catch(cwErr) {}
-
-      return ContentService.createTextOutput(JSON.stringify({ 
-        status: "success", 
-        message: "تم حفظ وتحديث إعدادات وبيانات المكتب في ورقة (Settings_الاعدادات_والرسائل) بملف جوجل شيت بنجاح! 💾✅" 
-      })).setMimeType(ContentService.MimeType.JSON);
-    }
-
-    // 3. Direct Specific Dictionary Push
-    if (action === "push_dictionary") {
-      var dictList = contents.dictionary || (contents.db && contents.db.dictionary) || [];
-      if (Array.isArray(dictList)) {
-        var dSheet = ss.getSheetByName("Dictionary_قاموس_الاسماء") || 
-                     ss.getSheetByName("Dictionary") || 
-                     ss.getSheetByName("قاموس_الاسماء") || 
-                     ss.insertSheet("Dictionary_قاموس_الاسماء");
-        dSheet.clearContents();
-        var dHeaders = ["م", "الاسم بالعربي", "الاسم بالإنجليزي (معايير الجوازات)"];
-        var dRows = [dHeaders];
-        for (var k = 0; k < dictList.length; k++) {
-          dRows.push([
-            k + 1,
-            dictList[k].arabic || "", 
-            dictList[k].english || ""
-          ]);
-        }
-        if (dRows.length > 0) {
-          dSheet.getRange(1, 1, dRows.length, dRows[0].length).setValues(dRows);
-          formatHeader(dSheet, dHeaders.length);
-          try {
-            dSheet.setColumnWidth(1, 60);
-            dSheet.setColumnWidth(2, 220);
-            dSheet.setColumnWidth(3, 260);
-          } catch(cwErr) {}
-        }
-        return ContentService.createTextOutput(JSON.stringify({ 
-          status: "success", 
-          message: "تم تسجيل وتحديث ورقة قاموس الأسماء (" + dictList.length + " اسم) بملف جوجل شيت بنجاح! 📖✅" 
-        })).setMimeType(ContentService.MimeType.JSON);
-      }
-    }
-
-    // 4. Direct Specific Government Fines Push
-    if (action === "push_fines") {
-      var finesList = contents.governmentFines || (contents.db && contents.db.governmentFines) || [];
-      if (Array.isArray(finesList)) {
-        var fSheet = findOrCreateSheet(ss, ["GovernmentFines_الغرامات_الحكومية", "GovernmentFines", "الغرامات_الحكومية", "الغرامات الحكومية", "الغرامات", "بنود_الغرامات", "بنود الغرامات", "غرامات", "fines"], "GovernmentFines_الغرامات_الحكومية");
-        fSheet.clearContents();
-        var fHeaders = ["المعرف ID", "اسم بند الغرامة الحكومية", "المبلغ الافتراضي (ج.م)", "شروط وملاحظات التطبيق"];
-        var fRows = [fHeaders];
-        for (var fi = 0; fi < finesList.length; fi++) {
-          fRows.push([
-            finesList[fi].id || ("fine-" + (fi + 1)),
-            finesList[fi].name || "",
-            Number(finesList[fi].amount) || 0,
-            finesList[fi].notes || ""
-          ]);
-        }
-        if (fRows.length > 0) {
-          fSheet.getRange(1, 1, fRows.length, fRows[0].length).setValues(fRows);
-          formatHeader(fSheet, fHeaders.length);
-          try {
-            fSheet.setColumnWidth(1, 100);
-            fSheet.setColumnWidth(2, 250);
-            fSheet.setColumnWidth(3, 160);
-            fSheet.setColumnWidth(4, 350);
-          } catch(cwErr) {}
-        }
-        return ContentService.createTextOutput(JSON.stringify({ 
-          status: "success", 
-          message: "تم تسجيل وتحديث ورقة الغرامات الحكومية (" + finesList.length + " بند) بملف جوجل شيت بنجاح! ⚖️✅" 
-        })).setMimeType(ContentService.MimeType.JSON);
-      }
-    }
-
-    // 5. Direct Specific Aman Report Push
-    if (action === "push_aman") {
-      var aRowsList = contents.amanRows || [];
-      var aSheet = findOrCreateSheet(ss, ["Aman_كشف_حركة_الخدمات_الجماهيرية", "Aman", "كشف_امان", "كشف امان", "كشف أمان", "أمان", "امان"], "Aman_كشف_حركة_الخدمات_الجماهيرية");
-      aSheet.clearContents();
-      var aHeaders = ["م", "الاسم", "تاريخ الميلاد", "الملاحظات (النوع والغرامة)", "رقم الفاتورة", "التاريخ"];
-      var aRows = [aHeaders];
-      for (var ar = 0; ar < aRowsList.length; ar++) {
-        var rowItem = aRowsList[ar];
-        if (rowItem && (rowItem.arabicName || rowItem.birthDate || rowItem.notes)) {
-          aRows.push([
-            ar + 1,
-            rowItem.arabicName || "",
-            formatSheetDate(rowItem.birthDate),
-            rowItem.notes || "",
-            rowItem.invoiceId || "",
-            formatSheetDate(rowItem.date || contents.dateFrom)
-          ]);
-        }
-      }
-      if (aRows.length > 0) {
-        aSheet.getRange(1, 1, aRows.length, aRows[0].length).setValues(aRows);
-        formatHeader(aSheet, aHeaders.length);
-        try {
-          aSheet.setColumnWidth(1, 60);
-          aSheet.setColumnWidth(2, 280);
-          aSheet.setColumnWidth(3, 140);
-          aSheet.setColumnWidth(4, 250);
-          aSheet.setColumnWidth(5, 110);
-          aSheet.setColumnWidth(6, 120);
-        } catch(cwErr) {}
-      }
-      return ContentService.createTextOutput(JSON.stringify({ 
-        status: "success", 
-        message: "تم حفظ وتحديث كشف أمان في ورقة (Aman_كشف_حركة_الخدمات_الجماهيرية) بملف جوجل شيت بنجاح! 📑✅" 
-      })).setMimeType(ContentService.MimeType.JSON);
-    }
-
-    // 5.5 Direct Specific Aman Postponed Names Push
-    if (action === "push_postponed_aman") {
-      var pRowsList = contents.postponedRows || contents.amanPostponedRows || [];
-      var pSheet = findOrCreateSheet(ss, ["Aman_Postponed_الأسماء_المرحلة", "Aman_Postponed", "الأسماء_المرحلة", "الاسماء المرحلة", "الأسماء المرحلة", "المؤجلين", "المرحلين"], "Aman_Postponed_الأسماء_المرحلة");
-      pSheet.clearContents();
-      var pHeaders = ["م", "الاسم", "تاريخ الميلاد", "الملاحظات (النوع والغرامة)", "تاريخ الكشف الأصلي", "تاريخ ووقت الترحيل", "رقم الفاتورة", "الحالة"];
-      var pRows = [pHeaders];
-      for (var pr = 0; pr < pRowsList.length; pr++) {
-        var prItem = pRowsList[pr];
-        if (prItem && (prItem.arabicName || prItem.birthDate || prItem.notes)) {
-          pRows.push([
-            pRows.length,
-            prItem.arabicName || "",
-            formatSheetDate(prItem.birthDate),
-            prItem.notes || "",
-            formatSheetDate(prItem.originalDate),
-            prItem.postponedAt || "",
-            prItem.invoiceId || "",
-            prItem.status || "مؤجل"
-          ]);
-        }
-      }
-      pSheet.getRange(1, 1, pRows.length, pHeaders.length).setValues(pRows);
-      formatHeader(pSheet, pHeaders.length);
-      try {
-        pSheet.setColumnWidth(1, 60);
-        pSheet.setColumnWidth(2, 280);
-        pSheet.setColumnWidth(3, 140);
-        pSheet.setColumnWidth(4, 250);
-        pSheet.setColumnWidth(5, 130);
-        pSheet.setColumnWidth(6, 160);
-        pSheet.setColumnWidth(7, 100);
-        pSheet.setColumnWidth(8, 100);
-      } catch(cwErr) {}
-      return ContentService.createTextOutput(JSON.stringify({ 
-        status: "success", 
-        message: "تم حفظ وتحديث ورقة الأسماء المرحلة (Aman_Postponed_الأسماء_المرحلة) بملف جوجل شيت بنجاح! 📑✂️" 
-      })).setMimeType(ContentService.MimeType.JSON);
-    }
-
-    // 6. Direct Specific Invoices Push / Sync
-    if (action === "push_invoices") {
-      var invoicesList = contents.invoices || (contents.db && contents.db.invoices) || [];
-      if (Array.isArray(invoicesList)) {
-        var invSheet = getOrCreateSheet(ss, "Invoices_الفواتير");
-        invSheet.clearContents();
-        var invHeaders = [
-          "رقم الفاتورة", "التاريخ", "الحالة", "الموظف", "مكان الحفظ (رقم الدرج)", 
-          "رسوم حكومية", "رسوم مكتب", "الإجمالي الكلي", "أسماء العملاء", "أرقام الهواتف", 
-          "الخدمات المطلوبة", "تفاصيل العملاء كاملة (JSON)"
-        ];
-        var invRows = [invHeaders];
-        for (var ii = 0; ii < invoicesList.length; ii++) {
-          var invItem = invoicesList[ii];
-          var custNames = [];
-          var custPhones = [];
-          var servicesList = [];
-          if (invItem.customers && Array.isArray(invItem.customers)) {
-            for (var kk = 0; kk < invItem.customers.length; kk++) {
-              var cItem = invItem.customers[kk];
-              custNames.push(cItem.arabicName + (cItem.englishName ? " (" + cItem.englishName + ")" : ""));
-              if (cItem.phone) custPhones.push(cItem.phone);
-              if (cItem.services && Array.isArray(cItem.services)) {
-                for (var ssIdx = 0; ssIdx < cItem.services.length; ssIdx++) {
-                  var srvObj = cItem.services[ssIdx];
-                  var srvText = srvObj.serviceId + " x" + (srvObj.quantity || 1);
-                  if (srvObj.fineName || srvObj.fineAmount) {
-                    srvText += " [غرامة: " + (srvObj.fineName || "مقررة") + " (" + (srvObj.fineAmount || 0) + " ج.م)]";
-                  }
-                  servicesList.push(srvText);
-                }
-              }
-            }
-          }
-          invRows.push([
-            invItem.invoiceId || "",
-            invItem.date || "",
-            invItem.status || "",
-            invItem.employeeName || "",
-            invItem.archiveDrawer || "",
-            invItem.totalGov || 0,
-            invItem.totalOffice || 0,
-            invItem.totalAmount || 0,
-            custNames.join(" | "),
-            custPhones.join(" | "),
-            servicesList.join(" , "),
-            JSON.stringify(invItem.customers || [])
-          ]);
-        }
-        if (invRows.length > 0) {
-          invSheet.getRange(1, 1, invRows.length, invRows[0].length).setValues(invRows);
-          formatHeader(invSheet, invHeaders.length);
-        }
-        return ContentService.createTextOutput(JSON.stringify({ 
-          status: "success", 
-          message: "تم تسجيل وتحديث الفواتير (" + invoicesList.length + " فاتورة) في الداتا شيت بجوجل شيت بنجاح! 📑✅" 
-        })).setMimeType(ContentService.MimeType.JSON);
-      }
-    }
-
-    return ContentService.createTextOutput(JSON.stringify({ error: "إجراء غير معروف" }))
-      .setMimeType(ContentService.MimeType.JSON);
-  } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({ error: err.toString() }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-}
-
-function doGet(e) {
-  try {
-    if (e && e.parameter && e.parameter.action === "test") {
-      return ContentService.createTextOutput(JSON.stringify({ 
-        status: "success", 
-        message: "تم الاتصال بنجاح بملف جوجل شيت! 📊" 
-      })).setMimeType(ContentService.MimeType.JSON);
-    }
-
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var db = {
-      settings: {},
-      services: [],
-      invoices: [],
-      collectionClosings: [],
-      dictionary: [],
-      governmentFines: []
-    };
-
-    // 1. Read Services
-    var srvSheet = ss.getSheetByName("Services_الخدمات_والاسعار") || ss.getSheetByName("Services");
-    if (srvSheet) {
-      var srvValues = srvSheet.getDataRange().getValues();
-      for (var s = 1; s < srvValues.length; s++) {
-        var row = srvValues[s];
-        if (row[1] || row[2]) {
-          var idVal = String(row[1] || row[0]);
-          var nameVal = String(row[2] || row[1]);
-          var govVal = Number(row[3] || row[2]) || 0;
-          var offVal = Number(row[4] || row[3]) || 0;
-          db.services.push({
-            order: Number(row[0]) || s,
-            id: idVal,
-            name: nameVal,
-            govPrice: govVal,
-            officeFee: offVal,
-            duration: String(row[6] || row[4] || ""),
-            instructions: String(row[7] || row[5] || ""),
-            deliveryDaysOffset: Number(row[8] || row[6]) || 0,
-            notes: String(row[9] || row[7] || "")
-          });
-        }
-      }
-    }
-
-    // 2. Read Invoices
-    var invSheet = ss.getSheetByName("Invoices_الفواتير") || ss.getSheetByName("Invoices");
-    if (invSheet) {
-      var invValues = invSheet.getDataRange().getValues();
-      for (var v = 1; v < invValues.length; v++) {
-        var iRow = invValues[v];
-        if (iRow[0]) {
-          var custData = [];
-          var rawJson = iRow[11] || iRow[8];
-          try {
-            custData = rawJson ? JSON.parse(rawJson) : [];
-          } catch(e){}
-          var rawDate = iRow[1];
-          var cleanDate = "";
-          if (rawDate instanceof Date) {
-            cleanDate = Utilities.formatDate(rawDate, Session.getScriptTimeZone() || "GMT+3", "yyyy-MM-dd");
-          } else {
-            cleanDate = String(rawDate || "").trim();
-            // Remove GMT offset and timezone descriptions if present
-            cleanDate = cleanDate.replace(/\s*GMT[+-]\d+.*$/i, "").trim();
-          }
-
-          db.invoices.push({
-            invoiceId: Number(iRow[0]),
-            date: cleanDate,
-            status: String(iRow[2] || "NEW"),
-            employeeName: String(iRow[3] || ""),
-            archiveDrawer: String(iRow[4] || ""),
-            totalGov: Number(iRow[5]) || 0,
-            totalOffice: Number(iRow[6]) || 0,
-            totalAmount: Number(iRow[7]) || 0,
-            customers: custData
-          });
-        }
-      }
-    }
-
-    // 3. Read Closings
-    var clsSheet = ss.getSheetByName("Closings_تقفيل_الخزينة") || ss.getSheetByName("CollectionClosings");
-    if (clsSheet) {
-      var clsValues = clsSheet.getDataRange().getValues();
-      for (var c = 1; c < clsValues.length; c++) {
-        var cRow = clsValues[c];
-        if (cRow[0]) {
-          db.collectionClosings.push({
-            id: String(cRow[0]),
-            closeDate: String(cRow[1] || ""),
-            closedBy: String(cRow[2] || ""),
-            revenue: Number(cRow[3]) || 0,
-            profit: Number(cRow[4]) || 0,
-            cashAmount: Number(cRow[5]) || 0,
-            deferredAmount: Number(cRow[6]) || 0,
-            notes: String(cRow[7] || "")
-          });
-        }
-      }
-    }
-
-    // 4. Read Settings
-    var stSheet = ss.getSheetByName("Settings_الاعدادات_والرسائل") || 
-                  ss.getSheetByName("Settings") || 
-                  ss.getSheetByName("الاعدادات") || 
-                  ss.getSheetByName("الاعدادات_والرسائل");
-    if (stSheet) {
-      var stValues = stSheet.getDataRange().getValues();
-      for (var st = 1; st < stValues.length; st++) {
-        var row = stValues[st];
-        var label = String(row[0] || "").trim();
-        var val = row[1] !== undefined && row[1] !== null ? String(row[1]) : "";
-        var key = String(row[2] || "").trim();
-
-        // 1. Check direct key
-        if (key && key !== "settings_json") {
-          db.settings[key] = val;
-        }
-
-        // 2. Fallback matching by label
-        if (label.indexOf("ترويسة") !== -1 && label.indexOf("فرعية") === -1) {
-          db.settings.headerText = val;
-        } else if (label.indexOf("فرعية") !== -1) {
-          db.settings.subHeaderText = val;
-        } else if (label.indexOf("ترحيب") !== -1 || label.indexOf("استلام الطلب") !== -1 || label.indexOf("welcome") !== -1) {
-          db.settings.welcomeMessage = val;
-        } else if (label.indexOf("جوازات") !== -1 || key === "readyPassportMessage") {
-          db.settings.readyPassportMessage = val;
-        } else if (label.indexOf("جزئي") !== -1 || key === "partialReadyMessage") {
-          db.settings.partialReadyMessage = val;
-        } else if (label.indexOf("جاهزية") !== -1 || label.indexOf("ready") !== -1) {
-          db.settings.readyMessage = val;
-        } else if (label.indexOf("التسليم بنجاح") !== -1 || label.indexOf("delivery") !== -1) {
-          db.settings.deliveryMessage = val;
-        } else if (label.indexOf("تذييل") !== -1 || label.indexOf("footer") !== -1) {
-          db.settings.footerText = val;
-        }
-
-        // 3. Complete JSON backup
-        if (label.indexOf("JSON") !== -1 || key === "settings_json") {
-          try {
-            var parsed = JSON.parse(val);
-            db.settings = Object.assign({}, parsed, db.settings);
-          } catch(e){}
-        }
-      }
-    }
-
-    // 5. Read Dictionary
-    var dictSheet = ss.getSheetByName("Dictionary_قاموس_الاسماء") || 
-                    ss.getSheetByName("Dictionary") || 
-                    ss.getSheetByName("قاموس_الاسماء");
-    if (dictSheet) {
-      var dictValues = dictSheet.getDataRange().getValues();
-      if (dictValues && dictValues.length > 1) {
-        for (var d = 1; d < dictValues.length; d++) {
-          var dRow = dictValues[d];
-          var ar = "";
-          var en = "";
-          if (dRow.length >= 3 && dRow[1]) {
-            ar = dRow[1];
-            en = dRow[2];
-          } else if (dRow.length >= 2 && dRow[0]) {
-            ar = dRow[0];
-            en = dRow[1];
-          }
-          if (ar && en) {
-            db.dictionary.push({
-              arabic: String(ar).trim(),
-              english: String(en).trim().toUpperCase()
-            });
-          }
-        }
-      }
-    }
-
-    // 6. Read Government Fines
-    var fineSheet = null;
-    var allSheetsList = ss.getSheets();
-    for (var fsIdx = 0; fsIdx < allSheetsList.length; fsIdx++) {
-      var sName = allSheetsList[fsIdx].getName().trim();
-      var sNameLower = sName.toLowerCase();
-      if (
-        sName === "GovernmentFines_الغرامات_الحكومية" ||
-        sName === "GovernmentFines" ||
-        sName === "الغرامات_الحكومية" ||
-        sName === "الغرامات الحكومية" ||
-        sName === "الغرامات" ||
-        sName === "بنود_الغرامات" ||
-        sName === "بنود الغرامات" ||
-        sName === "بنود الغرامات الحكومية" ||
-        sName === "غرامات" ||
-        sNameLower === "fines" ||
-        sNameLower === "government_fines" ||
-        sNameLower === "government fines" ||
-        sName.indexOf("غرام") !== -1 ||
-        sNameLower.indexOf("fine") !== -1
-      ) {
-        fineSheet = allSheetsList[fsIdx];
-        break;
-      }
-    }
-    if (fineSheet) {
-      var fineValues = fineSheet.getDataRange().getValues();
-      if (fineValues && fineValues.length > 1) {
-        var headerRow = fineValues[0];
-        var hasIdCol = false;
-        var nameColIdx = 0;
-        var amountColIdx = 1;
-        var notesColIdx = 2;
-
-        for (var h = 0; h < headerRow.length; h++) {
-          var hText = String(headerRow[h] || "").trim().toLowerCase();
-          if (hText.indexOf("id") !== -1 || hText.indexOf("معرف") !== -1) {
-            hasIdCol = true;
-          } else if (hText.indexOf("اسم") !== -1 || hText.indexOf("بند") !== -1 || hText.indexOf("name") !== -1) {
-            nameColIdx = h;
-          } else if (hText.indexOf("مبلغ") !== -1 || hText.indexOf("سعر") !== -1 || hText.indexOf("amount") !== -1 || hText.indexOf("price") !== -1 || hText.indexOf("قيمة") !== -1) {
-            amountColIdx = h;
-          } else if (hText.indexOf("ملاحظ") !== -1 || hText.indexOf("شروط") !== -1 || hText.indexOf("note") !== -1) {
-            notesColIdx = h;
-          }
-        }
-
-        if (hasIdCol && nameColIdx === 0) {
-          nameColIdx = 1;
-          amountColIdx = 2;
-          notesColIdx = 3;
-        }
-
-        for (var f = 1; f < fineValues.length; f++) {
-          var fRow = fineValues[f];
-          var fId = hasIdCol ? String(fRow[0] || ("fine-" + f)).trim() : ("fine-" + f);
-          var fName = String(fRow[nameColIdx] || "").trim();
-          var fAmount = Number(fRow[amountColIdx]) || 0;
-          var fNotes = String(fRow[notesColIdx] || "").trim();
-
-          if (fName && fName !== "اسم بند الغرامة" && fName !== "اسم الغرامة" && fName !== "اسم بند الغرامة الحكومية") {
-            db.governmentFines.push({
-              id: fId || ("fine-" + f),
-              name: fName,
-              amount: fAmount,
-              notes: fNotes
-            });
-          }
-        }
-      }
-    }
-
-    // 7. Read Aman Report (Aman_كشف_حركة_الخدمات_الجماهيرية)
-    var amanReportSheet = findOrCreateSheet(ss, ["Aman_كشف_حركة_الخدمات_الجماهيرية", "Aman", "كشف_امان", "كشف امان", "كشف أمان", "أمان", "امان"], "Aman_كشف_حركة_الخدمات_الجماهيرية");
-    db.amanReport = [];
-    if (amanReportSheet) {
-      var aValRange = amanReportSheet.getDataRange().getValues();
-      if (aValRange && aValRange.length > 1) {
-        for (var aRowIdx = 1; aRowIdx < aValRange.length; aRowIdx++) {
-          var aRow = aValRange[aRowIdx];
-          var aName = String(aRow[1] || "").trim();
-          var aBirth = formatSheetDate(aRow[2]);
-          var aNotes = String(aRow[3] || "").trim();
-          var aInvId = aRow[4] !== undefined && aRow[4] !== "" ? Number(aRow[4]) : undefined;
-          var aDate = formatSheetDate(aRow[5]);
-          if (aName || aBirth || aNotes) {
-            db.amanReport.push({
-              id: aInvId ? ("inv-" + aInvId + "-c-0") : ("sheet-aman-" + aRowIdx),
-              arabicName: aName,
-              birthDate: aBirth,
-              notes: aNotes,
-              invoiceId: aInvId,
-              date: aDate
-            });
-          }
-        }
-      }
-    }
-
-    // Fallback: If Aman sheet is empty or not yet filled, extract Aman entries from invoices sheet
-    if (db.amanReport.length === 0 && db.invoices && Array.isArray(db.invoices)) {
-      for (var ai2 = 0; ai2 < db.invoices.length; ai2++) {
-        var aInv2 = db.invoices[ai2];
-        if (aInv2.customers && Array.isArray(aInv2.customers)) {
-          for (var ac2 = 0; ac2 < aInv2.customers.length; ac2++) {
-            var aCust2 = aInv2.customers[ac2];
-            if (aCust2.services && Array.isArray(aCust2.services)) {
-              for (var as2 = 0; as2 < aCust2.services.length; as2++) {
-                var sId2 = String(aCust2.services[as2].serviceId || "");
-                if (sId2.indexOf("#") === 0 && sId2.indexOf("##") !== 0) {
-                  var sType2 = (sId2.indexOf("مستعجل") !== -1 || sId2.indexOf("عاجل") !== -1 || sId2.indexOf("فورى") !== -1) ? "مستعجل" : "عادي";
-                  var fName2 = String(aCust2.services[as2].fineName || "").trim();
-                  var fAmt2 = Number(aCust2.services[as2].fineAmount) || 0;
-                  var finePart2 = (fName2 || fAmt2 > 0) ? (" - " + (fName2 ? (fName2.indexOf("غرامة") === 0 ? fName2 : "غرامة " + fName2) : "غرامة حكومية")) : "";
-                  var noteVal2 = sType2 + finePart2;
-                  db.amanReport.push({
-                    id: "inv-" + (aInv2.invoiceId || ai2) + "-c-" + ac2,
-                    arabicName: aCust2.arabicName || "",
-                    birthDate: formatSheetDate(aCust2.birthDate),
-                    notes: noteVal2,
-                    invoiceId: aInv2.invoiceId,
-                    date: formatSheetDate(aInv2.date)
-                  });
-                  break;
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-
-    // 8. Read Aman Postponed Report (Aman_Postponed_الأسماء_المرحلة)
-    var postReportSheet = findOrCreateSheet(ss, ["Aman_Postponed_الأسماء_المرحلة", "Aman_Postponed", "الأسماء_المرحلة", "الاسماء المرحلة", "الأسماء المرحلة", "المؤجلين", "المرحلين"], "Aman_Postponed_الأسماء_المرحلة");
-    db.amanPostponedRows = [];
-    if (postReportSheet) {
-      var pValRange = postReportSheet.getDataRange().getValues();
-      if (pValRange && pValRange.length > 1) {
-        for (var pRowIdx = 1; pRowIdx < pValRange.length; pRowIdx++) {
-          var pRow = pValRange[pRowIdx];
-          var pName = String(pRow[1] || "").trim();
-          var pBirth = formatSheetDate(pRow[2]);
-          var pNotes = String(pRow[3] || "").trim();
-          var pOrigDate = formatSheetDate(pRow[4]);
-          var pPostAt = String(pRow[5] || "").trim();
-          var pInvId = pRow[6] !== undefined && pRow[6] !== "" ? Number(pRow[6]) : undefined;
-          var pStatus = String(pRow[7] || "مؤجل").trim();
-          if (pName || pBirth) {
-            db.amanPostponedRows.push({
-              id: "postponed-" + pRowIdx + "-" + Date.now(),
-              arabicName: pName,
-              birthDate: pBirth,
-              notes: pNotes,
-              originalDate: pOrigDate,
-              postponedAt: pPostAt,
-              invoiceId: pInvId,
-              status: pStatus
-            });
-          }
-        }
-      }
-    }
-
-    return ContentService.createTextOutput(JSON.stringify({ status: "success", db: db }))
-      .setMimeType(ContentService.MimeType.JSON);
-  } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({ error: err.toString() }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-}
-
-function getOrCreateSheet(ss, name) {
-  var sheet = ss.getSheetByName(name);
-  if (!sheet) {
-    sheet = ss.insertSheet(name);
-  }
-  return sheet;
-}
-
-function findOrCreateSheet(ss, candidates, defaultName) {
-  if (!Array.isArray(candidates)) candidates = [candidates];
-  var allSheets = ss.getSheets();
-  for (var i = 0; i < candidates.length; i++) {
-    var cand = String(candidates[i] || "").trim().toLowerCase();
-    if (!cand) continue;
-    for (var j = 0; j < allSheets.length; j++) {
-      var sName = allSheets[j].getName().trim().toLowerCase();
-      if (sName === cand || sName.indexOf(cand) !== -1 || cand.indexOf(sName) !== -1) {
-        return allSheets[j];
-      }
-    }
-  }
-  return getOrCreateSheet(ss, defaultName);
-}
-
-function formatSheetDate(val) {
-  if (!val && val !== 0) return "";
-  if (val instanceof Date) {
-    return Utilities.formatDate(val, Session.getScriptTimeZone() || "GMT+3", "yyyy/MM/dd");
-  }
-  var s = String(val).trim();
-  if (s.indexOf("GMT") !== -1 || /^[A-Za-z]{3}\s+[A-Za-z]{3}/.test(s)) {
-    try {
-      var d = new Date(s);
-      if (!isNaN(d.getTime())) {
-        return Utilities.formatDate(d, Session.getScriptTimeZone() || "GMT+3", "yyyy/MM/dd");
-      }
-    } catch(e) {}
-  }
-  var iso = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
-  if (iso) {
-    return iso[1] + "/" + (iso[2].length === 1 ? "0" + iso[2] : iso[2]) + "/" + (iso[3].length === 1 ? "0" + iso[3] : iso[3]);
-  }
-  var dmy = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
-  if (dmy) {
-    return dmy[3] + "/" + (dmy[2].length === 1 ? "0" + dmy[2] : dmy[2]) + "/" + (dmy[1].length === 1 ? "0" + dmy[1] : dmy[1]);
-  }
-  var digits = s.replace(/\D/g, "");
-  if (digits.length === 14) {
-    var c = parseInt(digits.charAt(0));
-    var y = (c === 3 ? 2000 : 1900) + parseInt(digits.substring(1, 3));
-    var m = digits.substring(3, 5);
-    var day = digits.substring(5, 7);
-    return y + "/" + m + "/" + day;
-  }
-  return s;
-}
-
-function formatHeader(sheet, numCols) {
-  try {
-    sheet.setRightToLeft(true);
-    sheet.setFrozenRows(1);
-    var range = sheet.getRange(1, 1, 1, numCols);
-    range.setBackground("#1e293b");
-    range.setFontColor("#ffffff");
-    range.setFontWeight("bold");
-    range.setHorizontalAlignment("center");
-  } catch(e) {}
-}`;
+  const appsScriptCode = APPS_SCRIPT_CODE;
 
   const handleCopyScript = () => {
     navigator.clipboard.writeText(appsScriptCode);
@@ -1464,7 +599,8 @@ function formatHeader(sheet, numCols) {
         footerText: footerText.trim(),
         googleSheetsConnected: !!(googleSheetWebhookUrl.trim() || googleSheetUrl.trim() || settings.googleSheetsConnected),
         includeSaturdayAsWeekend: includeSaturdayAsWeekend,
-        customHolidays: customHolidays
+        customHolidays: customHolidays,
+        applicantCapacities: applicantCapacities.filter(c => c && c.trim())
       };
 
       const result = await updateSettingsOnServer(payload);
@@ -1627,6 +763,7 @@ _{الترويسة_الفرعية}_
                     "{الاسم}",
                     "{الاسم_الانجليزي}",
                     "{المهنة}",
+                    "{صفة_مقدم_الطلب}",
                     "{الخدمات}",
                     "{تعليمات_الاستلام}",
                     "{فاصل}"
@@ -1817,6 +954,190 @@ _{الترويسة_الفرعية}_
                 <span className="bg-slate-100 px-1 py-0.5 rounded text-slate-700 font-bold">{"{رقم_الفاتورة}"}</span>
               </div>
             </div>
+          </div>
+        </div>
+
+        {/* Applicant Capacity Management Card (صفة مقدم الطلب لخدمات # و ##) */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+            <div>
+              <h3 className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
+                <UserCheck className="w-5 h-5 text-indigo-600" />
+                <span>خيارات ومسميات صفة مقدم الطلب (معاملات الجوازات # و ##):</span>
+              </h3>
+              <p className="text-[11px] text-slate-500 mt-1">
+                تظهر هذه القائمة المنسدلة تلقائياً عند تسجيل فاتورة جديدة بالخدمات التي تبدأ بـ # أو ##. وتظهر الصفة المختارة في الفاتورة المطبوعة ورسائل الواتساب المرسلة للعميل.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleResetCapacities}
+              className="text-[11px] font-bold text-slate-600 hover:text-indigo-600 flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-indigo-50 border border-slate-200 rounded-xl transition-all cursor-pointer shrink-0 font-cairo"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>استعادة المسميات الافتراضية</span>
+            </button>
+          </div>
+
+          {capacityFeedback && (
+            <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-2 animate-fade-in font-cairo">
+              <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{capacityFeedback}</span>
+            </div>
+          )}
+
+          {/* Add New Capacity Input Form */}
+          <div className="bg-indigo-50/50 border border-indigo-100 rounded-xl p-3.5 space-y-2">
+            <label className="text-xs font-bold text-indigo-950 block font-cairo">
+              إضافة صفة أو مسمى جديد لمقدم الطلب:
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={newCapacityInput}
+                onChange={(e) => setNewCapacityInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleAddCapacity();
+                  }
+                }}
+                placeholder="مثال: الوصي القانوني، العم، الخال، الجد..."
+                className="flex-1 bg-white border border-slate-200 text-slate-800 rounded-xl px-3 py-2 text-xs font-cairo focus:outline-hidden focus:ring-2 focus:ring-indigo-500 shadow-2xs"
+              />
+              <button
+                type="button"
+                onClick={() => handleAddCapacity()}
+                disabled={!newCapacityInput.trim()}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold font-cairo flex items-center gap-1.5 transition-all disabled:opacity-50 cursor-pointer shadow-xs"
+              >
+                <Plus className="w-4 h-4" />
+                <span>إضافة للقائمة +</span>
+              </button>
+            </div>
+          </div>
+
+          {/* List of configured capacities */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-xs text-slate-500 font-cairo px-1">
+              <span>المسميات الحالية بالقائمة المنسدلة (مرتبة حسب الأولوية):</span>
+              <span className="font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md font-mono text-[11px]">
+                {applicantCapacities.length} مسمى
+              </span>
+            </div>
+
+            <div className="grid gap-2">
+              {applicantCapacities.map((cap, idx) => (
+                <div
+                  key={`${cap}-${idx}`}
+                  className="flex items-center justify-between bg-slate-50/80 hover:bg-white border border-slate-200 rounded-xl p-2.5 transition-all shadow-2xs"
+                >
+                  {editingCapacityIdx === idx ? (
+                    <div className="flex items-center gap-2 flex-1">
+                      <input
+                        type="text"
+                        value={editCapacityValue}
+                        onChange={(e) => setEditCapacityValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            handleSaveEditCapacity();
+                          } else if (e.key === "Escape") {
+                            setEditingCapacityIdx(null);
+                          }
+                        }}
+                        autoFocus
+                        className="flex-1 bg-white border border-indigo-300 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-800 font-cairo focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleSaveEditCapacity}
+                        className="p-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors cursor-pointer"
+                        title="حفظ التعديل"
+                      >
+                        <Check className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingCapacityIdx(null)}
+                        className="p-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg transition-colors cursor-pointer"
+                        title="إلغاء"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2.5">
+                        <span className="w-6 h-6 rounded-lg bg-slate-200/80 text-slate-700 text-[11px] font-bold flex items-center justify-center font-mono shrink-0">
+                          {idx + 1}
+                        </span>
+                        <span className="text-xs font-bold text-slate-800 font-cairo">
+                          {cap}
+                        </span>
+                        {idx === 0 && (
+                          <span className="text-[10px] bg-amber-100 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-md font-bold font-cairo">
+                            الافتراضي الأول 🌟
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => handleMoveCapacity(idx, "up")}
+                          disabled={idx === 0}
+                          className="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-20 cursor-pointer rounded-md hover:bg-slate-100 transition-colors"
+                          title="تحريك لأعلى"
+                        >
+                          <ArrowUp className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleMoveCapacity(idx, "down")}
+                          disabled={idx === applicantCapacities.length - 1}
+                          className="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-20 cursor-pointer rounded-md hover:bg-slate-100 transition-colors"
+                          title="تحريك لأسفل"
+                        >
+                          <ArrowDown className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleStartEditCapacity(idx)}
+                          className="p-1 text-slate-500 hover:text-blue-600 cursor-pointer rounded-md hover:bg-blue-50 transition-colors mr-1"
+                          title="تعديل المسمى"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteCapacity(idx)}
+                          className="p-1 text-slate-400 hover:text-rose-600 cursor-pointer rounded-md hover:bg-rose-50 transition-colors"
+                          title="حذف المسمى"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex justify-between items-center pt-2 border-t border-slate-100">
+            <span className="text-[11px] text-slate-400 font-cairo">
+              يتم حفظ التعديلات وحفظها مباشرة، أو يمكنك الضغط على زر الحفظ أدناه.
+            </span>
+            <button
+              type="button"
+              onClick={() => handleSaveCapacitiesDirectly(applicantCapacities)}
+              disabled={capacitySaveLoading}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold font-cairo flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
+            >
+              <Save className="w-4 h-4" />
+              <span>{capacitySaveLoading ? "جاري الحفظ..." : "حفظ المسميات 💾"}</span>
+            </button>
           </div>
         </div>
 

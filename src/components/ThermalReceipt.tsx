@@ -239,6 +239,11 @@ export default function ThermalReceipt({ invoice, settings, services, onClose, o
                         المهنة: <span className="font-bold">{customer.profession}</span>
                       </div>
                     )}
+                    {customer.applicantCapacity && (
+                      <div className="text-[11px] text-black font-bold mt-0.5">
+                        صفة مقدم الطلب: <span className="font-bold">{customer.applicantCapacity}</span>
+                      </div>
+                    )}
                     <div className="text-[11px] text-black font-bold font-mono">
                       الهاتف: {customer.phone}
                     </div>

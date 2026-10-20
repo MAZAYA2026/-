@@ -31,6 +31,7 @@ export interface CustomerInput {
   birthDate: string; // تاريخ الميلاد (Automatically calculated from National ID)
   phone: string; // رقم الهاتف (Mandatory, validates as Egyptian (11 digits starting with 01) or general)
   profession: string; // المهنة (Mandatory if service starts with # or ##, max 32 chars)
+  applicantCapacity?: string; // صفة مقدم الطلب (مثل: بنفسه، الأب، الأم، الزوج...)
   services: {
     serviceId: string;
     quantity: number;
@@ -44,6 +45,19 @@ export interface CustomerInput {
     executionNote?: string; // ملاحظات تنفيذ الخدمة (مثل: تأخير بسبب كذا أو مع مندوب كذا)
   }[];
 }
+
+export const DEFAULT_APPLICANT_CAPACITIES: string[] = [
+  "بنفسه",
+  "الأب",
+  "الأم",
+  "الزوج",
+  "الزوجة",
+  "الابن",
+  "الابنة",
+  "الأخ",
+  "الأخت",
+  "وكيل بموجب توكيل"
+];
 
 export interface Invoice {
   invoiceId: number; // Sequential starting from 100
@@ -113,6 +127,7 @@ export interface AppSettings {
   googleSheetsConnected?: boolean; // Integration toggle
   customHolidays?: HolidayItem[]; // العطلات الرسمية المخصصة والمضافة
   includeSaturdayAsWeekend?: boolean; // اعتبار يوم السبت عطلة أسبوعية للمصالح الحكومية (افتراضياً: نعم)
+  applicantCapacities?: string[]; // خيارات صفة مقدم الطلب لمعاملات الجوازات (# و ##)
 }
 
 export interface AmanPostponedItem {

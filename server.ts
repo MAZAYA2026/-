@@ -305,6 +305,9 @@ function readDB() {
     if (!parsed.amanPostponedRows || !Array.isArray(parsed.amanPostponedRows)) {
       parsed.amanPostponedRows = [];
     }
+    if (!parsed.amanReport || !Array.isArray(parsed.amanReport)) {
+      parsed.amanReport = [];
+    }
     return parsed;
   } catch (err) {
     console.error("Error reading database file, returning defaults:", err);
@@ -583,12 +586,18 @@ async function pushPostponedDirectlyToSheet(db: any): Promise<boolean> {
   if (!targetUrl || !targetUrl.startsWith("http")) return false;
 
   try {
+    const postponed = (db.amanPostponedRows || []).map((r: any) => ({
+      ...r,
+      birthDate: formatCleanBirthDate(r.birthDate),
+    }));
+
     const res = await fetch(targetUrl, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify({
         action: "push_postponed_aman",
-        postponedRows: db.amanPostponedRows || [],
+        postponedRows: postponed,
+        amanPostponedRows: postponed,
       }),
       redirect: "follow",
     });
@@ -606,7 +615,8 @@ async function pushPostponedDirectlyToSheet(db: any): Promise<boolean> {
         body: JSON.stringify({
           action: "push",
           db: db,
-          amanPostponedRows: db.amanPostponedRows || [],
+          amanPostponedRows: postponed,
+          postponedRows: postponed,
         }),
         redirect: "follow",
       });
@@ -614,6 +624,54 @@ async function pushPostponedDirectlyToSheet(db: any): Promise<boolean> {
     return true;
   } catch (err: any) {
     console.warn("Direct Google Sheet postponed push notice:", err.message);
+    return false;
+  }
+}
+
+// Atomic helper to push BOTH Aman Report and Postponed Aman to Google Sheets in one operation
+async function pushAmanAndPostponedDirectlyToSheet(db: any): Promise<boolean> {
+  const targetUrl = db.settings?.googleSheetWebhookUrl;
+  if (!targetUrl || !targetUrl.startsWith("http")) return false;
+
+  const cleanAman = (db.amanReport || []).map((r: any) => ({
+    ...r,
+    birthDate: formatCleanBirthDate(r.birthDate),
+  }));
+  const cleanPostponed = (db.amanPostponedRows || []).map((r: any) => ({
+    ...r,
+    birthDate: formatCleanBirthDate(r.birthDate),
+  }));
+
+  try {
+    const res = await fetch(targetUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        action: "sync_aman_and_postponed",
+        amanRows: cleanAman,
+        postponedRows: cleanPostponed,
+        amanPostponedRows: cleanPostponed,
+      }),
+      redirect: "follow",
+    });
+
+    const text = await res.text();
+    let result: any = null;
+    try {
+      result = JSON.parse(text);
+    } catch {}
+
+    // Fallback if older deployed Apps Script doesn't recognize sync_aman_and_postponed yet
+    if (text.includes("غير معروف") || text.includes("Unknown action") || (result && result.error && String(result.error).includes("غير معروف"))) {
+      console.log("sync_aman_and_postponed not supported by remote Apps Script, performing sequential push...");
+      const p1 = await pushAmanDirectlyToSheet(db);
+      await new Promise(res => setTimeout(res, 500));
+      const p2 = await pushPostponedDirectlyToSheet(db);
+      return p1 || p2;
+    }
+    return true;
+  } catch (err: any) {
+    console.warn("Combined Aman & Postponed sheet push notice:", err.message);
     return false;
   }
 }
@@ -736,6 +794,19 @@ function syncInvoiceToAmanReport(invoice: any, db: any) {
   });
   return modified;
 }
+
+// Bootstrap Aman report from invoices if empty
+(() => {
+  try {
+    const db = readDB();
+    if ((!db.amanReport || db.amanReport.length === 0) && db.invoices && db.invoices.length > 0) {
+      db.invoices.forEach((inv: any) => syncInvoiceToAmanReport(inv, db));
+      writeDB(db);
+    }
+  } catch (err) {
+    console.error("Error bootstrapping Aman report from invoices:", err);
+  }
+})();
 
 // 4. Create invoice endpoint: Records directly to Google Sheet
 app.post("/api/db/invoices", async (req, res) => {
@@ -2137,6 +2208,70 @@ app.delete("/api/db/aman-postponed/:id", async (req, res) => {
     status: "success",
     postponedRows: db.amanPostponedRows || [],
     message: "تم حذف الاسم من قائمة المؤجلين وتحديث ورقة الشيت",
+  });
+});
+
+// ATOMIC: Cut row from Aman Report and transfer to Postponed sheet
+app.post("/api/db/aman-cut-and-postpone", async (req, res) => {
+  const { activeRows, postponedRows } = req.body;
+  const db = readDB();
+
+  if (Array.isArray(activeRows)) {
+    db.amanReport = activeRows.map((r: any) => ({
+      ...r,
+      birthDate: formatCleanBirthDate(r.birthDate),
+    }));
+  }
+  if (Array.isArray(postponedRows)) {
+    db.amanPostponedRows = postponedRows.map((r: any) => ({
+      ...r,
+      birthDate: formatCleanBirthDate(r.birthDate),
+    }));
+  }
+  writeDB(db);
+
+  const sheetSynced = await pushAmanAndPostponedDirectlyToSheet(db);
+
+  res.json({
+    status: "success",
+    sheetSynced,
+    activeRows: db.amanReport,
+    postponedRows: db.amanPostponedRows,
+    message: sheetSynced 
+      ? "تم ترحيل الاسم وتحديث ورقة كشف أمان وورقة الأسماء المرحلة بملف الشيت بنجاح! ✂️📑"
+      : "تم ترحيل الاسم محلياً بقاعدة البيانات.",
+  });
+});
+
+// ATOMIC: Insert postponed item into Aman Report
+app.post("/api/db/aman-insert-postponed", async (req, res) => {
+  const { activeRows, postponedRows } = req.body;
+  const db = readDB();
+
+  if (Array.isArray(activeRows)) {
+    db.amanReport = activeRows.map((r: any) => ({
+      ...r,
+      birthDate: formatCleanBirthDate(r.birthDate),
+    }));
+  }
+  if (Array.isArray(postponedRows)) {
+    db.amanPostponedRows = postponedRows.map((r: any) => ({
+      ...r,
+      birthDate: formatCleanBirthDate(r.birthDate),
+    }));
+  }
+  writeDB(db);
+
+  const sheetSynced = await pushAmanAndPostponedDirectlyToSheet(db);
+
+  res.json({
+    status: "success",
+    sheetSynced,
+    activeRows: db.amanReport,
+    postponedRows: db.amanPostponedRows,
+    message: sheetSynced 
+      ? "تم إدراج الاسم في كشف أمان وتحديث ورقة كشف أمان والأسماء المرحلة بنجاح! 📑✅"
+      : "تم إدراج الاسم في كشف أمان محلياً بقاعدة البيانات.",
   });
 });
 

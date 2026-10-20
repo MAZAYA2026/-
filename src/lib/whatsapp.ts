@@ -53,6 +53,9 @@ export function buildCustomersAndServicesWhatsAppBlock(
     if (cust.profession && cust.profession.trim() && cust.profession !== "N/A") {
       custLines.push(`💼 المهنة: ${cust.profession.trim()}`);
     }
+    if (cust.applicantCapacity && cust.applicantCapacity.trim()) {
+      custLines.push(`🤝 صفة مقدم الطلب: ${cust.applicantCapacity.trim()}`);
+    }
     if (cust.phone) {
       custLines.push(`📱 الهاتف: ${cust.phone.trim()}`);
     }
@@ -468,6 +471,13 @@ export function generateWhatsAppWelcomeMessage(
     .filter(c => c.profession && c.profession.trim())
     .map((c, i) => `${i + 1}. ${c.profession}`)
     .join(" | ");
+  const applicantCapacities = inv.customers
+    .filter(c => c.applicantCapacity && c.applicantCapacity.trim())
+    .map((c, i) => `${i + 1}. ${c.applicantCapacity}`)
+    .join(" | ");
+  const simpleCapacities = inv.customers.length > 1
+    ? inv.customers.filter(c => c.applicantCapacity && c.applicantCapacity.trim()).map(c => c.applicantCapacity).join(" و ")
+    : (inv.customers[0]?.applicantCapacity || "");
 
   let invDate = inv.date || new Date().toISOString().split("T")[0];
   if (invDate.includes("GMT") || invDate.length > 10) {
@@ -544,6 +554,9 @@ export function generateWhatsAppWelcomeMessage(
     .replace(/{الرقم_القومي}/g, nationalIds)
     .replace(/{رقم_القومي}/g, nationalIds)
     .replace(/{المهنة}/g, professions)
+    .replace(/{صفة_مقدم_الطلب}/g, simpleCapacities)
+    .replace(/{صفة_المقدم}/g, simpleCapacities)
+    .replace(/{صفات_مقدمي_الطلبات}/g, applicantCapacities)
     .replace(/{الخدمات}/g, detailsBlock)
     .replace(/{الخدمة_المختارة}/g, detailsBlock)
     .replace(/{تعليمات_الاستلام}/g, serviceInstructionsBody)

@@ -544,3 +544,36 @@ export async function pullPostponedAmanFromGoogleSheets(webhookUrl?: string): Pr
 
 
 
+
+
+export async function cutAndPostponeAmanRow(params: {
+  activeRows: any[];
+  postponedRows: any[];
+}): Promise<{ status: string; sheetSynced: boolean; message: string; activeRows: any[]; postponedRows: any[] }> {
+  const response = await fetch("/api/db/aman-cut-and-postpone", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || "فشل ترحيل الاسم في قاعدة البيانات");
+  }
+  return response.json();
+}
+
+export async function insertPostponedAmanRow(params: {
+  activeRows: any[];
+  postponedRows: any[];
+}): Promise<{ status: string; sheetSynced: boolean; message: string; activeRows: any[]; postponedRows: any[] }> {
+  const response = await fetch("/api/db/aman-insert-postponed", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || "فشل إدراج الاسم في كشف أمان");
+  }
+  return response.json();
+}

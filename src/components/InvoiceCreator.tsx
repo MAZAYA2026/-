@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Service, CustomerInput, Invoice, InvoiceStatus, AppSettings, Employee, DictionaryItem, GovernmentFine } from "../types";
+import { Service, CustomerInput, Invoice, InvoiceStatus, AppSettings, Employee, DictionaryItem, GovernmentFine, DEFAULT_APPLICANT_CAPACITIES } from "../types";
 import { createInvoiceOnServer, saveDictionaryWord } from "../lib/api";
 import { calculateWorkingDaysDeliveryDate, getArabicDayName, isNonWorkingDay, recalculateCustomerServicesDeliveryDates } from "../lib/businessDays";
 import { generateWhatsAppWelcomeMessage, getWhatsAppUrl } from "../lib/whatsapp";
@@ -27,6 +27,10 @@ export default function InvoiceCreator({
   onDictionaryUpdated,
   governmentFines = []
 }: InvoiceCreatorProps) {
+  const applicantCapacityOptions = (settings.applicantCapacities && settings.applicantCapacities.length > 0)
+    ? settings.applicantCapacities
+    : DEFAULT_APPLICANT_CAPACITIES;
+
   // Master form state: list of customers on this invoice
   const [customers, setCustomers] = useState<CustomerInput[]>([createEmptyCustomer()]);
   const [loading, setLoading] = useState(false);
@@ -51,6 +55,9 @@ export default function InvoiceCreator({
       birthDate: "",
       phone: "",
       profession: "",
+      applicantCapacity: (settings.applicantCapacities && settings.applicantCapacities.length > 0)
+        ? settings.applicantCapacities[0]
+        : "بنفسه",
       services: [
         {
           serviceId: "",
@@ -552,6 +559,7 @@ export default function InvoiceCreator({
           birthDate: isPass ? cust.birthDate : "",
           phone: cust.phone,
           profession: isPass ? cust.profession.trim() : "",
+          applicantCapacity: isPass ? (cust.applicantCapacity?.trim() || applicantCapacityOptions[0] || "بنفسه") : "",
           services: formattedServices
         };
       });
@@ -860,8 +868,8 @@ export default function InvoiceCreator({
                       <span>بيانات استمارة الجوازات (مطلوبة لتفعيل الخدمة #)</span>
                     </div>
 
-                    {/* Passport complementary fields in 3 columns: National ID, Birth Date, Profession (Arabic inputs first) */}
-                    <div className="grid md:grid-cols-3 gap-4">
+                    {/* Passport complementary fields in 4 columns: National ID, Birth Date, Profession, Applicant Capacity */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
                       {/* National ID */}
                       <div className="space-y-1.5">
                         <label className="text-xs font-bold text-slate-700 font-cairo flex justify-between items-center">
@@ -890,7 +898,7 @@ export default function InvoiceCreator({
                       {/* Calculated / Editable Birth Date */}
                       <div className="space-y-1.5">
                         <label className="text-xs font-bold text-slate-700 font-cairo flex items-center justify-between">
-                          <span>تاريخ الميلاد <span className="text-[9px] text-slate-400">(مستخرج تلقائياً أو معدل)</span></span>
+                          <span>تاريخ الميلاد <span className="text-[9px] text-slate-400">(مستخرج تلقائياً)</span></span>
                         </label>
                         <div className="relative flex items-center">
                           <input
@@ -944,6 +952,31 @@ export default function InvoiceCreator({
                             <span>{errors[`c-${cIdx}-profession`]}</span>
                           </p>
                         )}
+                      </div>
+
+                      {/* Applicant Capacity (صفة مقدم الطلب) */}
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-slate-700 font-cairo flex justify-between items-center">
+                          <span>صفة مقدم الطلب <span className="text-rose-500">*</span></span>
+                          <span className="text-[10px] text-blue-700 font-bold bg-blue-100/70 px-1.5 py-0.5 rounded-md">
+                            صفة الاستلام
+                          </span>
+                        </label>
+                        <select
+                          value={customer.applicantCapacity || applicantCapacityOptions[0] || "بنفسه"}
+                          onChange={(e) => {
+                            const updated = [...customers];
+                            updated[cIdx].applicantCapacity = e.target.value;
+                            setCustomers(updated);
+                          }}
+                          className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-3 py-2.5 text-xs font-bold font-cairo focus:outline-hidden focus:ring-2 focus:ring-blue-500 cursor-pointer shadow-xs transition-all"
+                        >
+                          {applicantCapacityOptions.map((opt) => (
+                            <option key={opt} value={opt}>
+                              {opt}
+                            </option>
+                          ))}
+                        </select>
                       </div>
                     </div>
 
