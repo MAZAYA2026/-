@@ -679,14 +679,19 @@ function syncInvoiceToAmanReport(invoice: any, db: any) {
     if (amanSrv) {
       const srvName = String(amanSrv.serviceId || "");
       const isUrgent = srvName.includes("مستعجل") || srvName.includes("عاجل") || srvName.includes("فورى");
-      const hasFine = !!(amanSrv.fineName || (amanSrv.fineAmount && amanSrv.fineAmount > 0));
-      const finePart = hasFine
-        ? ("يوجد غرامة" + (amanSrv.fineName ? " (" + amanSrv.fineName + ")" : ""))
-        : "لا توجد غرامة";
-      let noteText = (isUrgent ? "مستعجل" : "عادي") + " - " + finePart;
-      if (amanSrv.notes) noteText += " | " + amanSrv.notes;
+      const fineName = (amanSrv.fineName || "").trim();
+      const fineAmt = Number(amanSrv.fineAmount) || 0;
+      const hasFine = !!(fineName || fineAmt > 0);
 
-      // Extract and format birthDate cleanly (DD/MM/YYYY or YYYY/MM/DD)
+      // User requirement: In notes column, do NOT put profession, and if no fines do NOT write 'لا توجد غرامة'
+      let finePart = "";
+      if (hasFine) {
+        const cleanName = fineName || "غرامة حكومية";
+        finePart = cleanName.startsWith("غرامة") ? cleanName : `غرامة ${cleanName}`;
+      }
+      const noteText = finePart ? `${isUrgent ? "مستعجل" : "عادي"} - ${finePart}` : (isUrgent ? "مستعجل" : "عادي");
+
+      // Extract and format birthDate cleanly (YYYY/MM/DD)
       let bDate = formatCleanBirthDate(cust.birthDate);
       if (!bDate && cust.nationalId && cust.nationalId.length >= 7) {
         bDate = formatCleanBirthDate(cust.nationalId);
@@ -707,8 +712,8 @@ function syncInvoiceToAmanReport(invoice: any, db: any) {
         date: invoice.date || "",
         serviceType: isUrgent ? "مستعجل" : "عادي",
         hasFine,
-        fineName: amanSrv.fineName || "",
-        fineAmount: amanSrv.fineAmount || 0,
+        fineName: fineName,
+        fineAmount: fineAmt,
       };
 
       if (existingIdx !== -1) {
@@ -716,6 +721,7 @@ function syncInvoiceToAmanReport(invoice: any, db: any) {
           ...db.amanReport[existingIdx],
           arabicName: amanItem.arabicName,
           birthDate: amanItem.birthDate,
+          notes: amanItem.notes, // Update notes properly with fresh fine name
           date: amanItem.date,
           serviceType: amanItem.serviceType,
           hasFine: amanItem.hasFine,
@@ -2061,27 +2067,16 @@ app.post("/api/db/aman", async (req, res) => {
   const { rows, syncWithSheets } = req.body;
   const db = readDB();
   if (Array.isArray(rows)) {
-    db.amanReport = rows;
+    db.amanReport = rows.map((r: any) => ({
+      ...r,
+      birthDate: formatCleanBirthDate(r.birthDate),
+    }));
     writeDB(db);
   }
 
   let sheetSyncResult: any = null;
-  const webhookUrl = db.settings?.googleSheetWebhookUrl;
-  if (syncWithSheets && webhookUrl && webhookUrl.startsWith("http")) {
-    try {
-      const resp = await fetch(webhookUrl, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify({
-          action: "push_aman",
-          amanRows: db.amanReport || [],
-        }),
-        redirect: "follow",
-      });
-      sheetSyncResult = await resp.json().catch(() => ({}));
-    } catch (e: any) {
-      console.warn("Could not sync aman rows to sheet:", e.message);
-    }
+  if (syncWithSheets) {
+    sheetSyncResult = await pushAmanDirectlyToSheet(db);
   }
 
   res.json({

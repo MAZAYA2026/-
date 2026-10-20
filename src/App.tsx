@@ -359,6 +359,7 @@ export default function App() {
               settings={settings}
               onInvoiceUpdated={handleInvoiceUpdated}
               onInvoiceCreated={handleInvoiceCreated}
+              governmentFines={governmentFines}
             />
           )}
 

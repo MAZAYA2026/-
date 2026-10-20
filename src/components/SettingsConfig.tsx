@@ -487,13 +487,10 @@ function doPost(e) {
                   if (sId.indexOf("#") === 0 && sId.indexOf("##") !== 0) {
                     isAman = true;
                     var sType = (sId.indexOf("مستعجل") !== -1 || sId.indexOf("عاجل") !== -1 || sId.indexOf("فورى") !== -1) ? "مستعجل" : "عادي";
-                    var fName = aCust.services[asIdx].fineName || "";
-                    var fAmt = aCust.services[asIdx].fineAmount || 0;
-                    var finePart = (fName || fAmt > 0) ? ("يوجد غرامة" + (fName ? " (" + fName + ")" : "")) : "لا توجد غرامة";
-                    aNote = sType + " - " + finePart;
-                    if (aCust.services[asIdx].notes) {
-                      aNote += " | " + aCust.services[asIdx].notes;
-                    }
+                    var fName = String(aCust.services[asIdx].fineName || "").trim();
+                    var fAmt = Number(aCust.services[asIdx].fineAmount) || 0;
+                    var finePart = (fName || fAmt > 0) ? (" - " + (fName ? (fName.indexOf("غرامة") === 0 ? fName : "غرامة " + fName) : "غرامة حكومية")) : "";
+                    aNote = sType + finePart;
                     break;
                   }
                 }
@@ -526,24 +523,26 @@ function doPost(e) {
       }
 
       // --- Sheet 8: Aman_Postponed_الأسماء_المرحلة ---
-      var postRowsList = (contents.amanPostponedRows || (contents.db && contents.db.amanPostponedRows)) || [];
-      if (Array.isArray(postRowsList) && postRowsList.length > 0) {
+      var postRowsList = contents.postponedRows || contents.amanPostponedRows || (contents.db && (contents.db.amanPostponedRows || contents.db.postponedRows)) || [];
+      if (Array.isArray(postRowsList)) {
         var postSheet = findOrCreateSheet(ss, ["Aman_Postponed_الأسماء_المرحلة", "Aman_Postponed", "الأسماء_المرحلة", "الاسماء المرحلة", "الأسماء المرحلة", "المؤجلين", "المرحلين"], "Aman_Postponed_الأسماء_المرحلة");
         postSheet.clearContents();
         var postHeaders = ["م", "الاسم", "تاريخ الميلاد", "الملاحظات (النوع والغرامة)", "تاريخ الكشف الأصلي", "تاريخ ووقت الترحيل", "رقم الفاتورة", "الحالة"];
         var postRows = [postHeaders];
         for (var pi = 0; pi < postRowsList.length; pi++) {
           var pItem = postRowsList[pi];
-          postRows.push([
-            pi + 1,
-            pItem.arabicName || "",
-            formatSheetDate(pItem.birthDate),
-            pItem.notes || "",
-            formatSheetDate(pItem.originalDate),
-            pItem.postponedAt || "",
-            pItem.invoiceId || "",
-            pItem.status || "مؤجل"
-          ]);
+          if (pItem && (pItem.arabicName || pItem.birthDate)) {
+            postRows.push([
+              postRows.length,
+              pItem.arabicName || "",
+              formatSheetDate(pItem.birthDate),
+              pItem.notes || "",
+              formatSheetDate(pItem.originalDate),
+              pItem.postponedAt || "",
+              pItem.invoiceId || "",
+              pItem.status || "مؤجل"
+            ]);
+          }
         }
         postSheet.getRange(1, 1, postRows.length, postHeaders.length).setValues(postRows);
         formatHeader(postSheet, postHeaders.length);
@@ -704,7 +703,7 @@ function doPost(e) {
 
     // 5.5 Direct Specific Aman Postponed Names Push
     if (action === "push_postponed_aman") {
-      var pRowsList = contents.postponedRows || [];
+      var pRowsList = contents.postponedRows || contents.amanPostponedRows || [];
       var pSheet = findOrCreateSheet(ss, ["Aman_Postponed_الأسماء_المرحلة", "Aman_Postponed", "الأسماء_المرحلة", "الاسماء المرحلة", "الأسماء المرحلة", "المؤجلين", "المرحلين"], "Aman_Postponed_الأسماء_المرحلة");
       pSheet.clearContents();
       var pHeaders = ["م", "الاسم", "تاريخ الميلاد", "الملاحظات (النوع والغرامة)", "تاريخ الكشف الأصلي", "تاريخ ووقت الترحيل", "رقم الفاتورة", "الحالة"];
@@ -713,7 +712,7 @@ function doPost(e) {
         var prItem = pRowsList[pr];
         if (prItem && (prItem.arabicName || prItem.birthDate || prItem.notes)) {
           pRows.push([
-            pr + 1,
+            pRows.length,
             prItem.arabicName || "",
             formatSheetDate(prItem.birthDate),
             prItem.notes || "",
@@ -724,20 +723,18 @@ function doPost(e) {
           ]);
         }
       }
-      if (pRows.length > 0) {
-        pSheet.getRange(1, 1, pRows.length, pHeaders.length).setValues(pRows);
-        formatHeader(pSheet, pHeaders.length);
-        try {
-          pSheet.setColumnWidth(1, 60);
-          pSheet.setColumnWidth(2, 280);
-          pSheet.setColumnWidth(3, 140);
-          pSheet.setColumnWidth(4, 250);
-          pSheet.setColumnWidth(5, 130);
-          pSheet.setColumnWidth(6, 160);
-          pSheet.setColumnWidth(7, 100);
-          pSheet.setColumnWidth(8, 100);
-        } catch(cwErr) {}
-      }
+      pSheet.getRange(1, 1, pRows.length, pHeaders.length).setValues(pRows);
+      formatHeader(pSheet, pHeaders.length);
+      try {
+        pSheet.setColumnWidth(1, 60);
+        pSheet.setColumnWidth(2, 280);
+        pSheet.setColumnWidth(3, 140);
+        pSheet.setColumnWidth(4, 250);
+        pSheet.setColumnWidth(5, 130);
+        pSheet.setColumnWidth(6, 160);
+        pSheet.setColumnWidth(7, 100);
+        pSheet.setColumnWidth(8, 100);
+      } catch(cwErr) {}
       return ContentService.createTextOutput(JSON.stringify({ 
         status: "success", 
         message: "تم حفظ وتحديث ورقة الأسماء المرحلة (Aman_Postponed_الأسماء_المرحلة) بملف جوجل شيت بنجاح! 📑✂️" 
@@ -1102,13 +1099,10 @@ function doGet(e) {
                 var sId2 = String(aCust2.services[as2].serviceId || "");
                 if (sId2.indexOf("#") === 0 && sId2.indexOf("##") !== 0) {
                   var sType2 = (sId2.indexOf("مستعجل") !== -1 || sId2.indexOf("عاجل") !== -1 || sId2.indexOf("فورى") !== -1) ? "مستعجل" : "عادي";
-                  var fName2 = aCust2.services[as2].fineName || "";
-                  var fAmt2 = aCust2.services[as2].fineAmount || 0;
-                  var finePart2 = (fName2 || fAmt2 > 0) ? ("يوجد غرامة" + (fName2 ? " (" + fName2 + ")" : "")) : "لا توجد غرامة";
-                  var noteVal2 = sType2 + " - " + finePart2;
-                  if (aCust2.services[as2].notes) {
-                    noteVal2 += " | " + aCust2.services[as2].notes;
-                  }
+                  var fName2 = String(aCust2.services[as2].fineName || "").trim();
+                  var fAmt2 = Number(aCust2.services[as2].fineAmount) || 0;
+                  var finePart2 = (fName2 || fAmt2 > 0) ? (" - " + (fName2 ? (fName2.indexOf("غرامة") === 0 ? fName2 : "غرامة " + fName2) : "غرامة حكومية")) : "";
+                  var noteVal2 = sType2 + finePart2;
                   db.amanReport.push({
                     id: "inv-" + (aInv2.invoiceId || ai2) + "-c-" + ac2,
                     arabicName: aCust2.arabicName || "",
@@ -1202,6 +1196,22 @@ function formatSheetDate(val) {
         return Utilities.formatDate(d, Session.getScriptTimeZone() || "GMT+3", "yyyy/MM/dd");
       }
     } catch(e) {}
+  }
+  var iso = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (iso) {
+    return iso[1] + "/" + (iso[2].length === 1 ? "0" + iso[2] : iso[2]) + "/" + (iso[3].length === 1 ? "0" + iso[3] : iso[3]);
+  }
+  var dmy = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+  if (dmy) {
+    return dmy[3] + "/" + (dmy[2].length === 1 ? "0" + dmy[2] : dmy[2]) + "/" + (dmy[1].length === 1 ? "0" + dmy[1] : dmy[1]);
+  }
+  var digits = s.replace(/\D/g, "");
+  if (digits.length === 14) {
+    var c = parseInt(digits.charAt(0));
+    var y = (c === 3 ? 2000 : 1900) + parseInt(digits.substring(1, 3));
+    var m = digits.substring(3, 5);
+    var day = digits.substring(5, 7);
+    return y + "/" + m + "/" + day;
   }
   return s;
 }

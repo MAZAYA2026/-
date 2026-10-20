@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
-import { Invoice, Service, Employee, AppSettings, InvoiceStatus, CustomerInput, AmanPostponedItem } from "../types";
+import { Invoice, Service, Employee, AppSettings, InvoiceStatus, CustomerInput, AmanPostponedItem, GovernmentFine } from "../types";
 import { 
   updateInvoiceOnServer, 
   createInvoiceOnServer, 
@@ -62,6 +62,7 @@ interface AmanReportProps {
   settings?: AppSettings;
   onInvoiceUpdated?: (updated: Invoice) => void;
   onInvoiceCreated?: (newInv: Invoice) => void;
+  governmentFines?: GovernmentFine[];
 }
 
 // Helper function to normalize any date format into comparable YYYY-MM-DD
@@ -87,10 +88,13 @@ export function normalizeDateToYMD(dStr: string | undefined): string {
 }
 
 // Helper function to resolve Aman customer details: serviceType (عادي / مستعجل), fine status and display label
+// User explicit requirement:
+// "عمود الملاحظات لا تضع به المهنة وفى حالة عدم وجود غرامات لا تكتب لا توجد غرامة حيث الطبيعى طالما مفيش غرامة لا يذكر لها اسم وتكتب فقط الغرامة فى حالة تواجدها"
 export function resolveAmanDetails(
   row: Partial<AmanRowItem>,
   invoices: Invoice[],
-  services: Service[]
+  services: Service[],
+  governmentFines?: GovernmentFine[]
 ): {
   serviceType: "عادي" | "مستعجل";
   hasFine: boolean;
@@ -100,11 +104,11 @@ export function resolveAmanDetails(
 } {
   let serviceType: "عادي" | "مستعجل" = (row.serviceType as any) === "مستعجل" ? "مستعجل" : "عادي";
   let hasFine = row.hasFine;
-  let fineName = row.fineName || "";
-  let fineAmount = row.fineAmount || 0;
-  const rowNotes = row.notes || "";
+  let fineName = (row.fineName || "").trim();
+  let fineAmount = Number(row.fineAmount) || 0;
+  const rowNotes = (row.notes || "").trim();
 
-  // Find linked customer from invoices if possible
+  // Find linked customer from fresh invoices list if possible
   let targetInv = row.invoiceId ? invoices.find((i) => i.invoiceId === row.invoiceId) : undefined;
   if (!targetInv && row.arabicName) {
     targetInv = invoices.find((i) => i.customers?.some((c) => c.arabicName?.trim() === row.arabicName?.trim()));
@@ -137,8 +141,8 @@ export function resolveAmanDetails(
           fineAmount = amanSrv.fineAmount || 0;
         } else if (amanSrv.fineAmount && amanSrv.fineAmount > 0) {
           hasFine = true;
-          fineName = "غرامة حكومية";
           fineAmount = amanSrv.fineAmount;
+          if (!fineName) fineName = "غرامة حكومية";
         } else if (hasFine === undefined) {
           hasFine = false;
         }
@@ -148,10 +152,11 @@ export function resolveAmanDetails(
 
   // Fallback checks from notes text if not resolved
   if (hasFine === undefined) {
-    if (rowNotes.includes("يوجد غرامة") || rowNotes.includes("غرامة")) {
+    if (rowNotes.includes("غرامة") && !rowNotes.includes("لا توجد غرامة")) {
       hasFine = true;
-      const m = rowNotes.match(/غرامة(?:\s*\(([^)]+)\))?/);
-      fineName = m && m[1] ? m[1].trim() : "غرامة حكومية";
+      const m = rowNotes.match(/غرامة(?:\s*\(?([^)]+)\)?)?/);
+      if (!fineName && m && m[1]) fineName = m[1].replace(/[()]/g, "").trim();
+      if (!fineName) fineName = "غرامة حكومية";
     } else {
       hasFine = false;
     }
@@ -161,10 +166,26 @@ export function resolveAmanDetails(
     serviceType = "مستعجل";
   }
 
-  const fineLabel = hasFine 
-    ? (fineName ? `يوجد غرامة (${fineName})` : "يوجد غرامة") 
-    : "لا توجد غرامة";
-  const statusText = `${serviceType} - ${fineLabel}`;
+  // Canonical fine name matching if fine matches any entry in governmentFines
+  if (governmentFines && Array.isArray(governmentFines) && fineName) {
+    const matchedFine = governmentFines.find(
+      (f) => f.name.trim() === fineName || (fineName.includes(f.name.trim()) && f.name.trim().length > 3)
+    );
+    if (matchedFine) {
+      fineName = matchedFine.name.trim();
+      if (!fineAmount) fineAmount = matchedFine.amount;
+    }
+  }
+
+  // User requirement: In case of NO fines, do NOT write "لا توجد غرامة".
+  // Only write the fine when it is actually present!
+  let fineLabel = "";
+  if (hasFine && (fineName || fineAmount > 0)) {
+    const cleanFineName = fineName || "غرامة حكومية";
+    fineLabel = cleanFineName.startsWith("غرامة") ? cleanFineName : `غرامة ${cleanFineName}`;
+  }
+
+  const statusText = fineLabel ? `${serviceType} - ${fineLabel}` : serviceType;
 
   return {
     serviceType,
@@ -181,7 +202,8 @@ export default function AmanReport({
   activeEmployee, 
   settings, 
   onInvoiceUpdated, 
-  onInvoiceCreated 
+  onInvoiceCreated,
+  governmentFines
 }: AmanReportProps) {
   // Date filters: from and to
   const todayStr = new Date().toISOString().split("T")[0];
@@ -383,12 +405,12 @@ export default function AmanReport({
       }
 
       const processed: AmanRowItem[] = loadedRows.map((row, idx) => {
-        const details = resolveAmanDetails(row, invoices, services);
+        const details = resolveAmanDetails(row, invoices, services, governmentFines);
         return {
           id: row.id || `sheet-${idx}`,
           arabicName: row.arabicName || "",
           birthDate: formatCleanBirthDate(row.birthDate),
-          notes: row.notes || "",
+          notes: details.statusText,
           date: row.date || dateFrom,
           invoiceId: row.invoiceId,
           customerIndex: row.customerIndex,
@@ -413,7 +435,7 @@ export default function AmanReport({
     } finally {
       setIsLoadingSheets(false);
     }
-  }, [dateFrom, dateTo, settings?.googleSheetWebhookUrl, baseCustomers, invoices, services]);
+  }, [dateFrom, dateTo, settings?.googleSheetWebhookUrl, baseCustomers, invoices, services, governmentFines]);
 
   // Load from dedicated sheet upon opening or date change
   useEffect(() => {
@@ -511,11 +533,19 @@ export default function AmanReport({
     try {
       const activeRowsToRecord = tableRows
         .filter((r) => r.arabicName && r.arabicName.trim().length > 0)
-        .map((r, idx) => ({
-          ...r,
-          birthDate: formatCleanBirthDate(r.birthDate),
-          index: idx + 1,
-        }));
+        .map((r, idx) => {
+          const det = resolveAmanDetails(r, invoices, services, governmentFines);
+          return {
+            ...r,
+            birthDate: formatCleanBirthDate(r.birthDate),
+            notes: det.statusText,
+            serviceType: det.serviceType,
+            hasFine: det.hasFine,
+            fineName: det.fineName,
+            fineAmount: det.fineAmount,
+            index: idx + 1,
+          };
+        });
 
       // 1. Save to dedicated Aman sheet in server database
       await saveLocalAmanReport(activeRowsToRecord, true);
@@ -562,8 +592,8 @@ export default function AmanReport({
   };
 
   // User explicit requirement:
-  // "الزرار الاول مهمتة عمل قص لبيانات هذا الصف الاسم وتاريخ الميلاد وتخصيص له مكان حفظ فى شيت الاكسيل ورقة خاصة بهذة البيانات المرحلة"
-  // "وكمان عايز لما اقص بيانات صف للترحيل فى ورقة الاسماء المرحلة عايزة يظبط باقى المسلسل فى الكشف يعنى يقوم برفع باقى البيانات المعروضة لفوق ليكون مطابق تمام لنفس ورقة الشيت وعلشان ميكونش فى صفوف فارغة"
+  // "فى كشف امان عند ترحيل اسم لا يتم نقلة فعليا من ورقة الشيت وترحيلة الى ورقة الاسماء المرحلة"
+  // "عمود الملاحظات لا تضع به المهنة وفى حالة عدم وجود غرامات لا تكتب لا توجد غرامة حيث الطبيعى طالما مفيش غرامة لا يذكر لها اسم وتكتب فقط الغرامة فى حالة تواجدها"
   const handleCutRow = async (rowIndex: number) => {
     const row = displayRows[rowIndex];
     if (!row || !row.arabicName.trim()) {
@@ -572,7 +602,9 @@ export default function AmanReport({
 
     const cutName = row.arabicName.trim();
     const cutBirthDate = formatCleanBirthDate(row.birthDate);
-    const cutNotes = row.notes.trim();
+    const details = resolveAmanDetails(row, invoices, services, governmentFines);
+    // Exact note text: NO profession, NO "لا توجد غرامة"
+    const cutNotes = details.statusText;
 
     const newPostponedItem: AmanPostponedItem = {
       id: `postponed-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
@@ -582,9 +614,9 @@ export default function AmanReport({
       originalDate: row.date || dateFrom || todayStr,
       postponedAt: new Date().toLocaleString("ar-EG"),
       invoiceId: row.invoiceId,
-      serviceType: row.serviceType,
-      fineName: row.fineName,
-      fineAmount: row.fineAmount,
+      serviceType: details.serviceType,
+      fineName: details.fineName,
+      fineAmount: details.fineAmount,
       status: "مؤجل",
     };
 
@@ -592,28 +624,54 @@ export default function AmanReport({
     setPostponedList(updatedPostponed);
 
     // Remove this row completely from tableRows so all subsequent rows are shifted up!
-    // No empty gaps in the middle of active rows, and serial numbering recalculates sequentially:
-    setTableRows((prev) => {
-      const copy = [...prev];
-      if (rowIndex < copy.length) {
-        copy.splice(rowIndex, 1);
-      }
-      return copy;
-    });
+    const newTableRows = [...tableRows];
+    if (rowIndex < newTableRows.length) {
+      newTableRows.splice(rowIndex, 1);
+    }
+    setTableRows(newTableRows);
 
-    setHasUnsavedChanges(true);
+    const activeRowsToRecord = newTableRows
+      .filter((r) => r.arabicName && r.arabicName.trim().length > 0)
+      .map((r, idx) => {
+        const det = resolveAmanDetails(r, invoices, services, governmentFines);
+        return {
+          ...r,
+          birthDate: formatCleanBirthDate(r.birthDate),
+          notes: det.statusText,
+          serviceType: det.serviceType,
+          hasFine: det.hasFine,
+          fineName: det.fineName,
+          fineAmount: det.fineAmount,
+          index: idx + 1,
+        };
+      });
 
-    // Persist postponed item to server & Google Sheets tab
+    setHasUnsavedChanges(false);
+
+    // User requirement: ACTUALLY transfer from Aman sheet to Postponed sheet on both DB and Google Sheets!
     try {
+      // 1. Update Aman sheet (row removed, serials adjusted)
+      await saveLocalAmanReport(activeRowsToRecord, true);
+      if (settings?.googleSheetWebhookUrl) {
+        syncAmanReportToGoogleSheets({
+          dateFrom,
+          dateTo,
+          amanRows: activeRowsToRecord,
+          webhookUrl: settings.googleSheetWebhookUrl,
+        }).catch((e) => console.warn("Aman sheet sync notice:", e));
+      }
+
+      // 2. Update Postponed sheet (row added)
       await savePostponedAmanNames(updatedPostponed, true);
       if (settings?.googleSheetWebhookUrl) {
-        await syncPostponedAmanToGoogleSheets(updatedPostponed, settings.googleSheetWebhookUrl);
+        syncPostponedAmanToGoogleSheets(updatedPostponed, settings.googleSheetWebhookUrl).catch((e) => console.warn("Postponed sheet sync notice:", e));
       }
-    } catch (err) {
-      console.warn("Failed to persist postponed item:", err);
-    }
 
-    showSaveNotice(`تم قص وترحيل (${cutName}) وحفظه في ورقة الأسماء المرحلة، ورُفعت باقي الصفوف لأعلى لتعديل المسلسل! ✂️⬆️ (اضغط "حفظ التغييرات" لتثبيت الكشف 💾)`);
+      showSaveNotice(`تم قص وترحيل (${cutName}) ونقله فعلياً من ورقة كشف أمان إلى ورقة الأسماء المرحلة بملف الشيت بنجاح! ✂️📑`);
+    } catch (err: any) {
+      console.warn("Transfer sync notice:", err);
+      showSaveNotice(`تم ترحيل (${cutName}) محلياً ✂️ (تنبيه المزامنة: ${err.message})`);
+    }
   };
 
   // User explicit requirement:
@@ -624,54 +682,91 @@ export default function AmanReport({
   };
 
   const handleInsertPostponedItem = async (item: AmanPostponedItem) => {
+    const details = {
+      serviceType: item.serviceType || "عادي",
+      fineName: item.fineName || "",
+      fineAmount: item.fineAmount || 0,
+      hasFine: !!(item.fineName || (item.fineAmount && item.fineAmount > 0)),
+    };
+    const cleanFineName = details.fineName;
+    const fineLabel = details.hasFine
+      ? (cleanFineName ? (cleanFineName.startsWith("غرامة") ? cleanFineName : `غرامة ${cleanFineName}`) : "غرامة حكومية")
+      : "";
+    const noteText = fineLabel ? `${details.serviceType} - ${fineLabel}` : details.serviceType;
+
     const newRow: AmanRowItem = {
       id: `manual-${Date.now()}`,
       arabicName: item.arabicName,
       birthDate: formatCleanBirthDate(item.birthDate),
-      notes: item.notes,
+      notes: noteText,
       date: dateFrom,
       invoiceId: item.invoiceId,
-      serviceType: item.serviceType as any,
-      fineName: item.fineName,
-      fineAmount: item.fineAmount,
-      hasFine: !!(item.fineName || (item.fineAmount && item.fineAmount > 0)),
+      serviceType: details.serviceType as any,
+      fineName: details.fineName,
+      fineAmount: details.fineAmount,
+      hasFine: details.hasFine,
       isCustomManual: true,
     };
 
-    setTableRows((prev) => {
-      const copy = [...prev];
-      if (targetInsertRowIndex !== null && targetInsertRowIndex < copy.length) {
-        // If target slot is an existing empty row, replace it; otherwise insert at position
-        if (!copy[targetInsertRowIndex].arabicName.trim()) {
-          copy[targetInsertRowIndex] = newRow;
-        } else {
-          copy.splice(targetInsertRowIndex, 0, newRow);
-        }
+    let updatedRows = [...tableRows];
+    if (targetInsertRowIndex !== null && targetInsertRowIndex < updatedRows.length) {
+      if (!updatedRows[targetInsertRowIndex].arabicName.trim()) {
+        updatedRows[targetInsertRowIndex] = newRow;
       } else {
-        copy.push(newRow);
+        updatedRows.splice(targetInsertRowIndex, 0, newRow);
       }
-      return copy;
-    });
+    } else {
+      updatedRows.push(newRow);
+    }
+    setTableRows(updatedRows);
 
-    setHasUnsavedChanges(true);
-
-    // Remove from postponed list if toggle enabled
+    let updatedPostponed = postponedList;
     if (deleteAfterInsert) {
-      const updatedPostponed = postponedList.filter((p) => p.id !== item.id);
+      updatedPostponed = postponedList.filter((p) => p.id !== item.id);
       setPostponedList(updatedPostponed);
-      try {
-        await deletePostponedAmanName(item.id);
+    }
+
+    setIsPostponedModalOpen(false);
+    setTargetInsertRowIndex(null);
+
+    const activeRowsToRecord = updatedRows
+      .filter((r) => r.arabicName && r.arabicName.trim().length > 0)
+      .map((r, idx) => {
+        const det = resolveAmanDetails(r, invoices, services, governmentFines);
+        return {
+          ...r,
+          birthDate: formatCleanBirthDate(r.birthDate),
+          notes: det.statusText,
+          serviceType: det.serviceType,
+          hasFine: det.hasFine,
+          fineName: det.fineName,
+          fineAmount: det.fineAmount,
+          index: idx + 1,
+        };
+      });
+
+    // Actually transfer between sheets on DB and Google Sheets!
+    try {
+      await saveLocalAmanReport(activeRowsToRecord, true);
+      if (settings?.googleSheetWebhookUrl) {
+        syncAmanReportToGoogleSheets({
+          dateFrom,
+          dateTo,
+          amanRows: activeRowsToRecord,
+          webhookUrl: settings.googleSheetWebhookUrl,
+        }).catch(() => {});
+      }
+
+      if (deleteAfterInsert) {
+        await savePostponedAmanNames(updatedPostponed, true);
         if (settings?.googleSheetWebhookUrl) {
           syncPostponedAmanToGoogleSheets(updatedPostponed, settings.googleSheetWebhookUrl).catch(() => {});
         }
-      } catch (err) {
-        console.warn("Failed to delete inserted postponed item:", err);
       }
+      showSaveNotice(`تم نقل وإدراج (${item.arabicName}) في كشف أمان وتحديث ورقتي الشيت بنجاح! 📥📑`);
+    } catch (err: any) {
+      console.warn("Insert transfer notice:", err);
     }
-
-    showSaveNotice(`تم إدراج بيانات (${item.arabicName}) بالكشف بنجاح! 📥 (تذكر الضغط على "حفظ التغييرات" 💾)`);
-    setIsPostponedModalOpen(false);
-    setTargetInsertRowIndex(null);
   };
 
   const handleDeletePostponedItem = async (id: string, name: string) => {
@@ -683,7 +778,7 @@ export default function AmanReport({
       if (settings?.googleSheetWebhookUrl) {
         syncPostponedAmanToGoogleSheets(updated, settings.googleSheetWebhookUrl).catch(() => {});
       }
-      showSaveNotice(`تم حذف (${name}) من ورقة الأسماء المرحلة`);
+      showSaveNotice(`تم حذف (${name}) من ورقة الأسماء المرحلة وتحديث الشيت`);
     } catch (err) {
       console.warn("Error deleting postponed item:", err);
     }
@@ -760,10 +855,8 @@ export default function AmanReport({
     activeRows.forEach((cust, idx) => {
       const cleanName = cust.arabicName.replace(/,/g, " ");
       const formattedName = formatNameWithNumber(cleanName, idx + 1);
-      const noteInfo = resolveAmanDetails(cust, invoices, services);
-      const fullNote = cust.notes && cust.notes !== noteInfo.statusText 
-        ? `${noteInfo.statusText} (${cust.notes})` 
-        : noteInfo.statusText;
+      const noteInfo = resolveAmanDetails(cust, invoices, services, governmentFines);
+      const fullNote = noteInfo.statusText;
       csvContent += `"${formattedName}","${cust.birthDate || ""}","${(fullNote || "").replace(/"/g, '""')}"\r\n`;
     });
 
@@ -1003,7 +1096,7 @@ export default function AmanReport({
       const finesByType: Record<string, number> = {};
 
       activeRows.forEach((row) => {
-        const details = resolveAmanDetails(row, invoices, services);
+        const details = resolveAmanDetails(row, invoices, services, governmentFines);
         if (details.serviceType === "مستعجل") {
           urgentCount++;
         } else {
@@ -1030,7 +1123,7 @@ export default function AmanReport({
         finesByType,
       };
     });
-  }, [totalPages, displayRows, invoices, services]);
+  }, [totalPages, displayRows, invoices, services, governmentFines]);
 
   // Overall report statistics across all pages
   const overallStats = useMemo(() => {
@@ -1041,7 +1134,7 @@ export default function AmanReport({
     const finesByType: Record<string, number> = {};
 
     activeRows.forEach((row) => {
-      const details = resolveAmanDetails(row, invoices, services);
+      const details = resolveAmanDetails(row, invoices, services, governmentFines);
       if (details.serviceType === "مستعجل") {
         urgentCount++;
       } else {
@@ -1347,11 +1440,26 @@ export default function AmanReport({
               تصدير إكسيل (CSV)
             </button>
 
+            {/* User requirement: اختيار تاريخ الطباعة يدوياً ليظهر مباشرة أعلى الكشف بدون مكان فاضي للكتابة باليد */}
+            <div className="flex items-center gap-1.5 bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs shadow-xs">
+              <span className="font-bold text-slate-700 whitespace-nowrap">📅 تاريخ الطباعة:</span>
+              <input 
+                type="date"
+                value={customPrintDate}
+                onChange={(e) => {
+                  setCustomPrintDate(e.target.value);
+                  setSelectedPrintDateHeader(e.target.value.replace(/-/g, "/"));
+                }}
+                className="bg-transparent border-0 p-0 text-xs font-mono font-bold text-blue-900 focus:outline-none cursor-pointer"
+                title="تحديد التاريخ المراد ظهوره في أعلى كشف أمان المطبوع"
+              />
+            </div>
+
             <button
               type="button"
               onClick={handleOpenPrintModal}
               className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-xs cursor-pointer"
-              title="طباعة الكشف مع خيارات تحديد تاريخ اليوم أو تاريخ مخصص أو تركه فارغاً"
+              title="طباعة الكشف مع التاريخ المحدد أعلى الورقة"
             >
               <Printer className="w-4 h-4" />
               طباعة الكشف A4 (35 صف)
@@ -1676,7 +1784,7 @@ export default function AmanReport({
                               }}
                             >
                               {rowName.trim().length > 0 && (() => {
-                                const noteInfo = resolveAmanDetails(row, invoices, services);
+                                const noteInfo = resolveAmanDetails(row, invoices, services, governmentFines);
                                 return (
                                   <div className="w-full h-full flex items-center justify-between px-1.5 overflow-hidden">
                                     <span
@@ -1692,9 +1800,6 @@ export default function AmanReport({
                                       }}
                                     >
                                       {noteInfo.statusText}
-                                      {rowNotes && rowNotes !== noteInfo.statusText && (
-                                        <span style={{ color: "#64748b", marginRight: "4px" }}> ({rowNotes})</span>
-                                      )}
                                     </span>
                                   </div>
                                 );
