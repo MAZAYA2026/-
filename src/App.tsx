@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Invoice, Service, AppSettings, Employee, CollectionClosing, DictionaryItem, GovernmentFine } from "./types";
+import { Invoice, Service, AppSettings, Employee, CollectionClosing, DictionaryItem, GovernmentFine, PotentialCustomer } from "./types";
 import { fetchDB, saveDB } from "./lib/api";
 import EmployeeLogin from "./components/EmployeeLogin";
 import InvoiceCreator from "./components/InvoiceCreator";
@@ -9,6 +9,7 @@ import NotificationsPanel from "./components/NotificationsPanel";
 import CollectionPanel from "./components/CollectionPanel";
 import ServicesConfig from "./components/ServicesConfig";
 import SettingsConfig from "./components/SettingsConfig";
+import PotentialCustomersPanel from "./components/PotentialCustomersPanel";
 import { 
   PlusCircle, 
   Search, 
@@ -22,7 +23,8 @@ import {
   RefreshCw, 
   Activity, 
   Flame,
-  HelpCircle
+  HelpCircle,
+  Users
 } from "lucide-react";
 
 export default function App() {
@@ -36,8 +38,10 @@ export default function App() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [dictionary, setDictionary] = useState<DictionaryItem[]>([]);
   const [governmentFines, setGovernmentFines] = useState<GovernmentFine[]>([]);
+  const [potentialCustomers, setPotentialCustomers] = useState<PotentialCustomer[]>([]);
+  const [customerToCreate, setCustomerToCreate] = useState<PotentialCustomer | null>(null);
   
-  const [activeTab, setActiveTab] = useState<"create" | "query" | "aman" | "reminders" | "collection" | "services" | "settings">("create");
+  const [activeTab, setActiveTab] = useState<"create" | "query" | "aman" | "reminders" | "collection" | "services" | "settings" | "prospects">("create");
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
 
@@ -55,6 +59,7 @@ export default function App() {
       setEmployees(data.employees || []);
       setDictionary(data.dictionary || []);
       setGovernmentFines(data.governmentFines || []);
+      setPotentialCustomers(data.potentialCustomers || []);
     } catch (err) {
       console.error("Error syncing database:", err);
     } finally {
@@ -232,6 +237,25 @@ export default function App() {
           </button>
 
           <button
+            onClick={() => setActiveTab("prospects")}
+            className={`w-full text-right px-4 py-3 rounded-xl flex items-center justify-between text-xs font-bold transition-all ${
+              activeTab === "prospects" 
+                ? "bg-slate-950 text-white shadow-md shadow-slate-950/10" 
+                : "bg-white text-slate-600 hover:bg-slate-200 border border-slate-200/60"
+            }`}
+          >
+            <span className="flex items-center gap-2">
+              <Users className="w-4.5 h-4.5 text-indigo-500" />
+              العملاء المحتملين (OCR)
+            </span>
+            {potentialCustomers.filter(p => p.status !== "تم_التحويل_لفاتورة").length > 0 && (
+              <span className="bg-indigo-600 text-white text-[9px] px-1.5 py-0.5 rounded-full font-mono font-bold">
+                {potentialCustomers.filter(p => p.status !== "تم_التحويل_لفاتورة").length}
+              </span>
+            )}
+          </button>
+
+          <button
             onClick={() => setActiveTab("query")}
             className={`w-full text-right px-4 py-3 rounded-xl flex items-center justify-between text-xs font-bold transition-all ${
               activeTab === "query" 
@@ -335,6 +359,8 @@ export default function App() {
               dictionary={dictionary}
               onDictionaryUpdated={(newDict) => setDictionary(newDict)}
               governmentFines={governmentFines}
+              potentialCustomers={potentialCustomers}
+              initialCustomerToCreate={customerToCreate}
             />
           )}
 
@@ -408,6 +434,19 @@ export default function App() {
               governmentFines={governmentFines}
               onGovernmentFinesUpdated={(fines) => setGovernmentFines(fines)}
               onReloadDatabase={syncDatabase}
+            />
+          )}
+
+          {activeTab === "prospects" && (
+            <PotentialCustomersPanel 
+              potentialCustomers={potentialCustomers}
+              onCustomersUpdated={(updatedList) => setPotentialCustomers(updatedList)}
+              onUseCustomerInInvoice={(cust) => {
+                setCustomerToCreate(cust);
+                setActiveTab("create");
+              }}
+              dictionary={dictionary}
+              settings={settings || undefined}
             />
           )}
         </main>

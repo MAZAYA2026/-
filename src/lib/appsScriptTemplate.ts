@@ -317,6 +317,52 @@ function doPost(e) {
         } catch(cwErr) {}
       }
 
+      // --- Sheet 9: العملاء المحتملين ---
+      var potList = contents.potentialCustomers || (contents.db && contents.db.potentialCustomers) || [];
+      if (Array.isArray(potList)) {
+        var potSheet = findOrCreateSheet(ss, ["العملاء المحتملين", "العملاء_المحتملين", "Potential_Customers", "المحتملين"], "العملاء_المحتملين");
+        potSheet.clearContents();
+        var potHeaders = ["م", "الاسم بالكامل (عربي)", "الاسم بالإنجليزي", "الرقم القومي (14 رقم)", "تاريخ الميلاد", "المهنة / الوظيفة", "نوع المستند", "رقم الهاتف", "صفة مقدم الطلب", "تاريخ التسجيل", "الحالة", "رقم الفاتورة"];
+        var potRows = [potHeaders];
+        for (var pti = 0; pti < potList.length; pti++) {
+          var ptItem = potList[pti];
+          if (ptItem && (ptItem.arabicName || ptItem.nationalId)) {
+            potRows.push([
+              pti + 1,
+              ptItem.arabicName || "",
+              ptItem.englishName || "",
+              "'" + (ptItem.nationalId || ""),
+              formatSheetDate(ptItem.birthDate),
+              ptItem.profession || "",
+              ptItem.documentType === "بطاقة_رقم_قومي" ? "بطاقة رقم قومي" : (ptItem.documentType === "شهادة_ميلاد" ? "شهادة ميلاد" : (ptItem.documentType || "يدوي")),
+              ptItem.phone || "",
+              ptItem.applicantCapacity || "",
+              formatSheetDate(ptItem.createdAt),
+              ptItem.status || "جديد",
+              ptItem.invoiceId || ""
+            ]);
+          }
+        }
+        if (potRows.length > 0) {
+          potSheet.getRange(1, 1, potRows.length, potHeaders.length).setValues(potRows);
+          formatHeader(potSheet, potHeaders.length);
+          try {
+            potSheet.setColumnWidth(1, 50);
+            potSheet.setColumnWidth(2, 260);
+            potSheet.setColumnWidth(3, 220);
+            potSheet.setColumnWidth(4, 160);
+            potSheet.setColumnWidth(5, 120);
+            potSheet.setColumnWidth(6, 200);
+            potSheet.setColumnWidth(7, 130);
+            potSheet.setColumnWidth(8, 130);
+            potSheet.setColumnWidth(9, 130);
+            potSheet.setColumnWidth(10, 120);
+            potSheet.setColumnWidth(11, 120);
+            potSheet.setColumnWidth(12, 100);
+          } catch(cwErr) {}
+        }
+      }
+
       return ContentService.createTextOutput(JSON.stringify({ 
         status: "success", 
         message: "تم تحديث وحفظ كافة البيانات في ملف جوجل شيت بنجاح! 🚀" 

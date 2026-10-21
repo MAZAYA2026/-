@@ -13,7 +13,8 @@ import {
   syncPostponedAmanToGoogleSheets,
   pullPostponedAmanFromGoogleSheets,
   cutAndPostponeAmanRow,
-  insertPostponedAmanRow
+  insertPostponedAmanRow,
+  fetchDB
 } from "../lib/api";
 import { playLanguageWarningSound } from "../lib/audio";
 import { 
@@ -214,6 +215,7 @@ export default function AmanReport({
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoadingSheets, setIsLoadingSheets] = useState(false);
+  const [isRefreshingFromInvoices, setIsRefreshingFromInvoices] = useState(false);
   const [sheetFetchError, setSheetFetchError] = useState<string | null>(null);
 
   // Postponed names state (User requirement: قص وحفظ في ورقة خاصة وإدراج لاحقاً)
@@ -571,6 +573,170 @@ export default function AmanReport({
       showSaveNotice(`خطأ أثناء حفظ كشف أمان: ${err.message} ⚠️`);
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  // User explicit requirement:
+  // "بالنسبة لشيت امان عايز زرار تحديث من شيت امان يجلب بياناتة من الفواتير نفسها علشان يعمل تحديث لو حصل تغيير بالفاتورة"
+  const handleRefreshFromInvoices = async () => {
+    setIsRefreshingFromInvoices(true);
+    try {
+      // 1. Fetch fresh invoices from the server to guarantee we have latest edits across all sessions
+      let freshInvoices = invoices;
+      try {
+        const dbPayload = await fetchDB();
+        if (dbPayload && Array.isArray(dbPayload.invoices) && dbPayload.invoices.length > 0) {
+          freshInvoices = dbPayload.invoices;
+        }
+      } catch (err) {
+        console.warn("Could not fetch fresh DB, falling back to props invoices:", err);
+      }
+
+      const fromYMD = normalizeDateToYMD(dateFrom);
+      const toYMD = normalizeDateToYMD(dateTo);
+
+      // 2. Extract customers with # passport services matching the date filter
+      const invoiceAmanItems: AmanRowItem[] = [];
+      const invoiceAmanMap = new Map<string, AmanRowItem>();
+
+      freshInvoices.forEach((inv) => {
+        const invYMD = normalizeDateToYMD(inv.date);
+        if (fromYMD && toYMD && invYMD) {
+          if (invYMD < fromYMD || invYMD > toYMD) return;
+        }
+
+        if (!Array.isArray(inv.customers)) return;
+
+        inv.customers.forEach((cust, cIdx) => {
+          if (!cust.services || !Array.isArray(cust.services)) return;
+
+          const amanService = cust.services.find((s) => {
+            const srvId = String(s.serviceId || "").trim();
+            const matched = services.find((srv) => srv.id === srvId || srv.name === srvId);
+            const fullName = matched?.name || srvId;
+            return fullName.startsWith("#") && !fullName.startsWith("##");
+          });
+
+          if (amanService) {
+            const srvId = String(amanService.serviceId || "").trim();
+            const matched = services.find((srv) => srv.id === srvId || srv.name === srvId);
+            const fullName = matched?.name || srvId;
+            const isUrgent = fullName.includes("مستعجل") || fullName.includes("عاجل") || fullName.includes("فورى");
+            const hasFine = !!(amanService.fineName && amanService.fineName.trim().length > 0) || !!(amanService.fineAmount && amanService.fineAmount > 0);
+
+            let finePart = "";
+            if (hasFine) {
+              const cleanName = (amanService.fineName || "").trim() || "غرامة حكومية";
+              finePart = cleanName.startsWith("غرامة") ? cleanName : `غرامة ${cleanName}`;
+            }
+            const noteText = finePart ? `${isUrgent ? "مستعجل" : "عادي"} - ${finePart}` : (isUrgent ? "مستعجل" : "عادي");
+
+            const item: AmanRowItem = {
+              id: `inv-${inv.invoiceId}-c-${cIdx}`,
+              arabicName: cust.arabicName || "",
+              birthDate: extractBirthDate(cust.birthDate, cust.nationalId),
+              notes: noteText,
+              date: inv.date,
+              invoiceId: inv.invoiceId,
+              customerIndex: cIdx,
+              serviceType: isUrgent ? "مستعجل" : "عادي",
+              hasFine,
+              fineName: amanService.fineName || "",
+              fineAmount: amanService.fineAmount || 0,
+            };
+
+            const key = `${inv.invoiceId}-${cIdx}`;
+            invoiceAmanMap.set(key, item);
+            invoiceAmanItems.push(item);
+          }
+        });
+      });
+
+      // 3. Merge: Update existing rows in tableRows that match invoices, keep manual rows, add any new invoices
+      let updatedCount = 0;
+      let newCount = 0;
+      const matchedKeys = new Set<string>();
+
+      const mergedRows: AmanRowItem[] = tableRows.map((row) => {
+        if (row.invoiceId) {
+          const key = `${row.invoiceId}-${row.customerIndex ?? 0}`;
+          let fresh = invoiceAmanMap.get(key);
+
+          // Fallback matching by invoiceId and trimmed arabicName if index shifted
+          if (!fresh && row.arabicName) {
+            fresh = invoiceAmanItems.find(
+              (item) => item.invoiceId === row.invoiceId && item.arabicName.trim() === row.arabicName.trim()
+            );
+          }
+
+          if (fresh) {
+            matchedKeys.add(`${fresh.invoiceId}-${fresh.customerIndex ?? 0}`);
+            updatedCount++;
+            return {
+              ...row,
+              arabicName: fresh.arabicName,
+              birthDate: fresh.birthDate,
+              notes: fresh.notes,
+              date: fresh.date,
+              serviceType: fresh.serviceType,
+              hasFine: fresh.hasFine,
+              fineName: fresh.fineName,
+              fineAmount: fresh.fineAmount,
+            };
+          }
+        }
+        return row;
+      });
+
+      // Append any invoice customers from the date range that aren't in tableRows yet
+      invoiceAmanItems.forEach((item) => {
+        const key = `${item.invoiceId}-${item.customerIndex ?? 0}`;
+        if (!matchedKeys.has(key)) {
+          const exists = mergedRows.some(
+            (r) => r.invoiceId === item.invoiceId && (r.customerIndex === item.customerIndex || r.arabicName.trim() === item.arabicName.trim())
+          );
+          if (!exists) {
+            mergedRows.push(item);
+            newCount++;
+          }
+        }
+      });
+
+      // If tableRows was completely empty, populate with all items from invoices
+      const finalRows = mergedRows.length > 0 ? mergedRows : invoiceAmanItems;
+      const cleanedFinalRows = finalRows.map((r) => ({
+        ...r,
+        birthDate: formatCleanBirthDate(r.birthDate),
+      }));
+
+      setTableRows(cleanedFinalRows);
+
+      // Save to local database
+      await saveLocalAmanReport(cleanedFinalRows, true);
+
+      // Sync to Google Sheets if connected
+      if (settings?.googleSheetWebhookUrl) {
+        try {
+          await syncAmanReportToGoogleSheets({
+            dateFrom,
+            dateTo,
+            amanRows: cleanedFinalRows,
+            webhookUrl: settings.googleSheetWebhookUrl,
+          });
+        } catch (syncErr: any) {
+          console.warn("Google Sheet sync notice during refresh from invoices:", syncErr);
+        }
+      }
+
+      setHasUnsavedChanges(false);
+      showSaveNotice(
+        `تم تحديث كشف أمان مباشرة من بيانات الفواتير بنجاح! 🔄 (${updatedCount} اسم تم تحديث بياناتهم${newCount > 0 ? `، و ${newCount} اسم جديد أُضيف للكشف` : ""})`
+      );
+    } catch (err: any) {
+      console.error("Refresh Aman from invoices failed:", err);
+      showSaveNotice(`خطأ أثناء التحديث من الفواتير: ${err.message} ⚠️`);
+    } finally {
+      setIsRefreshingFromInvoices(false);
     }
   };
 
@@ -1418,6 +1584,18 @@ export default function AmanReport({
             >
               <RefreshCw className={`w-4 h-4 ${isLoadingSheets ? "animate-spin text-blue-600" : ""}`} />
               {isLoadingSheets ? "جاري الجلب من شيت..." : "تحديث من شيت أمان 🔄"}
+            </button>
+
+            {/* User requirement: زر تحديث من الفواتير نفسها علشان يعمل تحديث لو حصل تغيير بالفاتورة */}
+            <button
+              type="button"
+              disabled={isRefreshingFromInvoices}
+              onClick={handleRefreshFromInvoices}
+              className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-300 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs disabled:opacity-50"
+              title="تحديث كشف أمان مباشرة من أحدث بيانات الفواتير المسجلة ليعكس أي تعديل في الاسم أو تاريخ الميلاد أو الخدمة أو الغرامات"
+            >
+              <RefreshCw className={`w-4 h-4 ${isRefreshingFromInvoices ? "animate-spin text-indigo-600" : "text-indigo-600"}`} />
+              <span>{isRefreshingFromInvoices ? "جاري التحديث من الفواتير..." : "تحديث من الفواتير 🔄"}</span>
             </button>
 
             <button

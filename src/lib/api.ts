@@ -1,4 +1,4 @@
-import { Invoice, Service, DictionaryItem, CollectionClosing, Employee, AppSettings, GovernmentFine, AmanPostponedItem } from "../types";
+import { Invoice, Service, DictionaryItem, CollectionClosing, Employee, AppSettings, GovernmentFine, AmanPostponedItem, PotentialCustomer } from "../types";
 
 export interface DBPayload {
   services: Service[];
@@ -8,6 +8,7 @@ export interface DBPayload {
   employees: Employee[];
   settings: AppSettings;
   governmentFines?: GovernmentFine[];
+  potentialCustomers?: PotentialCustomer[];
 }
 
 export async function fetchDB(): Promise<DBPayload> {
@@ -576,4 +577,142 @@ export async function insertPostponedAmanRow(params: {
     throw new Error(errData.error || "فشل إدراج الاسم في كشف أمان");
   }
   return response.json();
+}
+
+// ========================================================
+// 🎯 Potential Customers & AI OCR Client Methods
+// ========================================================
+
+export async function fetchPotentialCustomers(): Promise<PotentialCustomer[]> {
+  const response = await fetch("/api/db/potential-customers");
+  if (!response.ok) {
+    throw new Error("فشل جلب قائمة العملاء المحتملين");
+  }
+  const result = await response.json();
+  return result.potentialCustomers || [];
+}
+
+export async function savePotentialCustomers(customers: Partial<PotentialCustomer>[]): Promise<PotentialCustomer[]> {
+  const response = await fetch("/api/db/potential-customers", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ customers, syncWithSheets: true }),
+  });
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || "فشل حفظ بيانات العملاء المحتملين");
+  }
+  const result = await response.json();
+  return result.potentialCustomers || [];
+}
+
+export async function updatePotentialCustomerOnServer(id: string, updateData: Partial<PotentialCustomer>): Promise<PotentialCustomer> {
+  const response = await fetch(`/api/db/potential-customers/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updateData),
+  });
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || "فشل تحديث بيانات العميل المحتمل");
+  }
+  const result = await response.json();
+  return result.potentialCustomer;
+}
+
+export async function deletePotentialCustomerOnServer(id: string): Promise<void> {
+  const response = await fetch(`/api/db/potential-customers/${id}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || "فشل حذف العميل المحتمل");
+  }
+}
+
+export async function scanDocumentWithAI(params: {
+  image: string; // base64 or data URL
+  documentType: "national_id_front" | "national_id_back" | "birth_certificate";
+}): Promise<{
+  status: string;
+  extracted: {
+    arabicName?: string;
+    nationalId?: string;
+    birthDate?: string;
+    profession?: string;
+    gender?: string;
+    calculatedAge?: number;
+  };
+  documentType: string;
+  message?: string;
+}> {
+  const response = await fetch("/api/ocr/scan-document", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || "فشل مسح وقراءة بيانات المستند بالذكاء الاصطناعي");
+  }
+  return response.json();
+}
+
+export async function syncPotentialCustomersToGoogleSheets(webhookUrl?: string): Promise<{ status: string; message: string }> {
+  const response = await fetch("/api/sheets/webhook/sync-potential-customers", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ webhookUrl }),
+  });
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || "فشل مزامنة العملاء المحتملين مع جوجل شيت");
+  }
+  return response.json();
+}
+
+// Export Potential Customers to Excel-compatible CSV with UTF-8 BOM
+export function exportPotentialCustomersToExcel(customers: PotentialCustomer[]) {
+  const headers = [
+    "م",
+    "الاسم بالكامل (عربي)",
+    "الاسم بالإنجليزي",
+    "الرقم القومي (14 رقم)",
+    "تاريخ الميلاد",
+    "المهنة / الوظيفة",
+    "نوع المستند",
+    "رقم الهاتف",
+    "صفة مقدم الطلب",
+    "تاريخ التسجيل",
+    "الحالة",
+    "رقم الفاتورة إن وجد",
+    "ملاحظات"
+  ];
+
+  const rows = customers.map((c, idx) => [
+    idx + 1,
+    `"${(c.arabicName || "").replace(/"/g, '""')}"`,
+    `"${(c.englishName || "").replace(/"/g, '""')}"`,
+    `'${c.nationalId || ""}`, // Prefix with single quote so Excel preserves full 14 digits
+    `"${c.birthDate || ""}"`,
+    `"${(c.profession || "").replace(/"/g, '""')}"`,
+    `"${c.documentType === "بطاقة_رقم_قومي" ? "بطاقة رقم قومي" : c.documentType === "شهادة_ميلاد" ? "شهادة ميلاد" : (c.documentType || "يدوي")}"`,
+    `"${c.phone || ""}"`,
+    `"${c.applicantCapacity || ""}"`,
+    `"${c.createdAt || ""}"`,
+    `"${c.status || "جديد"}"`,
+    `"${c.invoiceId || ""}"`,
+    `"${(c.notes || "").replace(/"/g, '""')}"`
+  ]);
+
+  const csvContent = "\uFEFF" + [headers.join(","), ...rows.map(r => r.join(","))].join("\r\n");
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const dateStr = new Date().toISOString().split("T")[0];
+  link.setAttribute("href", url);
+  link.setAttribute("download", `العملاء_المحتملين_مكتب_مزايا_${dateStr}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
 }

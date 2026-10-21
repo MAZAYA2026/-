@@ -92,14 +92,23 @@ export default function InvoiceQuery({
     }
   }, [settings?.googleSheetWebhookUrl, onInvoicesLoaded]);
 
+  // Local invoices state for instantaneous optimistic UI updates (0ms delay on checkmarks)
+  const [localInvoices, setLocalInvoices] = useState<Invoice[]>(invoices);
+
+  useEffect(() => {
+    setLocalInvoices(invoices);
+  }, [invoices]);
+
   // User explicit requirement:
   // "شاشة الاستعلام والمحفوظات لا تعمل جلب للفواتير من جوجل شيت باستمرار انما مرة واحدة فقط عند الفتح اول مرة"
   useEffect(() => {
     if (!hasFetchedOnMountRef.current) {
       hasFetchedOnMountRef.current = true;
-      handleLoadInvoicesFromSheet(false);
+      if (invoices.length === 0) {
+        handleLoadInvoicesFromSheet(true);
+      }
     }
-  }, [handleLoadInvoicesFromSheet]);
+  }, [handleLoadInvoicesFromSheet, invoices.length]);
 
   // Clean date helper function: strips GMT+... and (Eastern European Summer Time)
   const formatInvoiceDateDisplay = (dateVal: string | undefined): string => {
@@ -113,7 +122,7 @@ export default function InvoiceQuery({
   };
 
   // Filtered invoices, sorted by invoiceId descending so newest operations appear at the top
-  const filteredInvoices = invoices
+  const filteredInvoices = localInvoices
     .filter((inv) => {
       if (searchId && !inv.invoiceId.toString().includes(searchId)) return false;
       
@@ -300,52 +309,48 @@ export default function InvoiceQuery({
     }
   };
 
-  // Toggle individual service completion with timestamp and execution note prompt
+  // Toggle individual service completion with timestamp and instantaneous optimistic UI update (0ms response)
   const handleToggleServiceCompleted = async (inv: Invoice, custIdx: number, sIdx: number) => {
-    try {
-      const cloned = JSON.parse(JSON.stringify(inv)) as Invoice;
-      const targetService = cloned.customers[custIdx].services[sIdx];
-      const currentlyCompleted = !!targetService.completed;
-      const newCompleted = !currentlyCompleted;
+    const targetInvId = inv.invoiceId;
+    let targetUpdatedInvoice: Invoice | null = null;
 
-      targetService.completed = newCompleted;
-      if (newCompleted) {
-        // Record precise timestamp of completion (Date & Time in Egypt / local format)
-        const now = new Date();
-        const dateStr = now.toISOString().split("T")[0];
-        const timeStr = now.toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit", hour12: true });
-        targetService.completedAt = `${dateStr} (${timeStr})`;
-      } else {
-        targetService.completedAt = undefined;
+    // 1. ⚡ Synchronous instantaneous local state update - 0ms response!
+    setLocalInvoices((prev) => {
+      return prev.map((item) => {
+        if (item.invoiceId !== targetInvId) return item;
+        const copy = JSON.parse(JSON.stringify(item)) as Invoice;
+        const targetService = copy.customers[custIdx]?.services[sIdx];
+        if (!targetService) return item;
+
+        const newCompleted = !targetService.completed;
+        targetService.completed = newCompleted;
+        if (newCompleted) {
+          const now = new Date();
+          const dateStr = now.toISOString().split("T")[0];
+          const timeStr = now.toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit", hour12: true });
+          targetService.completedAt = `${dateStr} (${timeStr})`;
+        } else {
+          targetService.completedAt = undefined;
+        }
+        targetUpdatedInvoice = copy;
+        return copy;
+      });
+    });
+
+    if (targetUpdatedInvoice) {
+      // 2. Notify parent App
+      onInvoiceUpdated(targetUpdatedInvoice);
+
+      // 3. Save to server asynchronously in background without blocking UI
+      try {
+        await updateInvoiceOnServer((targetUpdatedInvoice as Invoice).invoiceId, targetUpdatedInvoice as Invoice);
+      } catch (err) {
+        console.error("Failed to update service completion:", err);
+        // Revert on error
+        setLocalInvoices(invoices);
+        onInvoiceUpdated(inv);
+        alert("حدث خطأ أثناء حفظ حالة إنجاز الخدمة.");
       }
-
-      // Check if all services across all customers are completed -> auto promote status
-      const allServicesCompleted = cloned.customers.every(c => c.services.every(s => s.completed));
-      if (allServicesCompleted && cloned.status === InvoiceStatus.NEW) {
-        // All services finished, can be promoted or prompt drawer
-      }
-
-      const result = await updateInvoiceOnServer(cloned.invoiceId, cloned);
-      onInvoiceUpdated(result);
-
-      // If newly marked completed, open the execution note & WhatsApp notification modal
-      if (newCompleted) {
-        const cust = result.customers[custIdx];
-        const srv = cust.services[sIdx];
-        const matched = services.find(s => s.id === srv.serviceId || s.name === srv.serviceId);
-        setNoteModal({
-          invoice: result,
-          customerIndex: custIdx,
-          serviceIndex: sIdx,
-          currentNote: srv.executionNote || "",
-          completed: true,
-          serviceName: matched?.name || srv.serviceId,
-          customerName: cust.arabicName
-        });
-      }
-    } catch (err) {
-      console.error(err);
-      alert("حدث خطأ أثناء حفظ حالة إنجاز الخدمة.");
     }
   };
 
@@ -1140,10 +1145,11 @@ export default function InvoiceQuery({
                     <div className="space-y-1">
                       <label className="text-[11px] font-bold text-slate-600">صفة مقدم الطلب:</label>
                       <select 
-                        value={cust.applicantCapacity || applicantCapacityOptions[0] || "بنفسه"} 
+                        value={cust.applicantCapacity || ""} 
                         onChange={(e) => handleEditCustomerField(cIdx, "applicantCapacity", e.target.value)}
                         className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold font-cairo cursor-pointer"
                       >
+                        <option value="" disabled className="text-slate-400">-- اختر صفة مقدم الطلب --</option>
                         {applicantCapacityOptions.map((opt) => (
                           <option key={opt} value={opt}>
                             {opt}

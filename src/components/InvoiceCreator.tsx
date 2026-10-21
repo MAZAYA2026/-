@@ -1,12 +1,13 @@
-import React, { useState, useEffect, useRef } from "react";
-import { Service, CustomerInput, Invoice, InvoiceStatus, AppSettings, Employee, DictionaryItem, GovernmentFine, DEFAULT_APPLICANT_CAPACITIES } from "../types";
+import React, { useState, useEffect, useRef, useMemo } from "react";
+import { Service, CustomerInput, Invoice, InvoiceStatus, AppSettings, Employee, DictionaryItem, GovernmentFine, DEFAULT_APPLICANT_CAPACITIES, PotentialCustomer } from "../types";
 import { createInvoiceOnServer, saveDictionaryWord } from "../lib/api";
 import { calculateWorkingDaysDeliveryDate, getArabicDayName, isNonWorkingDay, recalculateCustomerServicesDeliveryDates } from "../lib/businessDays";
 import { generateWhatsAppWelcomeMessage, getWhatsAppUrl } from "../lib/whatsapp";
 import { breakdownArabicName, extractAtomicWordTokens, normalizeArabic } from "../lib/dictionary";
 import { playLanguageWarningSound } from "../lib/audio";
-import { Plus, Trash2, FileText, UserPlus, Sparkles, Printer, Send, Check, AlertCircle, Info, Calendar, BookOpen, ShieldAlert, CalendarCheck, AlertTriangle, Volume2 } from "lucide-react";
+import { Plus, Trash2, FileText, UserPlus, Sparkles, Printer, Send, Check, AlertCircle, Info, Calendar, BookOpen, ShieldAlert, CalendarCheck, AlertTriangle, Volume2, Users, Camera, CheckSquare, Square, Search, X } from "lucide-react";
 import ThermalReceipt from "./ThermalReceipt";
+import DocumentScannerModal from "./DocumentScannerModal";
 
 interface InvoiceCreatorProps {
   services: Service[];
@@ -16,6 +17,9 @@ interface InvoiceCreatorProps {
   dictionary?: DictionaryItem[];
   onDictionaryUpdated?: (newDict: DictionaryItem[]) => void;
   governmentFines?: GovernmentFine[];
+  potentialCustomers?: PotentialCustomer[];
+  initialCustomerToCreate?: PotentialCustomer | null;
+  onPotentialCustomerConverted?: (convertedId: string) => void;
 }
 
 export default function InvoiceCreator({ 
@@ -25,7 +29,10 @@ export default function InvoiceCreator({
   onInvoiceCreated, 
   dictionary = [], 
   onDictionaryUpdated,
-  governmentFines = []
+  governmentFines = [],
+  potentialCustomers = [],
+  initialCustomerToCreate = null,
+  onPotentialCustomerConverted
 }: InvoiceCreatorProps) {
   const applicantCapacityOptions = (settings.applicantCapacities && settings.applicantCapacities.length > 0)
     ? settings.applicantCapacities
@@ -36,6 +43,12 @@ export default function InvoiceCreator({
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
   
+  // Potential Customers modal & AI OCR scanner states
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [isSelectProspectModalOpen, setIsSelectProspectModalOpen] = useState(false);
+  const [selectedProspectIds, setSelectedProspectIds] = useState<string[]>([]);
+  const [prospectSearchTerm, setProspectSearchTerm] = useState("");
+
   // Missing word translation inputs and saving state
   const [missingWordInputs, setMissingWordInputs] = useState<{ [word: string]: string }>({});
   const [savingWord, setSavingWord] = useState<string | null>(null);
@@ -46,6 +59,123 @@ export default function InvoiceCreator({
   const [showSuccessToast, setShowSuccessToast] = useState(false);
   const [createdInvoiceId, setCreatedInvoiceId] = useState<number | null>(null);
 
+  // Auto pre-fill if initialCustomerToCreate is provided from Potential Customers tab
+  useEffect(() => {
+    if (initialCustomerToCreate) {
+      const p = initialCustomerToCreate;
+      const passportService = services.find((s) => s.name.startsWith("##") || s.name.startsWith("#"));
+      const defaultServiceId = passportService ? passportService.name : (services[0]?.name || "");
+
+      let en = p.englishName || "";
+      if (!en && p.arabicName) {
+        try {
+          const breakdown = breakdownArabicName(p.arabicName, dictionary);
+          if (breakdown && breakdown.assembledEnglish) {
+            en = breakdown.assembledEnglish.toUpperCase();
+          }
+        } catch {}
+      }
+
+      const prefilled: CustomerInput = {
+        arabicName: p.arabicName,
+        englishName: en,
+        englishNameOption: "dictionary",
+        nationalId: p.nationalId,
+        birthDate: p.birthDate || "",
+        profession: p.profession || "",
+        phone: p.phone || "",
+        applicantCapacity: p.applicantCapacity || "",
+        services: [
+          {
+            serviceId: defaultServiceId,
+            quantity: 1,
+            price: 0,
+            deliveryDate: "",
+          },
+        ],
+      };
+      setCustomers([prefilled]);
+    }
+  }, [initialCustomerToCreate]);
+
+  // Handle confirming selection of customers from potential customers list
+  const handleConfirmSelectProspects = () => {
+    const selectedList = potentialCustomers.filter((p) => selectedProspectIds.includes(p.id));
+    if (selectedList.length === 0) {
+      setIsSelectProspectModalOpen(false);
+      return;
+    }
+
+    const passportService = services.find((s) => s.name.startsWith("##") || s.name.startsWith("#"));
+    const defaultServiceId = passportService ? passportService.name : (services[0]?.name || "");
+
+    const newCustomers: CustomerInput[] = selectedList.map((p) => {
+      let en = p.englishName || "";
+      if (!en && p.arabicName) {
+        try {
+          const breakdown = breakdownArabicName(p.arabicName, dictionary);
+          if (breakdown && breakdown.assembledEnglish) {
+            en = breakdown.assembledEnglish.toUpperCase();
+          }
+        } catch {}
+      }
+
+      return {
+        arabicName: p.arabicName,
+        englishName: en,
+        englishNameOption: "dictionary",
+        nationalId: p.nationalId,
+        birthDate: p.birthDate || "",
+        profession: p.profession || "",
+        phone: p.phone || "", // Kept empty for the employee to type
+        applicantCapacity: p.applicantCapacity || "", // Kept unselected so employee notices and selects
+        services: [
+          {
+            serviceId: defaultServiceId,
+            quantity: 1,
+            price: 0,
+            deliveryDate: "",
+          },
+        ],
+      };
+    });
+
+    setCustomers(newCustomers);
+    setIsSelectProspectModalOpen(false);
+    setSelectedProspectIds([]);
+  };
+
+  // Handle scanned customer direct insertion
+  const handleScannedCustomerDirect = (cust: Partial<PotentialCustomer>, useImmediately?: boolean) => {
+    const passportService = services.find((s) => s.name.startsWith("##") || s.name.startsWith("#"));
+    const defaultServiceId = passportService ? passportService.name : (services[0]?.name || "");
+
+    const newCustomerInput: CustomerInput = {
+      arabicName: cust.arabicName || "",
+      englishName: cust.englishName || "",
+      englishNameOption: "dictionary",
+      nationalId: cust.nationalId || "",
+      birthDate: cust.birthDate || "",
+      profession: cust.profession || "",
+      phone: cust.phone || "",
+      applicantCapacity: cust.applicantCapacity || "",
+      services: [
+        {
+          serviceId: defaultServiceId,
+          quantity: 1,
+          price: 0,
+          deliveryDate: "",
+        },
+      ],
+    };
+
+    if (customers.length === 1 && !customers[0].arabicName.trim() && !customers[0].nationalId.trim()) {
+      setCustomers([newCustomerInput]);
+    } else {
+      setCustomers((prev) => [...prev, newCustomerInput]);
+    }
+  };
+
   function createEmptyCustomer(): CustomerInput {
     return {
       arabicName: "",
@@ -55,9 +185,7 @@ export default function InvoiceCreator({
       birthDate: "",
       phone: "",
       profession: "",
-      applicantCapacity: (settings.applicantCapacities && settings.applicantCapacities.length > 0)
-        ? settings.applicantCapacities[0]
-        : "بنفسه",
+      applicantCapacity: "",
       services: [
         {
           serviceId: "",
@@ -458,6 +586,10 @@ export default function InvoiceCreator({
           newErrors[`c-${cIdx}-profession`] = "المهنة إلزامية لخدمات الجوازات لتسجيل المعاملة.";
           isValid = false;
         }
+        if (!cust.applicantCapacity || !cust.applicantCapacity.trim()) {
+          newErrors[`c-${cIdx}-applicantCapacity`] = "يرجى تحديد صفة مقدم الطلب (بنفسه، الأب، الأم، الزوج...).";
+          isValid = false;
+        }
       }
 
       // Services validation
@@ -559,7 +691,7 @@ export default function InvoiceCreator({
           birthDate: isPass ? cust.birthDate : "",
           phone: cust.phone,
           profession: isPass ? cust.profession.trim() : "",
-          applicantCapacity: isPass ? (cust.applicantCapacity?.trim() || applicantCapacityOptions[0] || "بنفسه") : "",
+          applicantCapacity: isPass ? (cust.applicantCapacity?.trim() || "") : "",
           services: formattedServices
         };
       });
@@ -768,6 +900,52 @@ export default function InvoiceCreator({
       {/* Invoice Form */}
       <form onSubmit={handleSubmitInvoice} className="space-y-6">
         
+        {/* Quick Action Toolbar: Select from Potential Customers & AI OCR Document Scanner */}
+        <div className="bg-linear-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-900/40 rounded-2xl p-4 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-indigo-600/30 rounded-xl border border-indigo-400/30 text-indigo-300 shrink-0">
+              <Users className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="text-xs font-bold text-white flex items-center gap-2">
+                <span>تعبئة سريعة لبيانات الجوازات (# أو ##)</span>
+                {potentialCustomers.filter(p => p.status !== "تم_التحويل_لفاتورة").length > 0 && (
+                  <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] px-2 py-0.5 rounded-full font-bold">
+                    {potentialCustomers.filter(p => p.status !== "تم_التحويل_لفاتورة").length} عميل محتمل جاهز
+                  </span>
+                )}
+              </h4>
+              <p className="text-[11px] text-slate-300">
+                يمكنك إدخال البيانات يدوياً كالمعتاد، أو الاختيار المباشر من قائمة العملاء المحتملين أو مسح المستند بالذكاء الاصطناعي
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedProspectIds([]);
+                setProspectSearchTerm("");
+                setIsSelectProspectModalOpen(true);
+              }}
+              className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+            >
+              <CheckSquare className="w-4 h-4 text-emerald-300" />
+              <span>📋 اختيار من العملاء المحتملين</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsScannerOpen(true)}
+              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+            >
+              <Camera className="w-4 h-4 text-indigo-300" />
+              <span>📸 مسح بطاقة / شهادة ميلاد</span>
+            </button>
+          </div>
+        </div>
+
         {/* Customers list section */}
         {customers.map((customer, cIdx) => {
           const isPass = isPassportRelated(customer);
@@ -958,25 +1136,54 @@ export default function InvoiceCreator({
                       <div className="space-y-1.5">
                         <label className="text-xs font-bold text-slate-700 font-cairo flex justify-between items-center">
                           <span>صفة مقدم الطلب <span className="text-rose-500">*</span></span>
-                          <span className="text-[10px] text-blue-700 font-bold bg-blue-100/70 px-1.5 py-0.5 rounded-md">
-                            صفة الاستلام
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md transition-all ${
+                            customer.applicantCapacity 
+                              ? "bg-emerald-100 text-emerald-800" 
+                              : "bg-amber-100 text-amber-900 border border-amber-300 animate-pulse"
+                          }`}>
+                            {customer.applicantCapacity ? "تم التحديد ✓" : "مطلوب تحديدها ⚠️"}
                           </span>
                         </label>
                         <select
-                          value={customer.applicantCapacity || applicantCapacityOptions[0] || "بنفسه"}
+                          value={customer.applicantCapacity || ""}
                           onChange={(e) => {
                             const updated = [...customers];
                             updated[cIdx].applicantCapacity = e.target.value;
                             setCustomers(updated);
+                            if (errors[`c-${cIdx}-applicantCapacity`]) {
+                              const errs = { ...errors };
+                              delete errs[`c-${cIdx}-applicantCapacity`];
+                              setErrors(errs);
+                            }
                           }}
-                          className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-3 py-2.5 text-xs font-bold font-cairo focus:outline-hidden focus:ring-2 focus:ring-blue-500 cursor-pointer shadow-xs transition-all"
+                          className={`w-full bg-slate-50 border rounded-xl px-3 py-2.5 text-xs font-bold font-cairo focus:outline-hidden focus:ring-2 focus:ring-blue-500 cursor-pointer shadow-xs transition-all ${
+                            errors[`c-${cIdx}-applicantCapacity`]
+                              ? "border-rose-400 bg-rose-50/40 text-rose-900 ring-2 ring-rose-200"
+                              : !customer.applicantCapacity
+                                ? "border-amber-400 bg-amber-50/40 text-amber-950 font-bold ring-1 ring-amber-300"
+                                : "border-slate-200 text-slate-800 font-bold"
+                          }`}
                         >
+                          <option value="" disabled className="text-slate-400 font-normal">
+                            -- اختر صفة مقدم الطلب (إلزامي) --
+                          </option>
                           {applicantCapacityOptions.map((opt) => (
-                            <option key={opt} value={opt}>
+                            <option key={opt} value={opt} className="text-slate-900 font-bold">
                               {opt}
                             </option>
                           ))}
                         </select>
+                        {errors[`c-${cIdx}-applicantCapacity`] && (
+                          <p className="text-[10px] text-rose-600 flex items-center gap-1 mt-1 font-cairo">
+                            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                            <span>{errors[`c-${cIdx}-applicantCapacity`]}</span>
+                          </p>
+                        )}
+                        {!customer.applicantCapacity && !errors[`c-${cIdx}-applicantCapacity`] && (
+                          <p className="text-[10px] text-amber-700 flex items-center gap-1 mt-0.5 font-cairo font-medium">
+                            <span>⚠️ يرجى الانتباه لتحديد الصفة (بنفسه، الأب، الأم، الزوج...)</span>
+                          </p>
+                        )}
                       </div>
                     </div>
 
@@ -1465,6 +1672,155 @@ export default function InvoiceCreator({
         </div>
 
       </form>
+
+      {/* Modal: Select From Potential Customers */}
+      {isSelectProspectModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-xs font-cairo">
+          <div className="bg-white rounded-3xl p-6 shadow-2xl border border-slate-200 w-full max-w-2xl max-h-[88vh] flex flex-col space-y-4">
+            
+            <div className="flex items-center justify-between border-b border-slate-150 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-xl">
+                  <Users className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-slate-900">
+                    اختيار من قائمة العملاء المحتملين
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    حدد عميلاً واحداً أو أكثر ليتم إدراج بياناتهم فوراً في الفاتورة وتوفير وقت الكتابة
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSelectProspectModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-800 rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Search within available prospects */}
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={prospectSearchTerm}
+                onChange={(e) => setProspectSearchTerm(e.target.value)}
+                placeholder="ابحث بالاسم أو الرقم القومي أو المهنة..."
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl pr-10 pl-3 py-2 text-xs font-bold text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+
+            {/* List of available customers */}
+            <div className="flex-1 overflow-y-auto space-y-2 max-h-[46vh] pr-1">
+              {potentialCustomers
+                .filter((p) => {
+                  if (p.status === "تم_التحويل_لفاتورة") return false;
+                  if (prospectSearchTerm) {
+                    const term = prospectSearchTerm.toLowerCase();
+                    const nMatch = p.arabicName?.toLowerCase().includes(term);
+                    const nidMatch = p.nationalId?.includes(term);
+                    const pMatch = p.profession?.toLowerCase().includes(term);
+                    if (!nMatch && !nidMatch && !pMatch) return false;
+                  }
+                  return true;
+                })
+                .map((p) => {
+                  const isChecked = selectedProspectIds.includes(p.id);
+                  return (
+                    <div
+                      key={p.id}
+                      onClick={() => {
+                        setSelectedProspectIds((prev) =>
+                          prev.includes(p.id) ? prev.filter((id) => id !== p.id) : [...prev, p.id]
+                        );
+                      }}
+                      className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                        isChecked
+                          ? "bg-indigo-50/80 border-indigo-300 shadow-2xs"
+                          : "bg-slate-50/70 border-slate-200 hover:bg-slate-100/70"
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <button type="button" className="text-indigo-600">
+                          {isChecked ? <CheckSquare className="w-5 h-5" /> : <Square className="w-5 h-5 text-slate-300" />}
+                        </button>
+                        <div>
+                          <div className="font-bold text-xs text-slate-900 flex items-center gap-2">
+                            <span>{p.arabicName}</span>
+                            {p.documentType && (
+                              <span className="text-[10px] bg-white border border-slate-200 px-1.5 py-0.2 rounded-md text-slate-500 font-normal">
+                                {p.documentType === "شهادة_ميلاد" ? "📜 شهادة ميلاد" : "🆔 بطاقة رقم قومي"}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] font-mono text-slate-600 mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+                            <span>الرقم القومي: {p.nationalId}</span>
+                            {p.birthDate && <span>الميلاد: {p.birthDate}</span>}
+                            {p.profession && <span className="font-bold text-slate-800">المهنة: {p.profession}</span>}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-left shrink-0">
+                        <span className="text-[10px] font-bold text-indigo-700 bg-indigo-100/60 px-2 py-0.5 rounded-md">
+                          جاهز للإدراج
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+
+              {potentialCustomers.filter((p) => p.status !== "تم_التحويل_لفاتورة").length === 0 && (
+                <div className="text-center py-10 text-slate-400 space-y-2">
+                  <Users className="w-10 h-10 mx-auto text-slate-300" />
+                  <p className="font-bold text-xs text-slate-600">لا يوجد عملاء محتملون متاحون حالياً</p>
+                  <p className="text-[11px] text-slate-400">
+                    يمكنك تصوير مستندات العملاء (بطاقة أو شهادة ميلاد) بالضغط على "مسح بطاقة / شهادة ميلاد"
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-between border-t border-slate-150 pt-3">
+              <span className="text-xs text-slate-500 font-bold">
+                تم تحديد: {selectedProspectIds.length} عميل
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsSelectProspectModalOpen(false)}
+                  className="px-4 py-2 border border-slate-300 text-slate-700 hover:bg-slate-100 rounded-xl text-xs font-bold cursor-pointer"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="button"
+                  disabled={selectedProspectIds.length === 0}
+                  onClick={handleConfirmSelectProspects}
+                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md cursor-pointer transition-all"
+                >
+                  <Sparkles className="w-4 h-4 text-emerald-300" />
+                  <span>تأكيد إدراج بيانات العملاء المحددين ({selectedProspectIds.length})</span>
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* AI OCR Document Scanner Modal */}
+      <DocumentScannerModal
+        isOpen={isScannerOpen}
+        onClose={() => setIsScannerOpen(false)}
+        onSaveCustomer={(cust, useImmediately) => handleScannedCustomerDirect(cust, useImmediately)}
+        dictionary={dictionary}
+        applicantCapacities={applicantCapacityOptions}
+        allowDirectUse={true}
+      />
 
       {/* Embedded Thermal receipt rendering when active */}
       {printInvoice && (

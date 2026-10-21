@@ -12,7 +12,8 @@ dotenv.config();
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
-app.use(express.json());
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 // Initialize Gemini client if API key is available
 const geminiApiKey = process.env.GEMINI_API_KEY || "";
@@ -307,6 +308,9 @@ function readDB() {
     }
     if (!parsed.amanReport || !Array.isArray(parsed.amanReport)) {
       parsed.amanReport = [];
+    }
+    if (!parsed.potentialCustomers || !Array.isArray(parsed.potentialCustomers)) {
+      parsed.potentialCustomers = [];
     }
     return parsed;
   } catch (err) {
@@ -719,6 +723,74 @@ async function pushFinesDirectlyToSheet(db: any): Promise<boolean> {
   }
 }
 
+// Egyptian 14-digit National ID Parser & Age Calculator
+function parseEgyptianNationalId(nid: string) {
+  if (!nid) return null;
+  const clean = nid.replace(/[٠-٩]/g, d => "٠١٢٣٤٥٦٧٨٩".indexOf(d).toString()).replace(/\D/g, "");
+  if (clean.length !== 14) return null;
+  const century = parseInt(clean[0]);
+  const year = parseInt(clean.substring(1, 3));
+  const month = parseInt(clean.substring(3, 5));
+  const day = parseInt(clean.substring(5, 7));
+  const fullYear = (century === 2 ? 1900 : century === 3 ? 2000 : 1900) + year;
+  const mm = String(month).padStart(2, "0");
+  const dd = String(day).padStart(2, "0");
+  const birthDate = `${fullYear}-${mm}-${dd}`;
+  const gender = parseInt(clean[12]) % 2 === 1 ? "ذكر" : "أنثى";
+
+  const today = new Date();
+  let age = today.getFullYear() - fullYear;
+  const m = today.getMonth() - (month - 1);
+  if (m < 0 || (m === 0 && today.getDate() < day)) {
+    age--;
+  }
+
+  return { birthDate, gender, age, cleanNid: clean };
+}
+
+// Helper to directly push Potential Customers to Google Sheets
+async function pushPotentialCustomersDirectlyToSheet(db: any): Promise<boolean> {
+  const targetUrl = db.settings?.googleSheetWebhookUrl;
+  if (!targetUrl || !targetUrl.startsWith("http")) return false;
+
+  try {
+    const list = db.potentialCustomers || [];
+    const res = await fetch(targetUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        action: "push_potential_customers",
+        potentialCustomers: list,
+        db: { potentialCustomers: list }
+      }),
+      redirect: "follow",
+    });
+
+    const text = await res.text();
+    let result: any = null;
+    try {
+      result = JSON.parse(text);
+    } catch {}
+
+    if (text.includes("غير معروف") || text.includes("Unknown action") || (result && result.error && String(result.error).includes("غير معروف"))) {
+      await fetch(targetUrl, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({
+          action: "push",
+          db: db,
+          potentialCustomers: list
+        }),
+        redirect: "follow",
+      });
+    }
+    return true;
+  } catch (err: any) {
+    console.warn("Direct Google Sheet potential customers push notice:", err.message);
+    return false;
+  }
+}
+
 // User explicit requirement:
 // "عند عمل الفواتير التى تبدأ ب# قم بتسجيل البيانات المطلوب لورقة امان فى ورقة الشيت الخاصة بذلك
 // بحيث اى تعديل فى ورقة امان سواء حذف او ترحيل او استدعاء بيتم من الورقة المخصصة لشيت امان وليس من الفاتورة نفسها فى كل مرة"
@@ -839,6 +911,25 @@ app.post("/api/db/invoices", async (req, res) => {
   // User requirement: Automatically register services starting with # into Aman Report
   const amanModified = syncInvoiceToAmanReport(newInvoice, db);
 
+  // Automatically mark matching potential customers as converted to invoice
+  let potentialUpdated = false;
+  if (Array.isArray(db.potentialCustomers) && Array.isArray(newInvoice.customers)) {
+    newInvoice.customers.forEach((c: any) => {
+      const nid = (c.nationalId || "").trim();
+      const name = (c.arabicName || "").trim();
+      if (!nid && !name) return;
+      db.potentialCustomers.forEach((p: any) => {
+        if ((nid && p.nationalId === nid) || (name && p.arabicName === name)) {
+          if (p.status !== "تم_التحويل_لفاتورة") {
+            p.status = "تم_التحويل_لفاتورة";
+            p.invoiceId = newInvoice.invoiceId;
+            potentialUpdated = true;
+          }
+        }
+      });
+    });
+  }
+
   writeDB(db);
 
   // User explicit requirement: "الفواتير التى تنفذ يتم تسجيلها مباشرة على جوجل شيت وليس تسجيل محلى فقط"
@@ -847,6 +938,12 @@ app.post("/api/db/invoices", async (req, res) => {
   // User explicit requirement: "عند عمل الفواتير التى تبدأ ب# قم بتسجيل البيانات المطلوب لورقة امان فى ورقة الشيت الخاصة بذلك"
   if (amanModified) {
     await pushAmanDirectlyToSheet(db);
+  }
+
+  if (potentialUpdated) {
+    pushPotentialCustomersDirectlyToSheet(db).catch(err =>
+      console.warn("Background potential customers sheet push notice:", err.message)
+    );
   }
 
   res.json({ status: "success", invoice: newInvoice, sheetSynced: pushed });
@@ -877,14 +974,19 @@ app.put("/api/db/invoices/:id", async (req, res) => {
 
   writeDB(db);
 
-  // User explicit requirement: Record directly on Google Sheet
-  await pushInvoicesDirectlyToSheet(db);
+  // Return response immediately so frontend interactions are instantaneous
+  res.json({ status: "success", invoice: db.invoices[index] });
+
+  // Record directly on Google Sheet in background without delaying client response
+  pushInvoicesDirectlyToSheet(db).catch((err: any) =>
+    console.warn("Background invoices sheet push notice:", err.message)
+  );
 
   if (amanUpdated) {
-    await pushAmanDirectlyToSheet(db);
+    pushAmanDirectlyToSheet(db).catch((err: any) =>
+      console.warn("Background aman sheet push notice:", err.message)
+    );
   }
-
-  res.json({ status: "success", invoice: db.invoices[index] });
 });
 
 // 6. Delete invoice: Updates directly on Google Sheet
@@ -2580,6 +2682,267 @@ app.post("/api/db/settings", async (req, res) => {
     settings: db.settings,
     message: sheetSyncMessage ? `تم حفظ الإعدادات محلياً ${sheetSyncMessage}` : "تم حفظ إعدادات النظام بنجاح!"
   });
+});
+
+// ========================================================
+// 🎯 Potential Customers & AI Document OCR Endpoints
+// ========================================================
+
+// 1. AI Document Scanner (Egyptian National ID & Birth Certificate)
+app.post("/api/ocr/scan-document", async (req, res) => {
+  const { image, documentType } = req.body;
+  if (!image) {
+    return res.status(400).json({ error: "لم يتم استلام صورة المستند للمسح" });
+  }
+
+  let mimeType = "image/jpeg";
+  let base64Data = image;
+
+  if (image.startsWith("data:")) {
+    const parts = image.split(";base64,");
+    if (parts.length === 2) {
+      mimeType = parts[0].replace("data:", "").split(";")[0] || "image/jpeg";
+      base64Data = parts[1];
+    }
+  }
+
+  if (!ai) {
+    return res.status(503).json({
+      error: "ميزة المسح الذكي بالذكاء الاصطناعي تتطلب ضبط GEMINI_API_KEY بالخادم."
+    });
+  }
+
+  try {
+    let prompt = "";
+    if (documentType === "national_id_front") {
+      prompt = `أنت نظام ذكي رسمي لاستخراج البيانات من وجه بطاقة الرقم القومي المصرية (Egyptian National ID Card - Front).
+اقرأ البيانات واستخرج التالي وأرجعه حصراً بصيغة كائن JSON بدون أي ماركداون:
+{
+  "arabicName": "الاسم الرباعي أو الخماسي المكتوب باللغة العربية على البطاقة",
+  "nationalId": "الرقم القومي المكون من 14 رقماً بالضبط بأرقام إنجليزية (0-9)"
+}
+قواعد دقيقة:
+1. الرقم القومي 14 رقم بالضبط بدون مسافات.
+2. الاسم يجب أن يكون باللغة العربية كاملاً.`;
+    } else if (documentType === "national_id_back") {
+      prompt = `أنت نظام ذكي رسمي لاستخراج البيانات من ظهر بطاقة الرقم القومي المصرية (Egyptian National ID Card - Back).
+اقرأ المهنة والوظيفة المكتوبة بخلف البطاقة المصرية واستخرجها وأرجع كائن JSON حصراً:
+{
+  "profession": "المهنة أو الوظيفة المكتوبة باللغة العربية بحد أقصى 32 حرف (مثل: حاصل على بكالوريوس تجارة، مهندس، ربة منزل، محاسب، طالب، عامل، مدرس، طبيب، سائق، بدون عمل، إلخ)"
+}`;
+    } else if (documentType === "birth_certificate") {
+      prompt = `أنت نظام ذكي رسمي لاستخراج البيانات من شهادة الميلاد المصرية المميكنة (Egyptian Birth Certificate).
+اقرأ البيانات واستخرج التالي وأرجع كائن JSON حصراً:
+{
+  "arabicName": "الاسم الكامل للمولود باللغة العربية",
+  "nationalId": "الرقم القومي للمولود المكون من 14 رقماً بالضبط بأرقام إنجليزية (0-9)",
+  "birthDate": "تاريخ الميلاد بصيغة YYYY-MM-DD"
+}
+قواعد:
+1. استخرج الاسم والرقم القومي 14 رقم بدقة.`;
+    } else {
+      prompt = `أنت قارئ مستندات رسمي مصري (بطاقة رقم قومي أو شهادة ميلاد). استخرج الاسم والرقم القومي والمهنة إن وجدت وأرجع كائن JSON:
+{
+  "arabicName": "الاسم بالعربي",
+  "nationalId": "الرقم القومي 14 رقم",
+  "profession": "المهنة إن وجدت"
+}`;
+    }
+
+    const imagePart = {
+      inlineData: {
+        mimeType: mimeType || "image/jpeg",
+        data: base64Data
+      }
+    };
+    const textPart = { text: prompt };
+
+    const aiResponse = await ai.models.generateContent({
+      model: "gemini-3.8-flash",
+      contents: { parts: [imagePart, textPart] }
+    });
+
+    const rawText = aiResponse.text || "{}";
+    let extracted: any = {};
+    try {
+      const cleanJson = rawText.replace(/```(?:json)?\n?/gi, "").replace(/```/g, "").trim();
+      extracted = JSON.parse(cleanJson);
+    } catch {
+      const nameMatch = rawText.match(/"arabicName"\s*:\s*"([^"]+)"/);
+      const nidMatch = rawText.match(/"nationalId"\s*:\s*"([^"]+)"/);
+      const profMatch = rawText.match(/"profession"\s*:\s*"([^"]+)"/);
+      extracted = {
+        arabicName: nameMatch ? nameMatch[1] : "",
+        nationalId: nidMatch ? nidMatch[1] : "",
+        profession: profMatch ? profMatch[1] : ""
+      };
+    }
+
+    // Clean up National ID
+    if (extracted.nationalId) {
+      extracted.nationalId = String(extracted.nationalId)
+        .replace(/[٠-٩]/g, (d: string) => "٠١٢٣٤٥٦٧٨٩".indexOf(d).toString())
+        .replace(/\D/g, "");
+    }
+
+    // Extract exact birth date and age from 14-digit Egyptian National ID
+    if (extracted.nationalId && extracted.nationalId.length === 14) {
+      const nidInfo = parseEgyptianNationalId(extracted.nationalId);
+      if (nidInfo) {
+        extracted.birthDate = nidInfo.birthDate;
+        extracted.calculatedAge = nidInfo.age;
+        extracted.gender = nidInfo.gender;
+        
+        // As per user specification for birth certificate:
+        // "وكذلك عند تصوير شهادة الميلاد يقوم النظام بقراءة الاسم والرقم القومى وتدوين المهنة اما طالب او طفل"
+        if (documentType === "birth_certificate") {
+          extracted.profession = nidInfo.age >= 6 ? "طالب" : "طفل";
+        }
+      }
+    } else if (documentType === "birth_certificate" && (!extracted.profession || !extracted.profession.trim())) {
+      extracted.profession = "طالب";
+    }
+
+    res.json({
+      status: "success",
+      extracted,
+      documentType,
+      message: "تم استخراج البيانات بنجاح بواسطة الذكاء الاصطناعي ✨"
+    });
+  } catch (err: any) {
+    console.error("AI OCR Document Scanner Error:", err);
+    res.status(500).json({ error: "فشل استخراج البيانات من المستند: " + err.message });
+  }
+});
+
+// 2. GET all potential customers
+app.get("/api/db/potential-customers", (req, res) => {
+  const db = readDB();
+  res.json({
+    status: "success",
+    potentialCustomers: db.potentialCustomers || []
+  });
+});
+
+// 3. POST save potential customer(s)
+app.post("/api/db/potential-customers", async (req, res) => {
+  const { customer, customers, syncWithSheets } = req.body;
+  const db = readDB();
+  db.potentialCustomers = db.potentialCustomers || [];
+
+  const itemsToAdd: any[] = [];
+  if (customer && typeof customer === "object") {
+    itemsToAdd.push(customer);
+  }
+  if (Array.isArray(customers)) {
+    itemsToAdd.push(...customers);
+  }
+
+  const added: any[] = [];
+  for (const item of itemsToAdd) {
+    const newId = item.id || `prospect-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const newItem = {
+      ...item,
+      id: newId,
+      createdAt: item.createdAt || new Date().toISOString().split("T")[0],
+      status: item.status || "جديد"
+    };
+    db.potentialCustomers.unshift(newItem);
+    added.push(newItem);
+  }
+
+  writeDB(db);
+
+  if (syncWithSheets) {
+    pushPotentialCustomersDirectlyToSheet(db).catch(err =>
+      console.warn("Background potential customers sheet push notice:", err.message)
+    );
+  }
+
+  res.json({
+    status: "success",
+    potentialCustomers: db.potentialCustomers,
+    added,
+    message: `تم حفظ ${added.length} من العملاء المحتملين بنجاح!`
+  });
+});
+
+// 4. PUT update potential customer
+app.put("/api/db/potential-customers/:id", async (req, res) => {
+  const { id } = req.params;
+  const updateData = req.body;
+  const db = readDB();
+  db.potentialCustomers = db.potentialCustomers || [];
+
+  const idx = db.potentialCustomers.findIndex((c: any) => c.id === id);
+  if (idx === -1) {
+    return res.status(404).json({ error: "العميل المحتمل غير موجود" });
+  }
+
+  db.potentialCustomers[idx] = {
+    ...db.potentialCustomers[idx],
+    ...updateData,
+    id
+  };
+
+  writeDB(db);
+
+  pushPotentialCustomersDirectlyToSheet(db).catch(err =>
+    console.warn("Background potential customers sheet push notice:", err.message)
+  );
+
+  res.json({
+    status: "success",
+    potentialCustomer: db.potentialCustomers[idx],
+    potentialCustomers: db.potentialCustomers,
+    message: "تم تحديث بيانات العميل المحتمل بنجاح"
+  });
+});
+
+// 5. DELETE potential customer
+app.delete("/api/db/potential-customers/:id", async (req, res) => {
+  const { id } = req.params;
+  const db = readDB();
+  db.potentialCustomers = db.potentialCustomers || [];
+
+  db.potentialCustomers = db.potentialCustomers.filter((c: any) => c.id !== id);
+  writeDB(db);
+
+  pushPotentialCustomersDirectlyToSheet(db).catch(err =>
+    console.warn("Background potential customers sheet push notice:", err.message)
+  );
+
+  res.json({
+    status: "success",
+    potentialCustomers: db.potentialCustomers,
+    message: "تم حذف العميل المحتمل بنجاح"
+  });
+});
+
+// 6. Direct Webhook Sync Potential Customers to Google Sheet
+app.post("/api/sheets/webhook/sync-potential-customers", async (req, res) => {
+  const { webhookUrl, potentialCustomers } = req.body;
+  const db = readDB();
+  const targetUrl = webhookUrl || db.settings?.googleSheetWebhookUrl;
+
+  if (!targetUrl || !targetUrl.startsWith("http")) {
+    return res.status(400).json({ error: "الرجاء إدخال رابط سكربت Webhook صالح أولاً في قسم إعدادات جوجل شيت." });
+  }
+
+  try {
+    if (Array.isArray(potentialCustomers)) {
+      db.potentialCustomers = potentialCustomers;
+      writeDB(db);
+    }
+    const synced = await pushPotentialCustomersDirectlyToSheet(db);
+    res.json({
+      status: "success",
+      synced,
+      message: `تم حفظ ومزامنة ورقة (العملاء المحتملين) بجوجل شيت بنجاح! 📑✅`
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: "فشل إرسال العملاء المحتملين إلى السكربت: " + err.message });
+  }
 });
 
 // Vite Middleware Integration for Dev / Static Asset Server for Production

@@ -143,3 +143,22 @@ export interface AmanPostponedItem {
   fineAmount?: number;
   status?: "مؤجل" | "تم_الإدراج";
 }
+
+export interface PotentialCustomer {
+  id: string;
+  arabicName: string;
+  englishName?: string;
+  nationalId: string;
+  birthDate: string;
+  profession: string;
+  documentType: "بطاقة_رقم_قومي" | "شهادة_ميلاد" | "يدوي";
+  createdAt: string;
+  status: "جديد" | "تم_التحويل_لفاتورة";
+  invoiceId?: number;
+  phone?: string;
+  applicantCapacity?: string;
+  notes?: string;
+  cardFrontImage?: string; // base64 preview
+  cardBackImage?: string; // base64 preview
+}
+
