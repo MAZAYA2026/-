@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { Camera, Upload, RefreshCw, CheckCircle2, AlertCircle, X, Sparkles, User, FileText, ArrowRight, ShieldCheck, HelpCircle, Smartphone, Video } from "lucide-react";
+import { Camera, Upload, RefreshCw, CheckCircle2, AlertCircle, X, Sparkles, User, FileText, ArrowRight, ShieldCheck, HelpCircle, Video } from "lucide-react";
 import { scanDocumentWithAI } from "../lib/api";
 import { PotentialCustomer, DictionaryItem, DEFAULT_APPLICANT_CAPACITIES } from "../types";
 import { breakdownArabicName } from "../lib/dictionary";
@@ -85,8 +85,7 @@ export default function DocumentScannerModal({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  // Dedicated Native Camera & File Pickers
-  const nativeCameraInputRef = useRef<HTMLInputElement | null>(null);
+  // File picker ref (for optional file/gallery upload)
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Scanned Images previews
@@ -109,14 +108,13 @@ export default function DocumentScannerModal({
   const [applicantCapacity, setApplicantCapacity] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
 
-  // Start Live WebRTC Camera (with multi-stage mobile & browser fallback)
+  // Start Live WebRTC Camera (Prioritized as requested: live camera broadcast is best)
   const startCamera = async () => {
     setCameraError(null);
 
-    // If mediaDevices is not supported by browser / webview / insecure context, trigger native camera directly
     if (!navigator?.mediaDevices?.getUserMedia) {
-      setCameraError("متصفح الموبايل لا يدعم البث المباشر داخل الصفحة، يتم الآن فتح كاميرا الهاتف مباشرة... 📷");
-      nativeCameraInputRef.current?.click();
+      setCameraError("متصفح الموبايل لا يدعم البث المباشر داخل الصفحة. يرجى التأكد من تشغيل الرابط عبر اتصال آمن (HTTPS) أو اختيار صورة من الملفات.");
+      setUseCamera(false);
       return;
     }
 
@@ -146,12 +144,8 @@ export default function DocumentScannerModal({
       setUseCamera(true);
     } catch (err: any) {
       console.warn("Live camera access failed:", err);
-      setCameraError("تعذر تشغيل بث الكاميرا داخل المتصفح. يمكنك الضغط على (فتح كاميرا الهاتف) أدناه للتصوير المباشر بدقة عالية 📷");
+      setCameraError("تعذر تشغيل بث الكاميرا المباشر. يرجى التأكد من إعطاء إذن الكاميرا للمتصفح، أو رفع صورة من الملفات.");
       setUseCamera(false);
-      // Auto-trigger native camera capture so user gets camera immediately
-      setTimeout(() => {
-        nativeCameraInputRef.current?.click();
-      }, 300);
     }
   };
 
@@ -175,11 +169,14 @@ export default function DocumentScannerModal({
     setUseCamera(false);
   };
 
+  // Automatically start live camera broadcast when modal opens (user preferred mode)
   useEffect(() => {
     if (!isOpen) {
       stopCamera();
+    } else if (idStep !== "verify") {
+      startCamera();
     }
-  }, [isOpen]);
+  }, [isOpen, idStep]);
 
   // Capture snapshot from live video
   const capturePhoto = async (): Promise<string | null> => {
@@ -193,25 +190,6 @@ export default function DocumentScannerModal({
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     const rawData = canvas.toDataURL("image/jpeg", 0.9);
     return await optimizeImageForOcr(rawData, 1600, 0.85);
-  };
-
-  // Handle Native Mobile Camera Capture (uses native device camera app)
-  const handleNativeCameraCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      setIsScanning(true);
-      setScanMessage("جاري تجهيز وتحسين جودة الصورة الملتقطة من الكاميرا... 📷");
-      const optimizedBase64 = await optimizeImageForOcr(file, 1600, 0.85);
-      if (optimizedBase64) {
-        processCapturedImage(optimizedBase64);
-      }
-    } catch (err: any) {
-      setErrorNotice("فشل قراءة صورة الكاميرا: " + (err.message || "حدث خطأ"));
-      setIsScanning(false);
-    } finally {
-      e.target.value = "";
-    }
   };
 
   // Handle File Input Selection
@@ -505,17 +483,17 @@ export default function DocumentScannerModal({
                 <div>
                   <p className="font-bold">{cameraError}</p>
                   <p className="text-[11px] text-amber-800 mt-0.5">
-                    يمكنك تشغيل كاميرا هاتفك والتقاط الصورة فوراً بالضغط على الزر أدناه ⬇️
+                    تأكد من إعطاء إذن الكاميرا للمتصفح، أو ارفع صورة المستند من ملفاتك مباشرة.
                   </p>
                 </div>
               </div>
               <button
                 type="button"
-                onClick={() => nativeCameraInputRef.current?.click()}
-                className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 self-end sm:self-center cursor-pointer shadow-xs shrink-0"
+                onClick={startCamera}
+                className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 self-end sm:self-center cursor-pointer shadow-xs shrink-0"
               >
-                <Camera className="w-3.5 h-3.5" />
-                <span>فتح كاميرا الهاتف 📷</span>
+                <Video className="w-3.5 h-3.5" />
+                <span>إعادة تشغيل البث 🎥</span>
               </button>
             </div>
           )}
@@ -540,11 +518,11 @@ export default function DocumentScannerModal({
                   </div>
                 ) : useCamera ? (
                   <div className="w-full flex flex-col items-center space-y-3">
-                    <div className="relative w-full max-w-md rounded-xl overflow-hidden border border-slate-300 bg-black aspect-video flex items-center justify-center shadow-inner">
+                    <div className="relative w-full max-w-md rounded-2xl overflow-hidden border-2 border-indigo-400 bg-black aspect-video flex items-center justify-center shadow-lg">
                       <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
                       {/* Guide overlay outline for ID card */}
-                      <div className="absolute inset-4 border-2 border-dashed border-white/60 rounded-lg pointer-events-none flex items-center justify-center">
-                        <span className="text-[11px] text-white/90 bg-black/50 px-2 py-0.5 rounded-md">
+                      <div className="absolute inset-4 border-2 border-dashed border-emerald-400/90 rounded-xl pointer-events-none flex items-center justify-center">
+                        <span className="text-[11px] font-bold text-white bg-slate-900/80 px-2.5 py-1 rounded-lg border border-white/20 shadow-xs">
                           ضع {flow === "birth_certificate" ? "شهادة الميلاد" : (idStep === "front" ? "وجه البطاقة" : "ظهر البطاقة")} داخل الإطار
                         </span>
                       </div>
@@ -554,18 +532,18 @@ export default function DocumentScannerModal({
                       <button
                         type="button"
                         onClick={handleCaptureClick}
-                        className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-md cursor-pointer transition-all"
+                        className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white rounded-xl text-sm font-black flex items-center gap-2 shadow-md cursor-pointer transition-all"
                       >
-                        <Camera className="w-4 h-4" />
+                        <Camera className="w-5 h-5 text-emerald-300" />
                         <span>📸 التقاط الصورة الآن</span>
                       </button>
 
                       <button
                         type="button"
                         onClick={stopCamera}
-                        className="px-3 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
+                        className="px-3.5 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
                       >
-                        إلغاء الكاميرا
+                        إيقاف الكاميرا
                       </button>
                     </div>
                   </div>
@@ -593,50 +571,26 @@ export default function DocumentScannerModal({
                     </div>
 
                     {/* Camera and Upload Options */}
-                    <div className="flex flex-col items-center gap-3 pt-2 w-full">
-                      {/* Primary Button for Mobile */}
+                    <div className="flex flex-col sm:flex-row items-center justify-center gap-2.5 pt-2 w-full">
                       <button
                         type="button"
-                        onClick={() => nativeCameraInputRef.current?.click()}
-                        className="w-full px-5 py-3.5 bg-indigo-600 hover:bg-indigo-700 active:scale-98 text-white rounded-2xl text-xs sm:text-sm font-black flex items-center justify-center gap-2.5 shadow-md shadow-indigo-600/20 cursor-pointer transition-all"
-                        title="فتح كاميرا الموبايل والتقاط صورة واضحة مباشرة"
+                        onClick={startCamera}
+                        className="w-full sm:w-auto px-5 py-3 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 shadow-md shadow-indigo-600/20 cursor-pointer transition-all"
+                        title="فتح بث كاميرا الموبايل المباشر داخل المتصفح"
                       >
-                        <Smartphone className="w-5 h-5 text-emerald-300" />
-                        <span>📸 تصوير بكاميرا الهاتف مباشرة (موصى به للموبايل)</span>
+                        <Video className="w-4 h-4 text-emerald-300" />
+                        <span>🎥 تشغيل بث الكاميرا المباشر</span>
                       </button>
 
-                      {/* Secondary Options: Live webcam & File upload */}
-                      <div className="flex flex-wrap items-center justify-center gap-2 w-full">
-                        <button
-                          type="button"
-                          onClick={startCamera}
-                          className="flex-1 min-w-[150px] px-3.5 py-2.5 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs cursor-pointer transition-all"
-                          title="فتح بث كاميرا الويب المباشر داخل المتصفح"
-                        >
-                          <Video className="w-4 h-4 text-emerald-400" />
-                          <span>🎥 بث الكاميرا المباشر</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => fileInputRef.current?.click()}
-                          className="flex-1 min-w-[150px] px-3.5 py-2.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer transition-all"
-                          title="اختيار صورة تم تصويرها مسبقاً من الاستوديو أو الملفات"
-                        >
-                          <Upload className="w-4 h-4 text-indigo-600" />
-                          <span>📁 صورة من المعرض / الملفات</span>
-                        </button>
-                      </div>
-
-                      {/* Hidden native camera capture input */}
-                      <input
-                        ref={nativeCameraInputRef}
-                        type="file"
-                        accept="image/*"
-                        capture="environment"
-                        onChange={handleNativeCameraCapture}
-                        className="hidden"
-                      />
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="w-full sm:w-auto px-4 py-3 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer transition-all"
+                        title="اختيار صورة تم تصويرها مسبقاً من الاستوديو أو الملفات"
+                      >
+                        <Upload className="w-4 h-4 text-indigo-600" />
+                        <span>📁 صورة من المعرض / الملفات</span>
+                      </button>
 
                       {/* Hidden regular file picker input */}
                       <input

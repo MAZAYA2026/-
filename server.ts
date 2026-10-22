@@ -2778,10 +2778,42 @@ app.post("/api/ocr/scan-document", async (req, res) => {
     };
     const textPart = { text: prompt };
 
-    const aiResponse = await ai.models.generateContent({
-      model: "gemini-3.8-flash",
-      contents: { parts: [imagePart, textPart] }
-    });
+    // Robust Gemini OCR call with automatic retry and model fallback to handle temporary 503 / UNAVAILABLE spikes
+    const candidateModels = ["gemini-3.8-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"];
+    let aiResponse: any = null;
+    let lastError: any = null;
+
+    for (const modelName of candidateModels) {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          aiResponse = await ai.models.generateContent({
+            model: modelName,
+            contents: { parts: [imagePart, textPart] }
+          });
+          if (aiResponse && aiResponse.text) {
+            break;
+          }
+        } catch (err: any) {
+          lastError = err;
+          const errMsg = err?.message || JSON.stringify(err);
+          const isTransient = errMsg.includes("503") || errMsg.includes("UNAVAILABLE") || errMsg.includes("429") || errMsg.includes("high demand");
+          if (isTransient && attempt === 0) {
+            console.warn(`[OCR Retry] ${modelName} encountered spike (503/429), retrying in 750ms...`);
+            await new Promise((r) => setTimeout(r, 750));
+            continue;
+          }
+          console.warn(`[OCR Fallback] ${modelName} unavailable, switching to next candidate model...`, err?.message || err);
+          break;
+        }
+      }
+      if (aiResponse && aiResponse.text) {
+        break;
+      }
+    }
+
+    if (!aiResponse || !aiResponse.text) {
+      throw lastError || new Error("تعذر قراءة المستند حالياً بسبب ضغط مؤقت على الخدمة، يرجى إعادة المحاولة.");
+    }
 
     const rawText = aiResponse.text || "{}";
     let extracted: any = {};
