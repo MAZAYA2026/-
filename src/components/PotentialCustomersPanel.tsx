@@ -300,9 +300,10 @@ export default function PotentialCustomersPanel({
             type="button"
             onClick={() => setIsScannerOpen(true)}
             className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-md hover:shadow-indigo-500/20 transition-all cursor-pointer"
+            title="فتح الكاميرا ومسح البطاقة الشخصية أو شهادة الميلاد بالذكاء الاصطناعي"
           >
             <Camera className="w-4 h-4 text-emerald-300" />
-            <span>📸 مسح مستند ذكي (OCR)</span>
+            <span>📸 تصوير / مسح مستند ذكي</span>
           </button>
 
           <button

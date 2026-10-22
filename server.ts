@@ -885,6 +885,27 @@ app.post("/api/db/invoices", async (req, res) => {
   const db = readDB();
   const invoiceData = req.body;
   
+  // Server-side duplicate suppression: prevent accidental rapid double-posting
+  if (Array.isArray(db.invoices) && db.invoices.length > 0) {
+    const recentInvoice = db.invoices[db.invoices.length - 1];
+    const isSameEmployee = recentInvoice.employeeName === invoiceData.employeeName;
+    const isSameTotal = Number(recentInvoice.totalAmount) === Number(invoiceData.totalAmount);
+    const recentCustCount = recentInvoice.customers?.length || 0;
+    const newCustCount = invoiceData.customers?.length || 0;
+
+    if (isSameEmployee && isSameTotal && recentCustCount === newCustCount && newCustCount > 0) {
+      const firstRecent = recentInvoice.customers[0];
+      const firstNew = invoiceData.customers[0];
+      const isSameName = (firstRecent?.arabicName || "").trim() === (firstNew?.arabicName || "").trim();
+      const isSameNid = (firstRecent?.nationalId || "").trim() === (firstNew?.nationalId || "").trim();
+
+      if (isSameName && isSameNid) {
+        console.warn(`[Duplicate Suppressed] Ignored duplicate invoice submission for customer ${firstNew?.arabicName}, returning existing invoice #${recentInvoice.invoiceId}`);
+        return res.json({ status: "success", invoice: recentInvoice, isDuplicateSuppressed: true, sheetSynced: true });
+      }
+    }
+  }
+
   // Calculate next invoice ID
   const nextInvoiceId = db.invoices.length > 0 
     ? Math.max(...db.invoices.map((inv: any) => inv.invoiceId)) + 1 

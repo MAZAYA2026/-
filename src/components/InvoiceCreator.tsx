@@ -5,7 +5,7 @@ import { calculateWorkingDaysDeliveryDate, getArabicDayName, isNonWorkingDay, re
 import { generateWhatsAppWelcomeMessage, getWhatsAppUrl } from "../lib/whatsapp";
 import { breakdownArabicName, extractAtomicWordTokens, normalizeArabic } from "../lib/dictionary";
 import { playLanguageWarningSound } from "../lib/audio";
-import { Plus, Trash2, FileText, UserPlus, Sparkles, Printer, Send, Check, AlertCircle, Info, Calendar, BookOpen, ShieldAlert, CalendarCheck, AlertTriangle, Volume2, Users, Camera, CheckSquare, Square, Search, X } from "lucide-react";
+import { Plus, Trash2, FileText, UserPlus, Sparkles, Printer, Send, Check, AlertCircle, Info, Calendar, BookOpen, ShieldAlert, CalendarCheck, AlertTriangle, Volume2, Users, Camera, CheckSquare, Square, Search, X, RefreshCw } from "lucide-react";
 import ThermalReceipt from "./ThermalReceipt";
 import DocumentScannerModal from "./DocumentScannerModal";
 
@@ -42,6 +42,10 @@ export default function InvoiceCreator({
   const [customers, setCustomers] = useState<CustomerInput[]>([createEmptyCustomer()]);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
+
+  // Double-click and duplicate submission prevention locks
+  const isSubmittingRef = useRef<boolean>(false);
+  const lastSubmitTimeRef = useRef<number>(0);
   
   // Potential Customers modal & AI OCR scanner states
   const [isScannerOpen, setIsScannerOpen] = useState(false);
@@ -605,9 +609,17 @@ export default function InvoiceCreator({
     return isValid;
   };
 
-  // Submit invoice to database
+  // Submit invoice to database (protected against accidental double-clicks)
   const handleSubmitInvoice = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Prevent double clicking, dual submission, or rapid re-triggering
+    const now = Date.now();
+    if (isSubmittingRef.current || loading || now - lastSubmitTimeRef.current < 2000) {
+      console.warn("Duplicate invoice submission attempt blocked.");
+      return;
+    }
+
     if (!validateForm()) {
       // scroll to errors
       const firstError = Object.keys(errors)[0];
@@ -617,6 +629,8 @@ export default function InvoiceCreator({
       return;
     }
 
+    isSubmittingRef.current = true;
+    lastSubmitTimeRef.current = now;
     setLoading(true);
 
     try {
@@ -727,6 +741,10 @@ export default function InvoiceCreator({
       alert("حدث خطأ أثناء حفظ الفاتورة بالخادم، يرجى المحاولة لاحقاً.");
     } finally {
       setLoading(false);
+      // Keep safety lock active for 1.5 seconds after saving to absorb rapid clicks
+      setTimeout(() => {
+        isSubmittingRef.current = false;
+      }, 1500);
     }
   };
 
@@ -1662,10 +1680,24 @@ export default function InvoiceCreator({
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-800 text-white font-extrabold font-cairo text-sm py-3 px-4 rounded-xl flex items-center justify-center gap-2 shadow-md transition-all pt-2.5"
+              className={`w-full font-extrabold font-cairo text-sm py-3.5 px-4 rounded-xl flex items-center justify-center gap-2 shadow-md transition-all pt-2.5 ${
+                loading
+                  ? "bg-emerald-800 text-emerald-200 cursor-not-allowed opacity-75 pointer-events-none"
+                  : "bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer active:scale-98"
+              }`}
+              title={loading ? "جاري المعالجة، يرجى الانتظار..." : "حفظ الفاتورة الحالية وإصدار الإيصال"}
             >
-              <FileText className="w-5 h-5" />
-              {loading ? "جاري الحفظ والترجمة..." : "حفظ الفاتورة وإنتاج الإيصال 💾"}
+              {loading ? (
+                <>
+                  <RefreshCw className="w-5 h-5 animate-spin text-emerald-300" />
+                  <span>جاري الحفظ وإصدار الإيصال...</span>
+                </>
+              ) : (
+                <>
+                  <FileText className="w-5 h-5" />
+                  <span>حفظ الفاتورة وإنتاج الإيصال 💾</span>
+                </>
+              )}
             </button>
           </div>
 

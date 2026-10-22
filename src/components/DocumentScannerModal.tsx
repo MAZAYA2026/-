@@ -1,8 +1,59 @@
 import React, { useState, useRef, useEffect } from "react";
-import { Camera, Upload, RefreshCw, CheckCircle2, AlertCircle, X, Sparkles, User, FileText, ArrowRight, ShieldCheck, HelpCircle } from "lucide-react";
+import { Camera, Upload, RefreshCw, CheckCircle2, AlertCircle, X, Sparkles, User, FileText, ArrowRight, ShieldCheck, HelpCircle, Smartphone, Video } from "lucide-react";
 import { scanDocumentWithAI } from "../lib/api";
 import { PotentialCustomer, DictionaryItem, DEFAULT_APPLICANT_CAPACITIES } from "../types";
 import { breakdownArabicName } from "../lib/dictionary";
+
+// Client-side image optimizer: downscales large smartphone photos (e.g. 10MB) to crisp 1600px
+// This ensures lightning-fast upload over mobile connections and 100% accurate OCR readability.
+async function optimizeImageForOcr(fileOrBase64: File | string, maxDimension = 1600, quality = 0.85): Promise<string> {
+  return new Promise((resolve) => {
+    const processImg = (img: HTMLImageElement) => {
+      try {
+        let { width, height } = img;
+        if (width > maxDimension || height > maxDimension) {
+          if (width > height) {
+            height = Math.round((height * maxDimension) / width);
+            width = maxDimension;
+          } else {
+            width = Math.round((width * maxDimension) / height);
+            height = maxDimension;
+          }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          resolve(typeof fileOrBase64 === "string" ? fileOrBase64 : "");
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      } catch (e) {
+        console.warn("Canvas compression failed, returning original image", e);
+        resolve(typeof fileOrBase64 === "string" ? fileOrBase64 : "");
+      }
+    };
+
+    const img = new Image();
+    img.onload = () => processImg(img);
+    img.onerror = () => {
+      resolve(typeof fileOrBase64 === "string" ? fileOrBase64 : "");
+    };
+
+    if (typeof fileOrBase64 === "string") {
+      img.src = fileOrBase64;
+    } else {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        img.src = (e.target?.result as string) || "";
+      };
+      reader.onerror = () => resolve("");
+      reader.readAsDataURL(fileOrBase64);
+    }
+  });
+}
 
 interface DocumentScannerModalProps {
   isOpen: boolean;
@@ -30,8 +81,13 @@ export default function DocumentScannerModal({
   // Media / Camera State
   const [useCamera, setUseCamera] = useState<boolean>(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [activeStream, setActiveStream] = useState<MediaStream | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+
+  // Dedicated Native Camera & File Pickers
+  const nativeCameraInputRef = useRef<HTMLInputElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Scanned Images previews
   const [frontImage, setFrontImage] = useState<string | null>(null);
@@ -53,29 +109,61 @@ export default function DocumentScannerModal({
   const [applicantCapacity, setApplicantCapacity] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
 
-  // Start Camera
+  // Start Live WebRTC Camera (with multi-stage mobile & browser fallback)
   const startCamera = async () => {
     setCameraError(null);
+
+    // If mediaDevices is not supported by browser / webview / insecure context, trigger native camera directly
+    if (!navigator?.mediaDevices?.getUserMedia) {
+      setCameraError("متصفح الموبايل لا يدعم البث المباشر داخل الصفحة، يتم الآن فتح كاميرا الهاتف مباشرة... 📷");
+      nativeCameraInputRef.current?.click();
+      return;
+    }
+
     try {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop());
       }
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
-        audio: false,
-      });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play();
+
+      let stream: MediaStream | null = null;
+      // 1. Try rear environment camera
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "environment" } },
+          audio: false,
+        });
+      } catch (err1) {
+        console.warn("First getUserMedia attempt failed, falling back to simple video:", err1);
+        // 2. Try generic video constraint if environment constraint was rejected
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: false,
+        });
       }
+
+      streamRef.current = stream;
+      setActiveStream(stream);
       setUseCamera(true);
     } catch (err: any) {
-      console.warn("Camera access failed:", err);
-      setCameraError("تعذر تشغيل الكاميرا (يرجى التأكد من إعطاء الإذن أو اختيار رفع صورة من الملفات).");
+      console.warn("Live camera access failed:", err);
+      setCameraError("تعذر تشغيل بث الكاميرا داخل المتصفح. يمكنك الضغط على (فتح كاميرا الهاتف) أدناه للتصوير المباشر بدقة عالية 📷");
       setUseCamera(false);
+      // Auto-trigger native camera capture so user gets camera immediately
+      setTimeout(() => {
+        nativeCameraInputRef.current?.click();
+      }, 300);
     }
   };
+
+  // Attach active video stream once the video element is mounted in DOM
+  useEffect(() => {
+    if (useCamera && activeStream && videoRef.current) {
+      videoRef.current.srcObject = activeStream;
+      videoRef.current.play().catch((err) => {
+        console.warn("Video auto-play warning:", err);
+      });
+    }
+  }, [useCamera, activeStream]);
 
   // Stop Camera
   const stopCamera = () => {
@@ -83,6 +171,7 @@ export default function DocumentScannerModal({
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     }
+    setActiveStream(null);
     setUseCamera(false);
   };
 
@@ -92,30 +181,56 @@ export default function DocumentScannerModal({
     }
   }, [isOpen]);
 
-  // Capture snapshot from video
-  const capturePhoto = (): string | null => {
+  // Capture snapshot from live video
+  const capturePhoto = async (): Promise<string | null> => {
     if (!videoRef.current) return null;
     const video = videoRef.current;
     const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 480;
+    canvas.width = video.videoWidth || 1280;
+    canvas.height = video.videoHeight || 720;
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL("image/jpeg", 0.9);
+    const rawData = canvas.toDataURL("image/jpeg", 0.9);
+    return await optimizeImageForOcr(rawData, 1600, 0.85);
+  };
+
+  // Handle Native Mobile Camera Capture (uses native device camera app)
+  const handleNativeCameraCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setIsScanning(true);
+      setScanMessage("جاري تجهيز وتحسين جودة الصورة الملتقطة من الكاميرا... 📷");
+      const optimizedBase64 = await optimizeImageForOcr(file, 1600, 0.85);
+      if (optimizedBase64) {
+        processCapturedImage(optimizedBase64);
+      }
+    } catch (err: any) {
+      setErrorNotice("فشل قراءة صورة الكاميرا: " + (err.message || "حدث خطأ"));
+      setIsScanning(false);
+    } finally {
+      e.target.value = "";
+    }
   };
 
   // Handle File Input Selection
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const base64 = reader.result as string;
-      processCapturedImage(base64);
-    };
-    reader.readAsDataURL(file);
-    e.target.value = "";
+    try {
+      setIsScanning(true);
+      setScanMessage("جاري تجهيز الصورة ومعالجتها للذكاء الاصطناعي... 🖼️");
+      const optimizedBase64 = await optimizeImageForOcr(file, 1600, 0.85);
+      if (optimizedBase64) {
+        processCapturedImage(optimizedBase64);
+      }
+    } catch (err: any) {
+      setErrorNotice("فشل قراءة الملف: " + (err.message || "حدث خطأ"));
+      setIsScanning(false);
+    } finally {
+      e.target.value = "";
+    }
   };
 
   // Auto-translate Arabic Name using Dictionary
@@ -214,8 +329,8 @@ export default function DocumentScannerModal({
     }
   };
 
-  const handleCaptureClick = () => {
-    const photo = capturePhoto();
+  const handleCaptureClick = async () => {
+    const photo = await capturePhoto();
     if (photo) {
       processCapturedImage(photo);
     }
@@ -384,9 +499,24 @@ export default function DocumentScannerModal({
 
           {/* Camera Error banner */}
           {cameraError && (
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-              <span>{cameraError}</span>
+            <div className="p-3.5 bg-amber-50 border border-amber-300 rounded-2xl text-xs text-amber-950 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-bold">{cameraError}</p>
+                  <p className="text-[11px] text-amber-800 mt-0.5">
+                    يمكنك تشغيل كاميرا هاتفك والتقاط الصورة فوراً بالضغط على الزر أدناه ⬇️
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => nativeCameraInputRef.current?.click()}
+                className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 self-end sm:self-center cursor-pointer shadow-xs shrink-0"
+              >
+                <Camera className="w-3.5 h-3.5" />
+                <span>فتح كاميرا الهاتف 📷</span>
+              </button>
             </div>
           )}
 
@@ -411,7 +541,7 @@ export default function DocumentScannerModal({
                 ) : useCamera ? (
                   <div className="w-full flex flex-col items-center space-y-3">
                     <div className="relative w-full max-w-md rounded-xl overflow-hidden border border-slate-300 bg-black aspect-video flex items-center justify-center shadow-inner">
-                      <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
+                      <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
                       {/* Guide overlay outline for ID card */}
                       <div className="absolute inset-4 border-2 border-dashed border-white/60 rounded-lg pointer-events-none flex items-center justify-center">
                         <span className="text-[11px] text-white/90 bg-black/50 px-2 py-0.5 rounded-md">
@@ -440,7 +570,7 @@ export default function DocumentScannerModal({
                     </div>
                   </div>
                 ) : (
-                  <div className="space-y-4 py-6">
+                  <div className="space-y-4 py-6 w-full max-w-md mx-auto">
                     <div className="w-16 h-16 mx-auto bg-indigo-50 border border-indigo-200 rounded-2xl flex items-center justify-center text-indigo-600 shadow-xs">
                       {flow === "birth_certificate" ? <FileText className="w-8 h-8" /> : <User className="w-8 h-8" />}
                     </div>
@@ -462,26 +592,60 @@ export default function DocumentScannerModal({
                       </p>
                     </div>
 
-                    <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+                    {/* Camera and Upload Options */}
+                    <div className="flex flex-col items-center gap-3 pt-2 w-full">
+                      {/* Primary Button for Mobile */}
                       <button
                         type="button"
-                        onClick={startCamera}
-                        className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-xs cursor-pointer transition-all"
+                        onClick={() => nativeCameraInputRef.current?.click()}
+                        className="w-full px-5 py-3.5 bg-indigo-600 hover:bg-indigo-700 active:scale-98 text-white rounded-2xl text-xs sm:text-sm font-black flex items-center justify-center gap-2.5 shadow-md shadow-indigo-600/20 cursor-pointer transition-all"
+                        title="فتح كاميرا الموبايل والتقاط صورة واضحة مباشرة"
                       >
-                        <Camera className="w-4 h-4 text-emerald-400" />
-                        <span>فتح الكاميرا والتقاط صورة</span>
+                        <Smartphone className="w-5 h-5 text-emerald-300" />
+                        <span>📸 تصوير بكاميرا الهاتف مباشرة (موصى به للموبايل)</span>
                       </button>
 
-                      <label className="px-4 py-2.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-2 shadow-2xs cursor-pointer transition-all">
-                        <Upload className="w-4 h-4 text-indigo-600" />
-                        <span>اختيار صورة من الجهاز</span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          onChange={handleFileUpload}
-                          className="hidden"
-                        />
-                      </label>
+                      {/* Secondary Options: Live webcam & File upload */}
+                      <div className="flex flex-wrap items-center justify-center gap-2 w-full">
+                        <button
+                          type="button"
+                          onClick={startCamera}
+                          className="flex-1 min-w-[150px] px-3.5 py-2.5 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs cursor-pointer transition-all"
+                          title="فتح بث كاميرا الويب المباشر داخل المتصفح"
+                        >
+                          <Video className="w-4 h-4 text-emerald-400" />
+                          <span>🎥 بث الكاميرا المباشر</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          className="flex-1 min-w-[150px] px-3.5 py-2.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer transition-all"
+                          title="اختيار صورة تم تصويرها مسبقاً من الاستوديو أو الملفات"
+                        >
+                          <Upload className="w-4 h-4 text-indigo-600" />
+                          <span>📁 صورة من المعرض / الملفات</span>
+                        </button>
+                      </div>
+
+                      {/* Hidden native camera capture input */}
+                      <input
+                        ref={nativeCameraInputRef}
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        onChange={handleNativeCameraCapture}
+                        className="hidden"
+                      />
+
+                      {/* Hidden regular file picker input */}
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*"
+                        onChange={handleFileUpload}
+                        className="hidden"
+                      />
                     </div>
 
                     {/* Quick bypass if user wants to skip back of card */}
