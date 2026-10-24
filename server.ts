@@ -2778,8 +2778,8 @@ app.post("/api/ocr/scan-document", async (req, res) => {
     };
     const textPart = { text: prompt };
 
-    // Robust Gemini OCR call with automatic retry and model fallback to handle temporary 503 / UNAVAILABLE spikes
-    const candidateModels = ["gemini-3.8-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"];
+    // Ultra-fast Gemini Vision OCR using gemini-3.1-flash-lite with JSON response constraint
+    const candidateModels = ["gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.8-flash"];
     let aiResponse: any = null;
     let lastError: any = null;
 
@@ -2788,7 +2788,10 @@ app.post("/api/ocr/scan-document", async (req, res) => {
         try {
           aiResponse = await ai.models.generateContent({
             model: modelName,
-            contents: { parts: [imagePart, textPart] }
+            contents: { parts: [imagePart, textPart] },
+            config: {
+              responseMimeType: "application/json",
+            }
           });
           if (aiResponse && aiResponse.text) {
             break;
@@ -2798,8 +2801,8 @@ app.post("/api/ocr/scan-document", async (req, res) => {
           const errMsg = err?.message || JSON.stringify(err);
           const isTransient = errMsg.includes("503") || errMsg.includes("UNAVAILABLE") || errMsg.includes("429") || errMsg.includes("high demand");
           if (isTransient && attempt === 0) {
-            console.warn(`[OCR Retry] ${modelName} encountered spike (503/429), retrying in 750ms...`);
-            await new Promise((r) => setTimeout(r, 750));
+            console.warn(`[OCR Retry] ${modelName} encountered spike (503/429), retrying in 500ms...`);
+            await new Promise((r) => setTimeout(r, 500));
             continue;
           }
           console.warn(`[OCR Fallback] ${modelName} unavailable, switching to next candidate model...`, err?.message || err);
