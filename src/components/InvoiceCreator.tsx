@@ -927,9 +927,9 @@ export default function InvoiceCreator({
             <div>
               <h4 className="text-xs font-bold text-white flex items-center gap-2">
                 <span>تعبئة سريعة لبيانات الجوازات (# أو ##)</span>
-                {potentialCustomers.filter(p => p.status !== "تم_التحويل_لفاتورة").length > 0 && (
+                {potentialCustomers.length > 0 && (
                   <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] px-2 py-0.5 rounded-full font-bold">
-                    {potentialCustomers.filter(p => p.status !== "تم_التحويل_لفاتورة").length} عميل محتمل جاهز
+                    {potentialCustomers.length} عميل محتمل جاهز
                   </span>
                 )}
               </h4>
@@ -1804,7 +1804,7 @@ export default function InvoiceCreator({
                   );
                 })}
 
-              {potentialCustomers.filter((p) => p.status !== "تم_التحويل_لفاتورة").length === 0 && (
+              {potentialCustomers.length === 0 && (
                 <div className="text-center py-10 text-slate-400 space-y-2">
                   <Users className="w-10 h-10 mx-auto text-slate-300" />
                   <p className="font-bold text-xs text-slate-600">لا يوجد عملاء محتملون متاحون حالياً</p>

@@ -98,6 +98,14 @@ export default function SettingsConfig({
   const [footerText, setFooterText] = useState(settings.footerText || "يسعدنا دائماً خدمتكم وثقتكم بنا");
   const [autoSyncWebhook, setAutoSyncWebhook] = useState(settings.autoSyncWebhook || false);
 
+  // Aman Report Pricing config
+  const [amanNormalPrice, setAmanNormalPrice] = useState<number>(() => {
+    return typeof settings.amanNormalPrice === "number" ? settings.amanNormalPrice : 1200;
+  });
+  const [amanUrgentPrice, setAmanUrgentPrice] = useState<number>(() => {
+    return typeof settings.amanUrgentPrice === "number" ? settings.amanUrgentPrice : 1400;
+  });
+
   // Business days & Holidays config
   const [includeSaturdayAsWeekend, setIncludeSaturdayAsWeekend] = useState(settings.includeSaturdayAsWeekend !== false);
   const [customHolidays, setCustomHolidays] = useState<HolidayItem[]>(() => {
@@ -140,7 +148,9 @@ export default function SettingsConfig({
         googleSheetsConnected: !!(googleSheetWebhookUrl.trim() || googleSheetUrl.trim() || settings.googleSheetsConnected),
         includeSaturdayAsWeekend: includeSaturdayAsWeekend,
         customHolidays: holidaysToSave,
-        applicantCapacities: applicantCapacities.filter(c => c && c.trim())
+        applicantCapacities: applicantCapacities.filter(c => c && c.trim()),
+        amanNormalPrice: Number(amanNormalPrice) || 0,
+        amanUrgentPrice: Number(amanUrgentPrice) || 0,
       };
 
       const result = await updateSettingsOnServer(payload);
@@ -190,7 +200,9 @@ export default function SettingsConfig({
         googleSheetsConnected: !!(googleSheetWebhookUrl.trim() || googleSheetUrl.trim() || settings.googleSheetsConnected),
         includeSaturdayAsWeekend: includeSaturdayAsWeekend,
         customHolidays: customHolidays,
-        applicantCapacities: capacitiesToSave.filter(c => c && c.trim())
+        applicantCapacities: capacitiesToSave.filter(c => c && c.trim()),
+        amanNormalPrice: Number(amanNormalPrice) || 0,
+        amanUrgentPrice: Number(amanUrgentPrice) || 0,
       };
 
       const result = await updateSettingsOnServer(payload);
@@ -600,7 +612,9 @@ export default function SettingsConfig({
         googleSheetsConnected: !!(googleSheetWebhookUrl.trim() || googleSheetUrl.trim() || settings.googleSheetsConnected),
         includeSaturdayAsWeekend: includeSaturdayAsWeekend,
         customHolidays: customHolidays,
-        applicantCapacities: applicantCapacities.filter(c => c && c.trim())
+        applicantCapacities: applicantCapacities.filter(c => c && c.trim()),
+        amanNormalPrice: Number(amanNormalPrice) || 0,
+        amanUrgentPrice: Number(amanUrgentPrice) || 0,
       };
 
       const result = await updateSettingsOnServer(payload);
@@ -683,6 +697,53 @@ export default function SettingsConfig({
               placeholder="يسعدنا خدمتكم - طنطا شارع الجلاء بجوار الجوازات"
               className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs"
             />
+          </div>
+        </div>
+
+        {/* Aman Report Pricing Card */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <h3 className="font-bold text-sm text-slate-800 flex items-center gap-1.5">
+              <FileText className="w-4.5 h-4.5 text-emerald-600" />
+              <span>تسعير معاملات كشف أمان وحساب الإجمالي:</span>
+            </h3>
+            <span className="text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold px-2 py-0.5 rounded-full">
+              كشف أمان
+            </span>
+          </div>
+
+          <p className="text-xs text-slate-500">
+            تُستخدم هذه القيم في نهاية تفصيلة كشف أمان لحساب إجمالي المبالغ بضرب عدد الجوازات العادية والعاجلة في قيمتها، بالإضافة لضرب كل غرامة مسجلة في قيمتها من بند الغرامات.
+          </p>
+
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-700 block">
+                قيمة الجواز العادي لكشف أمان (ج.م):
+              </label>
+              <input 
+                type="number" 
+                value={amanNormalPrice}
+                onChange={(e) => setAmanNormalPrice(Number(e.target.value) || 0)}
+                placeholder="1200"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono font-bold text-emerald-900"
+              />
+              <span className="text-[10px] text-slate-400">القيمة الافتراضية: 1200 ج.م</span>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-700 block">
+                قيمة الجواز العاجل / المستعجل لكشف أمان (ج.م):
+              </label>
+              <input 
+                type="number" 
+                value={amanUrgentPrice}
+                onChange={(e) => setAmanUrgentPrice(Number(e.target.value) || 0)}
+                placeholder="1400"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono font-bold text-amber-900"
+              />
+              <span className="text-[10px] text-slate-400">القيمة الافتراضية: 1400 ج.م</span>
+            </div>
           </div>
         </div>
 

@@ -111,8 +111,27 @@ export default function PotentialCustomersPanel({
 
   // Counters
   const totalCount = potentialCustomers.length;
+  const idCardsCount = potentialCustomers.filter((c) => c.documentType !== "شهادة_ميلاد").length;
+  const birthCertsCount = potentialCustomers.filter((c) => c.documentType === "شهادة_ميلاد").length;
   const newCount = potentialCustomers.filter((c) => c.status !== "تم_التحويل_لفاتورة").length;
   const usedCount = potentialCustomers.filter((c) => c.status === "تم_التحويل_لفاتورة").length;
+
+  // Purge any legacy converted customers
+  const handlePurgeUsed = async () => {
+    const used = potentialCustomers.filter((c) => c.status === "تم_التحويل_لفاتورة");
+    if (used.length === 0) return;
+    if (!confirm(`هل تريد حذف جميع العملاء المحولين لفواتير وعددهم (${used.length}) نهائياً؟`)) return;
+    try {
+      for (const c of used) {
+        await deletePotentialCustomerOnServer(c.id);
+      }
+      const updatedList = potentialCustomers.filter((c) => c.status !== "تم_التحويل_لفاتورة");
+      onCustomersUpdated(updatedList);
+      showNotice(`تم حذف ${used.length} عميل محول لفاتورة بنجاح.`);
+    } catch (err: any) {
+      alert("خطأ أثناء الحذف: " + err.message);
+    }
+  };
 
   // Toggle selection
   const handleToggleSelect = (id: string) => {
@@ -345,6 +364,23 @@ export default function PotentialCustomersPanel({
         </div>
       )}
 
+      {/* Informational tip */}
+      <div className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-2.5 flex items-center justify-between text-xs text-slate-600">
+        <div className="flex items-center gap-2">
+          <Sparkles className="w-4 h-4 text-indigo-500 shrink-0" />
+          <span>💡 <strong>ميزة تلقائية:</strong> يتم حذف العميل المحتمل تلقائياً من هذه القائمة بمجرد استخدامه وحفظه داخل فاتورة لانتهاء الغرض منه.</span>
+        </div>
+        {usedCount > 0 && (
+          <button
+            type="button"
+            onClick={handlePurgeUsed}
+            className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold transition-all cursor-pointer shadow-xs shrink-0"
+          >
+            حذف المحولين سابقاً ({usedCount}) 🗑️
+          </button>
+        )}
+      </div>
+
       {/* Stat Cards Strip */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-white border border-slate-200 rounded-2xl p-4 flex items-center justify-between shadow-2xs">
@@ -359,18 +395,18 @@ export default function PotentialCustomersPanel({
 
         <div className="bg-white border border-emerald-200 rounded-2xl p-4 flex items-center justify-between shadow-2xs">
           <div className="space-y-1">
-            <span className="text-xs text-emerald-700 font-bold">جاهزون للاستخدام (جديد)</span>
-            <div className="text-2xl font-black text-emerald-700 font-mono">{newCount}</div>
+            <span className="text-xs text-emerald-700 font-bold">بطاقات رقم قومي</span>
+            <div className="text-2xl font-black text-emerald-700 font-mono">{idCardsCount}</div>
           </div>
           <div className="p-3 bg-emerald-50 rounded-xl text-emerald-700">
-            <Sparkles className="w-5 h-5" />
+            <User className="w-5 h-5" />
           </div>
         </div>
 
         <div className="bg-white border border-blue-200 rounded-2xl p-4 flex items-center justify-between shadow-2xs">
           <div className="space-y-1">
-            <span className="text-xs text-blue-700 font-bold">تم تحويلهم لفواتير</span>
-            <div className="text-2xl font-black text-blue-800 font-mono">{usedCount}</div>
+            <span className="text-xs text-blue-700 font-bold">شهادات ميلاد</span>
+            <div className="text-2xl font-black text-blue-800 font-mono">{birthCertsCount}</div>
           </div>
           <div className="p-3 bg-blue-50 rounded-xl text-blue-700">
             <FileText className="w-5 h-5" />

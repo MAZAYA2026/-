@@ -212,7 +212,9 @@
       "الأخ",
       "الأخت",
       "وكيل بموجب توكيل"
-    ]
+    ],
+    "amanNormalPrice": 1200,
+    "amanUrgentPrice": 1400
   },
   "services": [
     {

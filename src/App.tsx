@@ -106,8 +106,36 @@ export default function App() {
   };
 
   // State handlers for downstream modifications: ensure latest operations appear first
-  const handleInvoiceCreated = (newInv: Invoice) => {
+  const handleInvoiceCreated = (newInv: Invoice & { potentialCustomers?: PotentialCustomer[] }) => {
     setInvoices((prev) => [newInv, ...prev.filter(inv => inv.invoiceId !== newInv.invoiceId)]);
+
+    // Automatically remove used potential customers from state
+    if (newInv.potentialCustomers) {
+      setPotentialCustomers(newInv.potentialCustomers);
+    } else {
+      const customerNids = new Set(
+        (newInv.customers || [])
+          .map(c => (c.nationalId || "").trim())
+          .filter(Boolean)
+      );
+      const customerNames = new Set(
+        (newInv.customers || [])
+          .map(c => (c.arabicName || "").trim())
+          .filter(Boolean)
+      );
+
+      setPotentialCustomers((prev) => 
+        prev.filter((p) => {
+          const pNid = (p.nationalId || "").trim();
+          const pName = (p.arabicName || "").trim();
+          const matchesNid = pNid && customerNids.has(pNid);
+          const matchesName = pName && customerNames.has(pName);
+          return !(matchesNid || matchesName);
+        })
+      );
+    }
+
+    setCustomerToCreate(null);
   };
 
   const handleInvoiceUpdated = (updatedInv: Invoice) => {
@@ -248,9 +276,9 @@ export default function App() {
               <Users className="w-4.5 h-4.5 text-indigo-500" />
               العملاء المحتملين (OCR)
             </span>
-            {potentialCustomers.filter(p => p.status !== "تم_التحويل_لفاتورة").length > 0 && (
+            {potentialCustomers.length > 0 && (
               <span className="bg-indigo-600 text-white text-[9px] px-1.5 py-0.5 rounded-full font-mono font-bold">
-                {potentialCustomers.filter(p => p.status !== "تم_التحويل_لفاتورة").length}
+                {potentialCustomers.length}
               </span>
             )}
           </button>

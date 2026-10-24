@@ -42,7 +42,7 @@ export async function translateWithGemini(text: string): Promise<{ arabic: strin
   return response.json();
 }
 
-export async function createInvoiceOnServer(invoiceData: Partial<Invoice>): Promise<Invoice> {
+export async function createInvoiceOnServer(invoiceData: Partial<Invoice>): Promise<Invoice & { potentialCustomers?: PotentialCustomer[] }> {
   const response = await fetch("/api/db/invoices", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -52,7 +52,11 @@ export async function createInvoiceOnServer(invoiceData: Partial<Invoice>): Prom
     throw new Error("Failed to create invoice on server");
   }
   const result = await response.json();
-  return result.invoice;
+  const inv = result.invoice;
+  if (result.potentialCustomers) {
+    inv.potentialCustomers = result.potentialCustomers;
+  }
+  return inv;
 }
 
 export async function updateInvoiceOnServer(id: number, invoiceData: Partial<Invoice>): Promise<Invoice> {
@@ -459,12 +463,13 @@ export async function fetchLocalAmanReport(): Promise<any[]> {
 
 export async function saveLocalAmanReport(
   rows: any[], 
-  syncWithSheets: boolean = true
-): Promise<{ status: string; message: string }> {
+  syncWithSheets: boolean = true,
+  postponedRows?: any[]
+): Promise<{ status: string; message: string; rows: any[]; postponedRows?: any[] }> {
   const response = await fetch("/api/db/aman", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ rows, syncWithSheets }),
+    body: JSON.stringify({ rows, syncWithSheets, postponedRows }),
   });
   if (!response.ok) {
     const errData = await response.json().catch(() => ({}));

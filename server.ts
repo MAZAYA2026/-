@@ -932,23 +932,34 @@ app.post("/api/db/invoices", async (req, res) => {
   // User requirement: Automatically register services starting with # into Aman Report
   const amanModified = syncInvoiceToAmanReport(newInvoice, db);
 
-  // Automatically mark matching potential customers as converted to invoice
-  let potentialUpdated = false;
-  if (Array.isArray(db.potentialCustomers) && Array.isArray(newInvoice.customers)) {
-    newInvoice.customers.forEach((c: any) => {
-      const nid = (c.nationalId || "").trim();
-      const name = (c.arabicName || "").trim();
-      if (!nid && !name) return;
-      db.potentialCustomers.forEach((p: any) => {
-        if ((nid && p.nationalId === nid) || (name && p.arabicName === name)) {
-          if (p.status !== "تم_التحويل_لفاتورة") {
-            p.status = "تم_التحويل_لفاتورة";
-            p.invoiceId = newInvoice.invoiceId;
-            potentialUpdated = true;
-          }
-        }
-      });
+  // User explicit requirement: Automatically delete potential customers once registered in an invoice
+  // "عايز بعد استخدام العملاء المحتملين فى الفواتير يتم حذفهم من العملاء المحتملين علشان كدا خلاص تم الانتهاء من الغرض منهم وتسجيلهم بنجاح فى فواتير"
+  let potentialModified = false;
+  if (Array.isArray(db.potentialCustomers) && Array.isArray(newInvoice.customers) && db.potentialCustomers.length > 0) {
+    const originalCount = db.potentialCustomers.length;
+    const invNids = new Set(
+      newInvoice.customers
+        .map((c: any) => (c.nationalId || "").toString().trim())
+        .filter((nid: string) => nid.length >= 10)
+    );
+    const invNames = new Set(
+      newInvoice.customers
+        .map((c: any) => (c.arabicName || "").toString().trim())
+        .filter((name: string) => name.length >= 3)
+    );
+
+    db.potentialCustomers = db.potentialCustomers.filter((p: any) => {
+      const pNid = (p.nationalId || "").toString().trim();
+      const pName = (p.arabicName || "").toString().trim();
+      const matchNid = pNid && invNids.has(pNid);
+      const matchName = pName && invNames.has(pName);
+      return !(matchNid || matchName);
     });
+
+    if (db.potentialCustomers.length !== originalCount) {
+      potentialModified = true;
+      console.log(`[Potential Customers] Deleted ${originalCount - db.potentialCustomers.length} potential customer(s) registered in Invoice #${nextInvoiceId}`);
+    }
   }
 
   writeDB(db);
@@ -961,13 +972,18 @@ app.post("/api/db/invoices", async (req, res) => {
     await pushAmanDirectlyToSheet(db);
   }
 
-  if (potentialUpdated) {
+  if (potentialModified) {
     pushPotentialCustomersDirectlyToSheet(db).catch(err =>
       console.warn("Background potential customers sheet push notice:", err.message)
     );
   }
 
-  res.json({ status: "success", invoice: newInvoice, sheetSynced: pushed });
+  res.json({ 
+    status: "success", 
+    invoice: newInvoice, 
+    sheetSynced: pushed,
+    potentialCustomers: db.potentialCustomers || []
+  });
 });
 
 // 5. Update invoice: Updates directly on Google Sheet
@@ -2258,24 +2274,35 @@ app.get("/api/db/aman", (req, res) => {
 
 // POST save Aman report rows (Dedicated Save Button: "الحفظ يكون بتخصيص زرار للحفظ بعد ما اخلص كل المطلوب اضغط حفظ")
 app.post("/api/db/aman", async (req, res) => {
-  const { rows, syncWithSheets } = req.body;
+  const { rows, postponedRows, syncWithSheets } = req.body;
   const db = readDB();
   if (Array.isArray(rows)) {
     db.amanReport = rows.map((r: any) => ({
       ...r,
       birthDate: formatCleanBirthDate(r.birthDate),
     }));
-    writeDB(db);
   }
+  if (Array.isArray(postponedRows)) {
+    db.amanPostponedRows = postponedRows.map((r: any) => ({
+      ...r,
+      birthDate: formatCleanBirthDate(r.birthDate),
+    }));
+  }
+  writeDB(db);
 
   let sheetSyncResult: any = null;
   if (syncWithSheets) {
-    sheetSyncResult = await pushAmanDirectlyToSheet(db);
+    if (Array.isArray(postponedRows)) {
+      sheetSyncResult = await pushAmanAndPostponedDirectlyToSheet(db);
+    } else {
+      sheetSyncResult = await pushAmanDirectlyToSheet(db);
+    }
   }
 
   res.json({
     status: "success",
     rows: db.amanReport || [],
+    postponedRows: db.amanPostponedRows || [],
     sheetSyncResult,
     message: "تم حفظ وتحديث كشف أمان في ورقة الشيت بنجاح! 💾✅",
   });
@@ -2874,6 +2901,36 @@ app.post("/api/ocr/scan-document", async (req, res) => {
 // 2. GET all potential customers
 app.get("/api/db/potential-customers", (req, res) => {
   const db = readDB();
+  db.potentialCustomers = db.potentialCustomers || [];
+
+  const invNids = new Set(
+    (db.invoices || []).flatMap((inv: any) => 
+      (inv.customers || []).map((c: any) => (c.nationalId || "").toString().trim()).filter((nid: string) => nid.length >= 10)
+    )
+  );
+  const invNames = new Set(
+    (db.invoices || []).flatMap((inv: any) => 
+      (inv.customers || []).map((c: any) => (c.arabicName || "").toString().trim()).filter((name: string) => name.length >= 3)
+    )
+  );
+
+  const prevLen = db.potentialCustomers.length;
+  db.potentialCustomers = db.potentialCustomers.filter((p: any) => {
+    if (p.status === "تم_التحويل_لفاتورة") return false;
+    const pNid = (p.nationalId || "").toString().trim();
+    const pName = (p.arabicName || "").toString().trim();
+    if (pNid && invNids.has(pNid)) return false;
+    if (pName && invNames.has(pName)) return false;
+    return true;
+  });
+
+  if (db.potentialCustomers.length !== prevLen) {
+    writeDB(db);
+    pushPotentialCustomersDirectlyToSheet(db).catch(err =>
+      console.warn("Background potential customers cleanup sheet push notice:", err.message)
+    );
+  }
+
   res.json({
     status: "success",
     potentialCustomers: db.potentialCustomers || []

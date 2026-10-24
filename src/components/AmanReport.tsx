@@ -197,6 +197,103 @@ export function resolveAmanDetails(
   };
 }
 
+// Helper to resolve unit amount of a fine from GovernmentFine definitions or row details
+export function getFineAmount(
+  details: { fineName?: string; fineAmount?: number },
+  finesList?: GovernmentFine[]
+): number {
+  if (details.fineAmount && details.fineAmount > 0) {
+    return details.fineAmount;
+  }
+  if (!details.fineName) return 0;
+  const raw = details.fineName.trim();
+  const clean = raw.replace(/^غرامة\s+/, "").trim().toLowerCase();
+  const match = finesList?.find((f) => {
+    const fClean = (f.name || "").replace(/^غرامة\s+/, "").trim().toLowerCase();
+    return fClean === clean || f.name.trim().toLowerCase() === raw.toLowerCase();
+  });
+  return match?.amount || 0;
+}
+
+// User explicit requirement:
+// "عايز فى نهاية تفصيلة الكشف تحط الاجمالى حيث ياخد قيمة العادى وقيمة العاجل من الاعدادات نخصص لها قيمة وباقى الغرامات الموجودة تضرب فى قيمتها المسجلة من قبل فى بند الغرامات علشان يكون واضح فى نهاية الكشف"
+export function computeAmanDetailedStats(
+  rows: AmanRowItem[],
+  invoices: Invoice[],
+  services: Service[],
+  governmentFines: GovernmentFine[] | undefined,
+  normalPrice: number,
+  urgentPrice: number
+) {
+  const activeRows = rows.filter((r) => r.arabicName && r.arabicName.trim().length > 0);
+  let normalCount = 0;
+  let urgentCount = 0;
+  let finesCount = 0;
+  let totalFinesAmount = 0;
+
+  // Track fines grouped by name: count, unitPrice, totalAmount
+  const fineGroups: Record<string, { name: string; count: number; unitPrice: number; totalAmount: number }> = {};
+
+  activeRows.forEach((row) => {
+    const details = resolveAmanDetails(row, invoices, services, governmentFines);
+    if (details.serviceType === "مستعجل") {
+      urgentCount++;
+    } else {
+      normalCount++;
+    }
+
+    if (details.hasFine) {
+      finesCount++;
+      const rawName = (details.fineName || "غرامة حكومية").trim();
+      const cleanName = rawName.replace(/^غرامة\s+/, "").trim();
+      const displayName = cleanName.startsWith("غرامة") ? cleanName : `غرامة ${cleanName}`;
+      const unitPrice = getFineAmount(details, governmentFines);
+
+      if (!fineGroups[displayName]) {
+        fineGroups[displayName] = { name: displayName, count: 0, unitPrice, totalAmount: 0 };
+      }
+      fineGroups[displayName].count++;
+      fineGroups[displayName].totalAmount += unitPrice;
+      totalFinesAmount += unitPrice;
+    }
+  });
+
+  const normalTotal = normalCount * normalPrice;
+  const urgentTotal = urgentCount * urgentPrice;
+  const grandTotal = normalTotal + urgentTotal + totalFinesAmount;
+
+  // Detailed breakdown text with multiplication: e.g. "غرامة عدم وجود مؤهل: 2 × 450 = 900 ج.م"
+  const finesDetailedList = Object.values(fineGroups)
+    .map((g) => `${g.name}: ${g.count}${g.unitPrice > 0 ? ` (× ${g.unitPrice.toLocaleString()} = ${g.totalAmount.toLocaleString()} ج.م)` : ""}`)
+    .join("، ");
+
+  // Short print summary text for page footer
+  const finesPrintSummary = Object.values(fineGroups)
+    .map((g) => `${g.name}: ${g.count}${g.unitPrice > 0 ? ` × ${g.unitPrice} = ${g.totalAmount.toLocaleString()}ج` : ""}`)
+    .join("، ");
+
+  const finesShortText = Object.values(fineGroups)
+    .map((g) => `${g.name}: ${g.count}`)
+    .join("، ");
+
+  return {
+    totalActive: activeRows.length,
+    normalCount,
+    normalPrice,
+    normalTotal,
+    urgentCount,
+    urgentPrice,
+    urgentTotal,
+    finesCount,
+    totalFinesAmount,
+    fineGroups,
+    finesDetailedList,
+    finesPrintSummary,
+    finesShortText,
+    grandTotal,
+  };
+}
+
 export default function AmanReport({ 
   invoices, 
   services, 
@@ -549,8 +646,8 @@ export default function AmanReport({
           };
         });
 
-      // 1. Save to dedicated Aman sheet in server database
-      await saveLocalAmanReport(activeRowsToRecord, true);
+      // 1. Save both active rows and postponed list in server database
+      await saveLocalAmanReport(activeRowsToRecord, true, postponedList);
 
       // 2. Sync to Google Sheets dedicated tab if webhook configured
       if (settings?.googleSheetWebhookUrl) {
@@ -567,7 +664,7 @@ export default function AmanReport({
       }
 
       setHasUnsavedChanges(false);
-      showSaveNotice(`تم حفظ وتحديث كشف أمان في ورقة الشيت بنجاح (${activeRowsToRecord.length} عميل) 💾✅`);
+      showSaveNotice(`تم حفظ وتحديث كشف أمان وقائمة الأسماء المرحلة في ورقة الشيت بنجاح (${activeRowsToRecord.length} عميل) 💾✅`);
     } catch (err: any) {
       console.error("Save aman sheet failed:", err);
       showSaveNotice(`خطأ أثناء حفظ كشف أمان: ${err.message} ⚠️`);
@@ -799,40 +896,10 @@ export default function AmanReport({
     }
     setTableRows(newTableRows);
 
-    const activeRowsToRecord = newTableRows
-      .filter((r) => r.arabicName && r.arabicName.trim().length > 0)
-      .map((r, idx) => {
-        const det = resolveAmanDetails(r, invoices, services, governmentFines);
-        return {
-          ...r,
-          birthDate: formatCleanBirthDate(r.birthDate),
-          notes: det.statusText,
-          serviceType: det.serviceType,
-          hasFine: det.hasFine,
-          fineName: det.fineName,
-          fineAmount: det.fineAmount,
-          index: idx + 1,
-        };
-      });
-
-    setHasUnsavedChanges(false);
-
-    // User requirement: ACTUALLY transfer from Aman sheet to Postponed sheet on both DB and Google Sheets!
-    try {
-      const res = await cutAndPostponeAmanRow({
-        activeRows: activeRowsToRecord,
-        postponedRows: updatedPostponed,
-      });
-
-      if (res.sheetSynced) {
-        showSaveNotice(`تم قص وترحيل (${cutName}) ونقله فعلياً من ورقة كشف أمان إلى ورقة الأسماء المرحلة بملف الشيت بنجاح! ✂️📑`);
-      } else {
-        showSaveNotice(`تم قص وترحيل (${cutName}) وحفظه في قائمة الأسماء المرحلة محلياً بنجاح! ✂️ (تأكد من نشر سكربت جوجل شيت للمزامنة السحابية)`);
-      }
-    } catch (err: any) {
-      console.warn("Transfer sync notice:", err);
-      showSaveNotice(`تم ترحيل (${cutName}) محلياً ✂️ (تنبيه المزامنة: ${err.message})`);
-    }
+    // User explicit requirement:
+    // "فى كشف امان عايز لما اعمل قص وترحيل او استرجاع لاتقم بالتحديث اللحظى انما اظهر زرار حفظ التغيرات فى كشف زى بالظبط لما بضيف اسم او امسح اسم فى نهاية التعديلات اضغط باليد على زرار حفظ التغيرات فى كشف امان"
+    setHasUnsavedChanges(true);
+    showSaveNotice(`تم قص (${cutName}) ونقله للمؤجلين مؤقتاً ✂️. اضغط "حفظ التغييرات في كشف أمان 💾" بعد الانتهاء لتثبيت الكشف والشيت.`);
   };
 
   // User explicit requirement:
@@ -890,38 +957,10 @@ export default function AmanReport({
     setIsPostponedModalOpen(false);
     setTargetInsertRowIndex(null);
 
-    const activeRowsToRecord = updatedRows
-      .filter((r) => r.arabicName && r.arabicName.trim().length > 0)
-      .map((r, idx) => {
-        const det = resolveAmanDetails(r, invoices, services, governmentFines);
-        return {
-          ...r,
-          birthDate: formatCleanBirthDate(r.birthDate),
-          notes: det.statusText,
-          serviceType: det.serviceType,
-          hasFine: det.hasFine,
-          fineName: det.fineName,
-          fineAmount: det.fineAmount,
-          index: idx + 1,
-        };
-      });
-
-    // Actually transfer between sheets on DB and Google Sheets!
-    try {
-      const res = await insertPostponedAmanRow({
-        activeRows: activeRowsToRecord,
-        postponedRows: updatedPostponed,
-      });
-
-      if (res.sheetSynced) {
-        showSaveNotice(`تم نقل وإدراج (${item.arabicName}) في كشف أمان وتحديث ورقتي الشيت بنجاح! 📥📑`);
-      } else {
-        showSaveNotice(`تم نقل وإدراج (${item.arabicName}) في كشف أمان محلياً بنجاح! 📥 (تأكد من نشر سكربت جوجل شيت للمزامنة السحابية)`);
-      }
-    } catch (err: any) {
-      console.warn("Insert transfer notice:", err);
-      showSaveNotice(`تم إدراج (${item.arabicName}) في كشف أمان محلياً 📥 (تنبيه المزامنة: ${err.message})`);
-    }
+    // User explicit requirement:
+    // "فى كشف امان عايز لما اعمل قص وترحيل او استرجاع لاتقم بالتحديث اللحظى انما اظهر زرار حفظ التغيرات فى كشف زى بالظبط لما بضيف اسم او امسح اسم فى نهاية التعديلات اضغط باليد على زرار حفظ التغيرات فى كشف امان"
+    setHasUnsavedChanges(true);
+    showSaveNotice(`تم استرجاع وإدراج (${item.arabicName}) في كشف أمان مؤقتاً 📥. اضغط "حفظ التغييرات في كشف أمان 💾" بعد الانتهاء لتثبيت الكشف والشيت.`);
   };
 
   const handleDeletePostponedItem = async (id: string, name: string) => {
@@ -1238,84 +1277,27 @@ export default function AmanReport({
   // Count active non-empty names
   const activeCount = displayRows.filter((r) => r.arabicName.trim().length > 0).length;
 
+  // Aman pricing from Settings (User requirement: يأخذ قيمة العادي وقيمة العاجل من الإعدادات وباقي الغرامات تضرب في قيمتها المسجلة في بند الغرامات)
+  const normalPrice = typeof settings?.amanNormalPrice === "number" && settings.amanNormalPrice > 0 
+    ? settings.amanNormalPrice 
+    : 1200;
+  const urgentPrice = typeof settings?.amanUrgentPrice === "number" && settings.amanUrgentPrice > 0 
+    ? settings.amanUrgentPrice 
+    : 1400;
+
   // Breakdown statistics for each printed page
   const pageStats = useMemo(() => {
     return Array.from({ length: totalPages }).map((_, pageIdx) => {
       const startIdx = pageIdx * ROWS_PER_PAGE;
       const pageCustomers = displayRows.slice(startIdx, startIdx + ROWS_PER_PAGE);
-      const activeRows = pageCustomers.filter((r) => r.arabicName.trim().length > 0);
-
-      let normalCount = 0;
-      let urgentCount = 0;
-      let finesCount = 0;
-      const finesByType: Record<string, number> = {};
-
-      activeRows.forEach((row) => {
-        const details = resolveAmanDetails(row, invoices, services, governmentFines);
-        if (details.serviceType === "مستعجل") {
-          urgentCount++;
-        } else {
-          normalCount++;
-        }
-
-        if (details.hasFine) {
-          finesCount++;
-          const fName = details.fineName || "غرامة حكومية";
-          finesByType[fName] = (finesByType[fName] || 0) + 1;
-        }
-      });
-
-      const finesBreakdown = Object.entries(finesByType)
-        .map(([name, count]) => `${name}: ${count}`)
-        .join("، ");
-
-      return {
-        totalActive: activeRows.length,
-        normalCount,
-        urgentCount,
-        finesCount,
-        finesBreakdown,
-        finesByType,
-      };
+      return computeAmanDetailedStats(pageCustomers, invoices, services, governmentFines, normalPrice, urgentPrice);
     });
-  }, [totalPages, displayRows, invoices, services, governmentFines]);
+  }, [totalPages, displayRows, invoices, services, governmentFines, normalPrice, urgentPrice]);
 
   // Overall report statistics across all pages
   const overallStats = useMemo(() => {
-    const activeRows = displayRows.filter((r) => r.arabicName.trim().length > 0);
-    let normalCount = 0;
-    let urgentCount = 0;
-    let finesCount = 0;
-    const finesByType: Record<string, number> = {};
-
-    activeRows.forEach((row) => {
-      const details = resolveAmanDetails(row, invoices, services, governmentFines);
-      if (details.serviceType === "مستعجل") {
-        urgentCount++;
-      } else {
-        normalCount++;
-      }
-
-      if (details.hasFine) {
-        finesCount++;
-        const fName = details.fineName || "غرامة حكومية";
-        finesByType[fName] = (finesByType[fName] || 0) + 1;
-      }
-    });
-
-    const finesBreakdown = Object.entries(finesByType)
-      .map(([name, count]) => `${name}: ${count}`)
-      .join("، ");
-
-    return {
-      totalActive: activeRows.length,
-      normalCount,
-      urgentCount,
-      finesCount,
-      finesBreakdown,
-      finesByType,
-    };
-  }, [displayRows, invoices, services]);
+    return computeAmanDetailedStats(displayRows, invoices, services, governmentFines, normalPrice, urgentPrice);
+  }, [displayRows, invoices, services, governmentFines, normalPrice, urgentPrice]);
 
   return (
     <div className="space-y-6 font-cairo">
@@ -1676,31 +1658,45 @@ export default function AmanReport({
             )}
           </div>
 
-          {/* Statistics Badges */}
+          {/* Statistics & Financial Totals Strip */}
           <div className="flex flex-wrap items-center gap-2.5 pt-3">
             <div className="flex items-center gap-1.5 bg-slate-100 text-slate-800 px-3 py-1.5 rounded-xl text-xs font-bold border border-slate-200">
               <span>إجمالي المسجلين:</span>
               <span className="font-mono text-sm text-slate-950 font-black">{overallStats.totalActive}</span>
             </div>
 
-            <div className="flex items-center gap-1.5 bg-emerald-50 text-emerald-800 px-3 py-1.5 rounded-xl text-xs font-bold border border-emerald-200">
+            <div className="flex items-center gap-1.5 bg-emerald-50 text-emerald-900 px-3 py-1.5 rounded-xl text-xs font-bold border border-emerald-200">
               <span>جواز عادي:</span>
               <span className="font-mono text-sm text-emerald-950 font-black">{overallStats.normalCount}</span>
+              <span className="text-[11px] text-emerald-700 font-normal">
+                (× {overallStats.normalPrice.toLocaleString()} = <strong className="text-emerald-950 font-bold">{overallStats.normalTotal.toLocaleString()} ج.م</strong>)
+              </span>
             </div>
 
-            <div className="flex items-center gap-1.5 bg-amber-50 text-amber-800 px-3 py-1.5 rounded-xl text-xs font-bold border border-amber-200">
+            <div className="flex items-center gap-1.5 bg-amber-50 text-amber-900 px-3 py-1.5 rounded-xl text-xs font-bold border border-amber-200">
               <span>جواز عاجل / مستعجل:</span>
               <span className="font-mono text-sm text-amber-950 font-black">{overallStats.urgentCount}</span>
+              <span className="text-[11px] text-amber-700 font-normal">
+                (× {overallStats.urgentPrice.toLocaleString()} = <strong className="text-amber-950 font-bold">{overallStats.urgentTotal.toLocaleString()} ج.م</strong>)
+              </span>
             </div>
 
-            <div className="flex items-center gap-1.5 bg-purple-50 text-purple-800 px-3 py-1.5 rounded-xl text-xs font-bold border border-purple-200">
+            <div className="flex items-center gap-1.5 bg-purple-50 text-purple-900 px-3 py-1.5 rounded-xl text-xs font-bold border border-purple-200">
               <span>الغرامات الحكومية:</span>
               <span className="font-mono text-sm text-purple-950 font-black">{overallStats.finesCount}</span>
-              {overallStats.finesBreakdown && (
+              {overallStats.finesCount > 0 ? (
                 <span className="text-[11px] text-purple-700 font-normal mr-1">
-                  ({overallStats.finesBreakdown})
+                  ({overallStats.finesDetailedList}) = <strong className="text-purple-950 font-bold">{overallStats.totalFinesAmount.toLocaleString()} ج.م</strong>
                 </span>
+              ) : (
+                <span className="text-[11px] text-purple-600 font-normal mr-1">(لا توجد)</span>
               )}
+            </div>
+
+            {/* Prominent Grand Total Badge */}
+            <div className="flex items-center gap-2 bg-linear-to-r from-emerald-600 via-teal-700 to-emerald-800 text-white px-4 py-2 rounded-xl text-xs font-black shadow-xs mr-auto border border-emerald-500/30">
+              <span>المبلغ الإجمالي الكلي:</span>
+              <span className="font-mono text-base font-black tracking-tight">{overallStats.grandTotal.toLocaleString()} ج.م</span>
             </div>
           </div>
         </div>
@@ -2026,26 +2022,34 @@ export default function AmanReport({
 
                   {/* Left: Small font reference breakdown requested by user */}
                   <div 
-                    className="flex items-center gap-2 border border-black/50 px-2.5 py-0.5 rounded-sm bg-slate-50/90 print:bg-transparent print:border-black/60"
+                    className="flex items-center gap-1.5 border border-black/50 px-2 py-0.5 rounded-sm bg-slate-50/90 print:bg-transparent print:border-black/60 flex-wrap"
                     style={{ 
                       fontFamily: "'Cairo', sans-serif", 
-                      fontSize: "10.5px", 
+                      fontSize: "9.5px", 
                       fontWeight: "bold",
-                      lineHeight: 1.2 
+                      lineHeight: 1.25 
                     }}
                   >
                     <span className="font-extrabold text-slate-900">📌 تفصيلة الكشف:</span>
-                    <span>عادي: <strong className="text-black">{pageStats[pageIdx]?.normalCount || 0}</strong></span>
+                    <span>عادي: <strong className="text-black">{pageStats[pageIdx]?.normalCount || 0}</strong> <span className="text-[9px] text-slate-700 font-mono">({(pageStats[pageIdx]?.normalTotal || 0).toLocaleString()}ج)</span></span>
                     <span>|</span>
-                    <span>عاجل: <strong className="text-black">{pageStats[pageIdx]?.urgentCount || 0}</strong></span>
+                    <span>عاجل: <strong className="text-black">{pageStats[pageIdx]?.urgentCount || 0}</strong> <span className="text-[9px] text-slate-700 font-mono">({(pageStats[pageIdx]?.urgentTotal || 0).toLocaleString()}ج)</span></span>
                     <span>|</span>
                     <span>
                       الغرامات: <strong className="text-black">{pageStats[pageIdx]?.finesCount || 0}</strong>
-                      {pageStats[pageIdx]?.finesBreakdown ? ` (${pageStats[pageIdx].finesBreakdown})` : " (لا توجد)"}
+                      {(pageStats[pageIdx]?.finesCount || 0) > 0 ? (
+                        <span className="text-[9px] text-slate-700 font-mono mr-1">
+                          {pageStats[pageIdx]?.finesPrintSummary ? `(${pageStats[pageIdx].finesPrintSummary})` : ""} = <strong>{(pageStats[pageIdx]?.totalFinesAmount || 0).toLocaleString()}ج</strong>
+                        </span>
+                      ) : " (لا توجد)"}
+                    </span>
+                    <span>|</span>
+                    <span className="bg-slate-950 text-white px-2 py-0.2 rounded-xs font-black print:bg-transparent print:text-black print:border print:border-black text-[10px]">
+                      الإجمالي: {(pageStats[pageIdx]?.grandTotal || 0).toLocaleString()} ج.م
                     </span>
                     {totalPages > 1 && (
-                      <span className="text-[9.5px] text-slate-500 font-normal mr-1">
-                        [ص {pageIdx + 1}/{totalPages}]
+                      <span className="text-[9px] text-slate-500 font-normal mr-1">
+                        [ص {pageIdx + 1}/{totalPages} - إجمالي الكشف: {overallStats.grandTotal.toLocaleString()} ج.م]
                       </span>
                     )}
                   </div>

@@ -128,6 +128,8 @@ export interface AppSettings {
   customHolidays?: HolidayItem[]; // العطلات الرسمية المخصصة والمضافة
   includeSaturdayAsWeekend?: boolean; // اعتبار يوم السبت عطلة أسبوعية للمصالح الحكومية (افتراضياً: نعم)
   applicantCapacities?: string[]; // خيارات صفة مقدم الطلب لمعاملات الجوازات (# و ##)
+  amanNormalPrice?: number; // قيمة الجواز العادي في كشف أمان
+  amanUrgentPrice?: number; // قيمة الجواز العاجل في كشف أمان
 }
 
 export interface AmanPostponedItem {
