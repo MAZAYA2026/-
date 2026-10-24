@@ -56,74 +56,6 @@ async function optimizeImageForOcr(fileOrBase64: File | string, maxDimension = 1
   });
 }
 
-// Instant client-side parser for text copied from Google Lens (0.0s offline processing)
-function parseTextFromLens(rawText: string) {
-  if (!rawText || !rawText.trim()) return null;
-
-  // 1. Normalize Arabic numerals to standard digits
-  const normalized = rawText.replace(/[٠-٩]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d).toString());
-
-  // 2. Extract 14-digit Egyptian National ID (begins with 2 or 3)
-  let nationalId = "";
-  const match14 = normalized.match(/\b([23]\d{13})\b/);
-  if (match14) {
-    nationalId = match14[1];
-  } else {
-    const digitsOnly = normalized.replace(/\D/g, "");
-    const subMatch = digitsOnly.match(/([23]\d{13})/);
-    if (subMatch) {
-      nationalId = subMatch[1];
-    }
-  }
-
-  // Calculate birth date and age from National ID
-  let birthDate = "";
-  let calculatedAge = 0;
-  if (nationalId.length === 14) {
-    const century = parseInt(nationalId[0]);
-    const year = parseInt(nationalId.substring(1, 3));
-    const month = parseInt(nationalId.substring(3, 5));
-    const day = parseInt(nationalId.substring(5, 7));
-    const fullYear = (century === 2 ? 1900 : century === 3 ? 2000 : 1900) + year;
-    const mm = String(month).padStart(2, "0");
-    const dd = String(day).padStart(2, "0");
-    birthDate = `${fullYear}-${mm}-${dd}`;
-
-    const today = new Date();
-    calculatedAge = today.getFullYear() - fullYear;
-    const m = today.getMonth() - (month - 1);
-    if (m < 0 || (m === 0 && today.getDate() < day)) {
-      calculatedAge--;
-    }
-  }
-
-  // 3. Extract Arabic Full Name: find line with 3 to 5 Arabic words
-  const lines = rawText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  let arabicName = "";
-  const headerWords = ["جمهورية", "مصر", "العربية", "وزارة", "الداخلية", "قطاع", "مصلحة", "الأحوال", "المدنية", "بطاقة", "تحقيق", "الشخصية", "الرقم", "القومي", "شهادة", "ميلاد"];
-  for (const line of lines) {
-    const cleanLine = line.replace(/[\d٠-٩،,.:;!؟'"\-–_\\/()]/g, " ").replace(/\s+/g, " ").trim();
-    const words = cleanLine.split(" ").filter((w) => /^[\u0621-\u064A\u0671-\u06D3]{2,}$/.test(w));
-    const filtered = words.filter((w) => !headerWords.includes(w));
-    if (filtered.length >= 3) {
-      arabicName = filtered.slice(0, 5).join(" ");
-      break;
-    }
-  }
-
-  // 4. Extract Profession if detected
-  let profession = "";
-  const profKeywords = ["طالب", "طالبة", "مهندس", "محاسب", "طبيب", "معلم", "مدرس", "ربة منزل", "حاصل على", "سائق", "عامل", "أعمال حرة", "مدير", "محامي", "صيدلي", "فني", "دبلوم", "بكالوريوس", "ليسانس"];
-  for (const kw of profKeywords) {
-    if (rawText.includes(kw)) {
-      profession = kw;
-      break;
-    }
-  }
-
-  return { nationalId, birthDate, arabicName, profession, calculatedAge };
-}
-
 interface DocumentScannerModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -176,59 +108,6 @@ export default function DocumentScannerModal({
   const [phone, setPhone] = useState<string>("");
   const [applicantCapacity, setApplicantCapacity] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
-
-  // Google Lens text paste support
-  const [showLensInput, setShowLensInput] = useState<boolean>(false);
-  const [lensPastedText, setLensPastedText] = useState<string>("");
-
-  const handleParseLensText = (text: string) => {
-    if (!text || !text.trim()) {
-      setErrorNotice("يرجى لصق النص المنسوخ من عدسة جوجل أولاً.");
-      return;
-    }
-    const parsed = parseTextFromLens(text);
-    if (!parsed || (!parsed.nationalId && !parsed.arabicName)) {
-      setErrorNotice("لم يتم العثور على اسم أو رقم قومي 14 رقم داخل النص الملصق.");
-      return;
-    }
-
-    if (parsed.nationalId) {
-      setNationalId(parsed.nationalId);
-    }
-    if (parsed.birthDate) {
-      setBirthDate(parsed.birthDate);
-    }
-    if (parsed.arabicName) {
-      setArabicName(parsed.arabicName);
-      autoTranslateName(parsed.arabicName);
-    }
-    if (parsed.profession) {
-      setProfession(parsed.profession);
-    } else if (flow === "birth_certificate") {
-      setProfession(parsed.calculatedAge >= 6 ? "طالب" : "طفل");
-    }
-
-    setShowLensInput(false);
-    setIdStep("verify");
-    setScanMessage("");
-    setErrorNotice(null);
-  };
-
-  const handlePasteFromClipboard = async () => {
-    try {
-      if (navigator.clipboard && navigator.clipboard.readText) {
-        const text = await navigator.clipboard.readText();
-        if (text) {
-          setLensPastedText(text);
-          handleParseLensText(text);
-          return;
-        }
-      }
-    } catch (e) {
-      console.warn("Clipboard access denied or unavailable", e);
-    }
-    handleParseLensText(lensPastedText);
-  };
 
   // Start Live WebRTC Camera (Prioritized as requested: live camera broadcast is best)
   const startCamera = async () => {
@@ -453,8 +332,6 @@ export default function DocumentScannerModal({
     setNotes("");
     setErrorNotice(null);
     setIsScanning(false);
-    setShowLensInput(false);
-    setLensPastedText("");
   };
 
   // Handle Save
@@ -561,72 +438,6 @@ export default function DocumentScannerModal({
                 <FileText className="w-4 h-4 text-emerald-600" />
                 <span>📜 شهادة ميلاد مميكنة (طالب/طفل)</span>
               </button>
-            </div>
-          )}
-
-          {/* Quick Option: Paste directly from Google Lens (0.0s offline parsing) */}
-          {idStep !== "verify" && (
-            <div className="bg-linear-to-r from-indigo-50/90 via-purple-50/70 to-indigo-50/90 border border-indigo-200/90 rounded-2xl p-3 text-xs shadow-2xs">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-7 h-7 bg-indigo-600 text-white rounded-xl flex items-center justify-center font-bold shrink-0 shadow-xs">
-                    🔍
-                  </div>
-                  <div>
-                    <span className="font-bold text-slate-900 flex items-center gap-1.5">
-                      <span>نسخت النص بواسطة عدسة جوجل (Google Lens)؟</span>
-                      <span className="bg-emerald-100 text-emerald-800 border border-emerald-200 text-[10px] px-1.5 py-0.2 rounded-md font-bold">
-                        فوري ⚡ 0 ثانية
-                      </span>
-                    </span>
-                    <p className="text-[11px] text-slate-500 mt-0.5">
-                      يمكنك لصق النص المنسوخ من عدسة هاتفك هنا مباشرة لاستخراج الاسم والرقم القومي وتاريخ الميلاد فورياً
-                    </p>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setShowLensInput(!showLensInput)}
-                  className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-xs transition-all shrink-0 self-end sm:self-center"
-                >
-                  <span>{showLensInput ? "إخفاء خانة اللصق" : "📋 لصق نص من عدسة جوجل"}</span>
-                </button>
-              </div>
-
-              {showLensInput && (
-                <div className="mt-3 pt-3 border-t border-indigo-200/70 space-y-2.5 animate-in fade-in">
-                  <textarea
-                    rows={3}
-                    value={lensPastedText}
-                    onChange={(e) => setLensPastedText(e.target.value)}
-                    placeholder="الصق هنا النص المنسوخ من تطبيق عدسة جوجل (Google Lens)..."
-                    className="w-full text-xs p-2.5 bg-white border border-indigo-300 rounded-xl text-slate-900 font-mono focus:outline-hidden focus:ring-2 focus:ring-indigo-500 shadow-inner"
-                  />
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-[10px] text-slate-500">
-                      💡 يتعرف تلقائياً على الأرقام القومية (14 رقم) ويحسب تاريخ الميلاد والسن والاسم.
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={handlePasteFromClipboard}
-                        className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors"
-                      >
-                        <span>📋 لصق من الحافظة</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleParseLensText(lensPastedText)}
-                        className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer transition-all"
-                      >
-                        <Sparkles className="w-3.5 h-3.5" />
-                        <span>استخراج فوري للبيانات ⚡</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
