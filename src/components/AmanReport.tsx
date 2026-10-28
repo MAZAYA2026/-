@@ -262,17 +262,21 @@ export function computeAmanDetailedStats(
   const urgentTotal = urgentCount * urgentPrice;
   const grandTotal = normalTotal + urgentTotal + totalFinesAmount;
 
-  // Detailed breakdown text with multiplication: e.g. "غرامة عدم وجود مؤهل: 2 × 450 = 900 ج.م"
-  const finesDetailedList = Object.values(fineGroups)
-    .map((g) => `${g.name}: ${g.count}${g.unitPrice > 0 ? ` (× ${g.unitPrice.toLocaleString()} = ${g.totalAmount.toLocaleString()} ج.م)` : ""}`)
-    .join("، ");
+  // Grouped fines array
+  const fineGroupsList = Object.values(fineGroups);
 
-  // Short print summary text for page footer
-  const finesPrintSummary = Object.values(fineGroups)
-    .map((g) => `${g.name}: ${g.count}${g.unitPrice > 0 ? ` × ${g.unitPrice} = ${g.totalAmount.toLocaleString()}ج` : ""}`)
-    .join("، ");
+  // User explicit requirement:
+  // "مش لازم توضح تكلفة كل غرامة الواحدة بكام انما اذكر نوع الغرامة ثم العدد ثم بين قوسين مبلغها الاجمالى زى بالظبط كما هو الحال فى الجواز العادى والعاجل"
+  // Format: "غرامة المؤهل: 1 (450ج) | غرامة بدل فاقد: 1 (550ج)"
+  const finesDetailedList = fineGroupsList
+    .map((g) => `${g.name}: ${g.count} (${g.totalAmount.toLocaleString()}ج)`)
+    .join(" | ");
 
-  const finesShortText = Object.values(fineGroups)
+  const finesPrintSummary = fineGroupsList
+    .map((g) => `${g.name}: ${g.count} (${g.totalAmount.toLocaleString()}ج)`)
+    .join(" | ");
+
+  const finesShortText = fineGroupsList
     .map((g) => `${g.name}: ${g.count}`)
     .join("، ");
 
@@ -287,6 +291,7 @@ export function computeAmanDetailedStats(
     finesCount,
     totalFinesAmount,
     fineGroups,
+    fineGroupsList,
     finesDetailedList,
     finesPrintSummary,
     finesShortText,
@@ -1666,28 +1671,31 @@ export default function AmanReport({
             </div>
 
             <div className="flex items-center gap-1.5 bg-emerald-50 text-emerald-900 px-3 py-1.5 rounded-xl text-xs font-bold border border-emerald-200">
-              <span>جواز عادي:</span>
+              <span>عادي:</span>
               <span className="font-mono text-sm text-emerald-950 font-black">{overallStats.normalCount}</span>
-              <span className="text-[11px] text-emerald-700 font-normal">
-                (× {overallStats.normalPrice.toLocaleString()} = <strong className="text-emerald-950 font-bold">{overallStats.normalTotal.toLocaleString()} ج.م</strong>)
+              <span className="text-[11px] text-emerald-800 font-bold">
+                ({overallStats.normalTotal.toLocaleString()}ج)
               </span>
             </div>
 
             <div className="flex items-center gap-1.5 bg-amber-50 text-amber-900 px-3 py-1.5 rounded-xl text-xs font-bold border border-amber-200">
-              <span>جواز عاجل / مستعجل:</span>
+              <span>عاجل:</span>
               <span className="font-mono text-sm text-amber-950 font-black">{overallStats.urgentCount}</span>
-              <span className="text-[11px] text-amber-700 font-normal">
-                (× {overallStats.urgentPrice.toLocaleString()} = <strong className="text-amber-950 font-bold">{overallStats.urgentTotal.toLocaleString()} ج.م</strong>)
+              <span className="text-[11px] text-amber-800 font-bold">
+                ({overallStats.urgentTotal.toLocaleString()}ج)
               </span>
             </div>
 
             <div className="flex items-center gap-1.5 bg-purple-50 text-purple-900 px-3 py-1.5 rounded-xl text-xs font-bold border border-purple-200">
-              <span>الغرامات الحكومية:</span>
-              <span className="font-mono text-sm text-purple-950 font-black">{overallStats.finesCount}</span>
-              {overallStats.finesCount > 0 ? (
-                <span className="text-[11px] text-purple-700 font-normal mr-1">
-                  ({overallStats.finesDetailedList}) = <strong className="text-purple-950 font-bold">{overallStats.totalFinesAmount.toLocaleString()} ج.م</strong>
-                </span>
+              <span>الغرامات:</span>
+              {overallStats.fineGroupsList.length > 0 ? (
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {overallStats.fineGroupsList.map((fg) => (
+                    <span key={fg.name} className="text-[11px] bg-purple-100/90 text-purple-950 px-2 py-0.5 rounded-md font-bold">
+                      {fg.name}: {fg.count} ({fg.totalAmount.toLocaleString()}ج)
+                    </span>
+                  ))}
+                </div>
               ) : (
                 <span className="text-[11px] text-purple-600 font-normal mr-1">(لا توجد)</span>
               )}
@@ -2011,47 +2019,56 @@ export default function AmanReport({
 
                 {/* Signoff Section & Small Reference Breakdown requested by user */}
                 <div 
-                  className="flex justify-between items-center px-2 pt-1 mt-1 border-t-2 border-black text-black font-cairo"
-                  style={{ height: "14mm", maxHeight: "15mm", boxSizing: "border-box" }}
+                  className="w-full flex justify-between items-center px-1 pt-1 mt-1 border-t-2 border-black text-black font-cairo"
+                  style={{ 
+                    width: "100%", 
+                    direction: "rtl",
+                    height: "14mm", 
+                    maxHeight: "15mm", 
+                    boxSizing: "border-box" 
+                  }}
                 >
-                  {/* Right: Signature */}
-                  <div className="flex items-center gap-2" style={{ fontFamily: "'Cairo', sans-serif", fontSize: "16px", fontWeight: "bold" }}>
+                  {/* Right: Signature (رئيس القسم في أقصى اليمين) */}
+                  <div 
+                    className="flex items-center gap-1.5 shrink-0" 
+                    style={{ fontFamily: "'Cairo', sans-serif", fontSize: "15px", fontWeight: "bold" }}
+                  >
                     <span>رئيس القسم :</span>
-                    <span className="inline-block border-b-2 border-dotted border-black w-36 sm:w-48 h-3 mb-1"></span>
+                    <span className="inline-block border-b-2 border-dotted border-black w-24 sm:w-28 h-2 mb-0.5"></span>
                   </div>
 
-                  {/* Left: Small font reference breakdown requested by user */}
+                  {/* Left: Financial breakdown statement in far left (أقصى اليسار - بعيداً تماماً عن توقيع رئيس القسم) */}
                   <div 
-                    className="flex items-center gap-1.5 border border-black/50 px-2 py-0.5 rounded-sm bg-slate-50/90 print:bg-transparent print:border-black/60 flex-wrap"
-                    style={{ 
-                      fontFamily: "'Cairo', sans-serif", 
-                      fontSize: "9.5px", 
-                      fontWeight: "bold",
-                      lineHeight: 1.25 
-                    }}
+                    className="shrink-0 flex items-center"
+                    style={{ direction: "rtl" }}
                   >
-                    <span className="font-extrabold text-slate-900">📌 تفصيلة الكشف:</span>
-                    <span>عادي: <strong className="text-black">{pageStats[pageIdx]?.normalCount || 0}</strong> <span className="text-[9px] text-slate-700 font-mono">({(pageStats[pageIdx]?.normalTotal || 0).toLocaleString()}ج)</span></span>
-                    <span>|</span>
-                    <span>عاجل: <strong className="text-black">{pageStats[pageIdx]?.urgentCount || 0}</strong> <span className="text-[9px] text-slate-700 font-mono">({(pageStats[pageIdx]?.urgentTotal || 0).toLocaleString()}ج)</span></span>
-                    <span>|</span>
-                    <span>
-                      الغرامات: <strong className="text-black">{pageStats[pageIdx]?.finesCount || 0}</strong>
-                      {(pageStats[pageIdx]?.finesCount || 0) > 0 ? (
-                        <span className="text-[9px] text-slate-700 font-mono mr-1">
-                          {pageStats[pageIdx]?.finesPrintSummary ? `(${pageStats[pageIdx].finesPrintSummary})` : ""} = <strong>{(pageStats[pageIdx]?.totalFinesAmount || 0).toLocaleString()}ج</strong>
-                        </span>
-                      ) : " (لا توجد)"}
-                    </span>
-                    <span>|</span>
-                    <span className="bg-slate-950 text-white px-2 py-0.2 rounded-xs font-black print:bg-transparent print:text-black print:border print:border-black text-[10px]">
-                      الإجمالي: {(pageStats[pageIdx]?.grandTotal || 0).toLocaleString()} ج.م
-                    </span>
-                    {totalPages > 1 && (
-                      <span className="text-[9px] text-slate-500 font-normal mr-1">
-                        [ص {pageIdx + 1}/{totalPages} - إجمالي الكشف: {overallStats.grandTotal.toLocaleString()} ج.م]
+                    <div 
+                      className="inline-flex items-center gap-1.5 border border-black/60 px-2 py-0.5 rounded-xs bg-slate-50/90 print:bg-transparent print:border-black/70 flex-nowrap whitespace-nowrap"
+                      style={{ 
+                        fontFamily: "'Cairo', sans-serif", 
+                        fontSize: "9px", 
+                        fontWeight: "bold",
+                        lineHeight: 1.2 
+                      }}
+                    >
+                      <span className="font-extrabold text-slate-950">📌 تفصيلة الكشف:</span>
+                      <span>عادي: {pageStats[pageIdx]?.normalCount || 0} ({(pageStats[pageIdx]?.normalTotal || 0).toLocaleString()}ج)</span>
+                      <span className="text-black/50 font-normal">|</span>
+                      <span>عاجل: {pageStats[pageIdx]?.urgentCount || 0} ({(pageStats[pageIdx]?.urgentTotal || 0).toLocaleString()}ج)</span>
+                      
+                      {/* Dynamic list of fines present in this page */}
+                      {pageStats[pageIdx]?.fineGroupsList && pageStats[pageIdx].fineGroupsList.map((fg) => (
+                        <React.Fragment key={fg.name}>
+                          <span className="text-black/50 font-normal">|</span>
+                          <span>{fg.name}: {fg.count} ({fg.totalAmount.toLocaleString()}ج)</span>
+                        </React.Fragment>
+                      ))}
+
+                      <span className="text-black/50 font-normal">|</span>
+                      <span className="font-black text-black">
+                        الإجمالي: {(pageStats[pageIdx]?.grandTotal || 0).toLocaleString()} ج.م
                       </span>
-                    )}
+                    </div>
                   </div>
                 </div>
 
