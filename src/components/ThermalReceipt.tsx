@@ -314,12 +314,25 @@ export default function ThermalReceipt({ invoice, settings, services, onClose, o
                                   </table>
 
                                   {/* Government fine row if applicable */}
-                                  {fineAmount > 0 && (
+                                  {Array.isArray(item.fines) && item.fines.length > 1 ? (
+                                    <div className="border-t-2 border-black px-2 py-1 bg-white text-[9.5px] text-black space-y-0.5 font-bold">
+                                      <div className="flex justify-between items-center text-[10px]">
+                                        <span>⚠️ تشمل غرامات حكومية ({item.fines.length} غرامات):</span>
+                                        <span className="font-mono font-black">+{fineAmount.toFixed(2)} ج.م</span>
+                                      </div>
+                                      {item.fines.map((f, fIdx) => (
+                                        <div key={fIdx} className="flex justify-between items-center pr-2.5 text-[9px] text-black font-normal">
+                                          <span>• {f.name}:</span>
+                                          <span className="font-mono font-bold">+{f.amount.toFixed(2)} ج.م</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : fineAmount > 0 ? (
                                     <div className="border-t-2 border-black px-2 py-1 bg-white text-[10px] text-black flex justify-between items-center font-bold">
                                       <span>⚠️ تشمل غرامة حكومية ({item.fineName || "غرامة"}):</span>
                                       <span className="font-mono font-black">+{fineAmount.toFixed(2)} ج.م (للوحدة)</span>
                                     </div>
-                                  )}
+                                  ) : null}
 
                                   {/* Subtotal calculation note for clarity when quantity > 1 or fine exists */}
                                   {(item.quantity > 1 || fineAmount > 0) && (

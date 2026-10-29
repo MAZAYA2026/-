@@ -40,6 +40,7 @@ export interface CustomerInput {
     notes?: string; // ملاحظات أو تعليمات خاصة بالخدمة
     fineName?: string; // اسم الغرامة الحكومية إن وجدت (لخدمات #)
     fineAmount?: number; // مبلغ الغرامة الحكومية للوحدة إن وجد
+    fines?: { name: string; amount: number }[]; // قائمة الغرامات الحكومية المتعددة إن وجدت
     completed?: boolean; // هل تم الانتهاء من تنفيذ هذه الخدمة
     completedAt?: string; // تاريخ وتوقيت الانتهاء من تنفيذ هذه الخدمة
     executionNote?: string; // ملاحظات تنفيذ الخدمة (مثل: تأخير بسبب كذا أو مع مندوب كذا)
@@ -143,6 +144,7 @@ export interface AmanPostponedItem {
   serviceType?: string;
   fineName?: string;
   fineAmount?: number;
+  fines?: { name: string; amount: number }[];
   status?: "مؤجل" | "تم_الإدراج";
 }
 

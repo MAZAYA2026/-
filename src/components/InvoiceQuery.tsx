@@ -1235,55 +1235,111 @@ export default function InvoiceQuery({
                           </div>
 
                           {/* Government fine selection when service starts with # */}
-                          {isPass && (
-                            <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-200/60 text-[11px]">
-                              <span className="text-amber-800 font-bold flex items-center gap-1">
-                                <AlertTriangle className="w-3 h-3 text-amber-600" />
-                                غرامة حكومية:
-                              </span>
-                              <select
-                                value={s.fineName || ""}
-                                onChange={(e) => {
-                                  const val = e.target.value;
-                                  const updated = [...editCustomers];
-                                  if (!val) {
-                                    updated[cIdx].services[sIdx].fineName = "";
-                                    updated[cIdx].services[sIdx].fineAmount = 0;
-                                  } else {
-                                    const found = governmentFines.find(f => f.name === val);
-                                    updated[cIdx].services[sIdx].fineName = val;
-                                    updated[cIdx].services[sIdx].fineAmount = found ? found.amount : (updated[cIdx].services[sIdx].fineAmount || 500);
-                                  }
-                                  setEditCustomers(updated);
-                                }}
-                                className="bg-white border border-amber-300 rounded-md px-2 py-1 text-xs text-amber-950 font-cairo"
-                              >
-                                <option value="">-- بدون غرامة --</option>
-                                {governmentFines.map(f => (
-                                  <option key={f.id} value={f.name}>
-                                    {f.name} (+{f.amount} ج.م)
-                                  </option>
-                                ))}
-                                <option value="__custom__">غرامة مخصصة...</option>
-                              </select>
-                              {s.fineName && (
-                                <div className="flex items-center gap-1">
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    value={s.fineAmount || 0}
-                                    onChange={(e) => {
-                                      const updated = [...editCustomers];
-                                      updated[cIdx].services[sIdx].fineAmount = parseFloat(e.target.value) || 0;
-                                      setEditCustomers(updated);
-                                    }}
-                                    className="w-16 bg-white border border-amber-300 rounded-md px-1.5 py-1 text-xs font-mono font-bold text-amber-950"
-                                  />
-                                  <span className="text-[10px] text-slate-400">ج.م</span>
+                          {isPass && (() => {
+                            const currentFines: { name: string; amount: number }[] = Array.isArray(s.fines) && s.fines.length > 0
+                              ? s.fines
+                              : (s.fineName || (s.fineAmount && s.fineAmount > 0))
+                                ? [{ name: s.fineName || "غرامة حكومية", amount: s.fineAmount || 0 }]
+                                : [];
+
+                            const syncServiceFines = (finesArr: { name: string; amount: number }[]) => {
+                              const updated = [...editCustomers];
+                              updated[cIdx].services[sIdx].fines = finesArr;
+                              updated[cIdx].services[sIdx].fineAmount = finesArr.reduce((sum, f) => sum + (f.amount || 0), 0);
+                              updated[cIdx].services[sIdx].fineName = finesArr.map((f) => f.name).join(" + ");
+                              setEditCustomers(updated);
+                            };
+
+                            return (
+                              <div className="space-y-1.5 pt-1 border-t border-slate-200/60 text-[11px]">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-amber-800 font-bold flex items-center gap-1">
+                                    <AlertTriangle className="w-3 h-3 text-amber-600" />
+                                    غرامات حكومية للجواز (يمكن اختيار أكثر من غرامة):
+                                  </span>
+                                  {currentFines.length > 0 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => syncServiceFines([])}
+                                      className="text-[10px] text-red-600 hover:text-red-800 font-bold cursor-pointer"
+                                    >
+                                      إلغاء الغرامات ✕
+                                    </button>
+                                  )}
                                 </div>
-                              )}
-                            </div>
-                          )}
+
+                                {currentFines.map((f, fIdx) => (
+                                  <div key={fIdx} className="flex items-center gap-1.5 bg-amber-50/50 p-1 rounded-md border border-amber-200">
+                                    <input
+                                      type="text"
+                                      value={f.name}
+                                      onChange={(e) => {
+                                        const next = [...currentFines];
+                                        next[fIdx] = { ...next[fIdx], name: e.target.value };
+                                        syncServiceFines(next);
+                                      }}
+                                      className="flex-1 bg-white border border-amber-300 rounded px-1.5 py-0.5 text-xs font-cairo"
+                                      placeholder="مسمى الغرامة..."
+                                    />
+                                    <div className="flex items-center gap-1">
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        value={f.amount}
+                                        onChange={(e) => {
+                                          const next = [...currentFines];
+                                          next[fIdx] = { ...next[fIdx], amount: parseFloat(e.target.value) || 0 };
+                                          syncServiceFines(next);
+                                        }}
+                                        className="w-16 bg-white border border-amber-300 rounded px-1.5 py-0.5 text-xs font-mono font-bold text-amber-950"
+                                      />
+                                      <span className="text-[10px] text-slate-400">ج.م</span>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const next = currentFines.filter((_, i) => i !== fIdx);
+                                        syncServiceFines(next);
+                                      }}
+                                      className="p-1 text-red-500 hover:text-red-700 cursor-pointer"
+                                      title="حذف هذه الغرامة"
+                                    >
+                                      <Trash2 className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                ))}
+
+                                <select
+                                  value=""
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    if (!val) return;
+                                    const found = governmentFines.find((gf) => gf.name === val);
+                                    const next = [
+                                      ...currentFines,
+                                      {
+                                        name: val === "__custom__" ? "غرامة مخصصة" : val,
+                                        amount: val === "__custom__" ? 500 : (found ? found.amount : 0)
+                                      }
+                                    ];
+                                    syncServiceFines(next);
+                                    e.target.value = "";
+                                  }}
+                                  className="w-full bg-white border border-amber-300 rounded-md px-2 py-1 text-xs text-amber-950 font-cairo cursor-pointer"
+                                >
+                                  <option value="">
+                                    {currentFines.length === 0 ? "+ إضافة غرامة حكومية للجواز..." : "+ إضافة غرامة أخرى للجواز..."}
+                                  </option>
+                                  {governmentFines.map((gf) => (
+                                    <option key={gf.id} value={gf.name}>
+                                      {gf.name} (+{gf.amount} ج.م)
+                                    </option>
+                                  ))}
+                                  <option value="__custom__">غرامة مخصصة...</option>
+                                </select>
+                              </div>
+                            );
+                          })()}
 
                           {/* Service Completion & Execution Note inside Edit Modal */}
                           <div className="pt-2 border-t border-slate-200/60 space-y-2">

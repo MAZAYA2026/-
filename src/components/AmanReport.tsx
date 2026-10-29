@@ -56,6 +56,7 @@ export interface AmanRowItem {
   hasFine?: boolean;
   fineName?: string;
   fineAmount?: number;
+  fines?: { name: string; amount: number }[];
 }
 
 interface AmanReportProps {
@@ -103,12 +104,14 @@ export function resolveAmanDetails(
   hasFine: boolean;
   fineName: string;
   fineAmount: number;
+  fines?: { name: string; amount: number }[];
   statusText: string;
 } {
   let serviceType: "عادي" | "مستعجل" = (row.serviceType as any) === "مستعجل" ? "مستعجل" : "عادي";
   let hasFine = row.hasFine;
   let fineName = (row.fineName || "").trim();
   let fineAmount = Number(row.fineAmount) || 0;
+  let rowFines: { name: string; amount: number }[] = Array.isArray(row.fines) && row.fines.length > 0 ? [...row.fines] : [];
   const rowNotes = (row.notes || "").trim();
 
   // Find linked customer from fresh invoices list if needed
@@ -138,14 +141,25 @@ export function resolveAmanDetails(
         const isUrgent = fullName.includes("مستعجل") || fullName.includes("عاجل") || fullName.includes("فورى");
         serviceType = isUrgent ? "مستعجل" : "عادي";
 
-        if (!fineName && amanSrv.fineName && amanSrv.fineName.trim().length > 0) {
-          fineName = amanSrv.fineName.trim();
-        }
-        if (!fineAmount && amanSrv.fineAmount && amanSrv.fineAmount > 0) {
-          fineAmount = amanSrv.fineAmount;
-        }
-        if (hasFine === undefined) {
-          hasFine = !!(fineName || fineAmount > 0);
+        // Multi-fine support from invoice
+        if (Array.isArray(amanSrv.fines) && amanSrv.fines.length > 0) {
+          rowFines = amanSrv.fines.map((f) => ({
+            name: f.name.trim().startsWith("غرامة") ? f.name.trim() : `غرامة ${f.name.trim()}`,
+            amount: Number(f.amount) || 0,
+          }));
+          fineAmount = rowFines.reduce((sum, f) => sum + f.amount, 0);
+          fineName = rowFines.map((f) => f.name).join(" + ");
+          hasFine = true;
+        } else {
+          if (!fineName && amanSrv.fineName && amanSrv.fineName.trim().length > 0) {
+            fineName = amanSrv.fineName.trim();
+          }
+          if (!fineAmount && amanSrv.fineAmount && amanSrv.fineAmount > 0) {
+            fineAmount = amanSrv.fineAmount;
+          }
+          if (hasFine === undefined) {
+            hasFine = !!(fineName || fineAmount > 0);
+          }
         }
       }
     }
@@ -168,20 +182,32 @@ export function resolveAmanDetails(
   }
 
   // Exact matching against configured governmentFines ONLY (never substring match, to prevent reverting custom/renamed fines to old names)
-  if (governmentFines && Array.isArray(governmentFines) && fineName) {
-    const matchedFine = governmentFines.find((f) => f.name.trim() === fineName);
-    if (matchedFine) {
-      fineName = matchedFine.name.trim();
-      if (!fineAmount) fineAmount = matchedFine.amount;
+  if (rowFines.length === 0 && governmentFines && Array.isArray(governmentFines) && fineName) {
+    // If fineName contains multiple fines e.g. "غرامة المؤهل + غرامة بدل فاقد"
+    if (fineName.includes("+") || fineName.includes("،")) {
+      const parts = fineName.split(/\s*[\+\،]\s*/).filter(Boolean);
+      rowFines = parts.map((p) => {
+        const cleanP = p.trim().startsWith("غرامة") ? p.trim() : `غرامة ${p.trim()}`;
+        const match = governmentFines.find((f) => f.name.trim() === cleanP || f.name.trim() === p.trim());
+        return {
+          name: cleanP,
+          amount: match ? match.amount : getFineAmount({ fineName: cleanP }, governmentFines),
+        };
+      });
+      fineAmount = rowFines.reduce((sum, f) => sum + f.amount, 0);
+    } else {
+      const matchedFine = governmentFines.find((f) => f.name.trim() === fineName);
+      if (matchedFine) {
+        fineName = matchedFine.name.trim();
+        if (!fineAmount) fineAmount = matchedFine.amount;
+      }
     }
   }
 
-  // User explicit requirements:
-  // 1. "عمود الملاحظات لا تضع به المهنة"
-  // 2. "وفى حالة عدم وجود غرامات لا تكتب لا توجد غرامة حيث الطبيعى طالما مفيش غرامة لا يذكر لها اسم وتكتب فقط الغرامة فى حالة تواجدها"
-  // 3. "مسميات الغرامات تسجل بنفس المسمى بالضبط"
   let fineLabel = "";
-  if (hasFine && (fineName || fineAmount > 0)) {
+  if (rowFines.length > 0) {
+    fineLabel = rowFines.map((f) => (f.name.startsWith("غرامة") ? f.name : `غرامة ${f.name}`)).join(" + ");
+  } else if (hasFine && (fineName || fineAmount > 0)) {
     const cleanFineName = (fineName || "غرامة حكومية").trim();
     fineLabel = cleanFineName.startsWith("غرامة") ? cleanFineName : `غرامة ${cleanFineName}`;
   }
@@ -190,9 +216,10 @@ export function resolveAmanDetails(
 
   return {
     serviceType,
-    hasFine: !!hasFine,
-    fineName,
-    fineAmount,
+    hasFine: !!hasFine || rowFines.length > 0,
+    fineName: fineName || (rowFines.length > 0 ? rowFines.map((f) => f.name).join(" + ") : ""),
+    fineAmount: fineAmount || (rowFines.length > 0 ? rowFines.reduce((s, f) => s + f.amount, 0) : 0),
+    fines: rowFines.length > 0 ? rowFines : undefined,
     statusText,
   };
 }
@@ -243,18 +270,35 @@ export function computeAmanDetailedStats(
     }
 
     if (details.hasFine) {
-      finesCount++;
-      const rawName = (details.fineName || "غرامة حكومية").trim();
-      const cleanName = rawName.replace(/^غرامة\s+/, "").trim();
-      const displayName = cleanName.startsWith("غرامة") ? cleanName : `غرامة ${cleanName}`;
-      const unitPrice = getFineAmount(details, governmentFines);
+      // Multiple fines for the same person support
+      if (details.fines && details.fines.length > 0) {
+        details.fines.forEach((f) => {
+          finesCount++;
+          const cleanName = f.name.replace(/^غرامة\s+/, "").trim();
+          const displayName = cleanName.startsWith("غرامة") ? cleanName : `غرامة ${cleanName}`;
+          const unitPrice = f.amount > 0 ? f.amount : getFineAmount({ fineName: displayName }, governmentFines);
 
-      if (!fineGroups[displayName]) {
-        fineGroups[displayName] = { name: displayName, count: 0, unitPrice, totalAmount: 0 };
+          if (!fineGroups[displayName]) {
+            fineGroups[displayName] = { name: displayName, count: 0, unitPrice, totalAmount: 0 };
+          }
+          fineGroups[displayName].count++;
+          fineGroups[displayName].totalAmount += unitPrice;
+          totalFinesAmount += unitPrice;
+        });
+      } else {
+        finesCount++;
+        const rawName = (details.fineName || "غرامة حكومية").trim();
+        const cleanName = rawName.replace(/^غرامة\s+/, "").trim();
+        const displayName = cleanName.startsWith("غرامة") ? cleanName : `غرامة ${cleanName}`;
+        const unitPrice = getFineAmount(details, governmentFines);
+
+        if (!fineGroups[displayName]) {
+          fineGroups[displayName] = { name: displayName, count: 0, unitPrice, totalAmount: 0 };
+        }
+        fineGroups[displayName].count++;
+        fineGroups[displayName].totalAmount += unitPrice;
+        totalFinesAmount += unitPrice;
       }
-      fineGroups[displayName].count++;
-      fineGroups[displayName].totalAmount += unitPrice;
-      totalFinesAmount += unitPrice;
     }
   });
 
@@ -2038,37 +2082,92 @@ export default function AmanReport({
                   </div>
 
                   {/* Left: Financial breakdown statement in far left (أقصى اليسار - بعيداً تماماً عن توقيع رئيس القسم) */}
+                  {/* Left: Financial breakdown statement in far left (أقصى اليسار - بعيداً تماماً عن توقيع رئيس القسم) */}
                   <div 
                     className="shrink-0 flex items-center"
                     style={{ direction: "rtl" }}
                   >
-                    <div 
-                      className="inline-flex items-center gap-1.5 border border-black/60 px-2 py-0.5 rounded-xs bg-slate-50/90 print:bg-transparent print:border-black/70 flex-nowrap whitespace-nowrap"
-                      style={{ 
-                        fontFamily: "'Cairo', sans-serif", 
-                        fontSize: "9px", 
-                        fontWeight: "bold",
-                        lineHeight: 1.2 
-                      }}
-                    >
-                      <span className="font-extrabold text-slate-950">📌 تفصيلة الكشف:</span>
-                      <span>عادي: {pageStats[pageIdx]?.normalCount || 0} ({(pageStats[pageIdx]?.normalTotal || 0).toLocaleString()}ج)</span>
-                      <span className="text-black/50 font-normal">|</span>
-                      <span>عاجل: {pageStats[pageIdx]?.urgentCount || 0} ({(pageStats[pageIdx]?.urgentTotal || 0).toLocaleString()}ج)</span>
-                      
-                      {/* Dynamic list of fines present in this page */}
-                      {pageStats[pageIdx]?.fineGroupsList && pageStats[pageIdx].fineGroupsList.map((fg) => (
-                        <React.Fragment key={fg.name}>
-                          <span className="text-black/50 font-normal">|</span>
-                          <span>{fg.name}: {fg.count} ({fg.totalAmount.toLocaleString()}ج)</span>
-                        </React.Fragment>
-                      ))}
+                    {(() => {
+                      const stats = pageStats[pageIdx];
+                      const fines = stats?.fineGroupsList || [];
+                      const isMultiLine = fines.length >= 2;
 
-                      <span className="text-black/50 font-normal">|</span>
-                      <span className="font-black text-black">
-                        الإجمالي: {(pageStats[pageIdx]?.grandTotal || 0).toLocaleString()} ج.م
-                      </span>
-                    </div>
+                      if (!isMultiLine) {
+                        return (
+                          <div 
+                            className="inline-flex items-center gap-1.5 border border-black/60 px-2 py-0.5 rounded-xs bg-slate-50/90 print:bg-transparent print:border-black/70 flex-nowrap whitespace-nowrap"
+                            style={{ 
+                              fontFamily: "'Cairo', sans-serif", 
+                              fontSize: "9px", 
+                              fontWeight: "bold",
+                              lineHeight: 1.2 
+                            }}
+                          >
+                            <span className="font-extrabold text-slate-950">📌 تفصيلة الكشف:</span>
+                            <span>عادي: {stats?.normalCount || 0} ({(stats?.normalTotal || 0).toLocaleString()}ج)</span>
+                            <span className="text-black/50 font-normal">|</span>
+                            <span>عاجل: {stats?.urgentCount || 0} ({(stats?.urgentTotal || 0).toLocaleString()}ج)</span>
+                            
+                            {fines.map((fg) => (
+                              <React.Fragment key={fg.name}>
+                                <span className="text-black/50 font-normal">|</span>
+                                <span>{fg.name}: {fg.count} ({fg.totalAmount.toLocaleString()}ج)</span>
+                              </React.Fragment>
+                            ))}
+
+                            <span className="text-black/50 font-normal">|</span>
+                            <span className="font-black text-black">
+                              الإجمالي: {(stats?.grandTotal || 0).toLocaleString()} ج.م
+                            </span>
+                          </div>
+                        );
+                      }
+
+                      // تقسيم على سطرين عندما تكون بنود الغرامات كثيرة (بندان فأكثر)
+                      const splitIdx = Math.ceil(fines.length / 2);
+                      const line1Fines = fines.slice(0, splitIdx);
+                      const line2Fines = fines.slice(splitIdx);
+
+                      return (
+                        <div 
+                          className="inline-flex flex-col gap-0.5 border border-black/60 px-2 py-0.5 rounded-xs bg-slate-50/90 print:bg-transparent print:border-black/70 text-right"
+                          style={{ 
+                            fontFamily: "'Cairo', sans-serif", 
+                            fontSize: "8.5px", 
+                            fontWeight: "bold",
+                            lineHeight: 1.25 
+                          }}
+                        >
+                          {/* السطر الأول: عادي وعاجل ونصف الغرامات */}
+                          <div className="flex items-center gap-1.5 flex-nowrap whitespace-nowrap">
+                            <span className="font-extrabold text-slate-950">📌 تفصيلة الكشف:</span>
+                            <span>عادي: {stats?.normalCount || 0} ({(stats?.normalTotal || 0).toLocaleString()}ج)</span>
+                            <span className="text-black/50 font-normal">|</span>
+                            <span>عاجل: {stats?.urgentCount || 0} ({(stats?.urgentTotal || 0).toLocaleString()}ج)</span>
+                            {line1Fines.map((fg) => (
+                              <React.Fragment key={fg.name}>
+                                <span className="text-black/50 font-normal">|</span>
+                                <span>{fg.name}: {fg.count} ({fg.totalAmount.toLocaleString()}ج)</span>
+                              </React.Fragment>
+                            ))}
+                          </div>
+
+                          {/* السطر الثاني: باقي الغرامات والمبلغ الإجمالي */}
+                          <div className="flex items-center gap-1.5 flex-nowrap whitespace-nowrap">
+                            {line2Fines.map((fg, idx) => (
+                              <React.Fragment key={fg.name}>
+                                {idx > 0 && <span className="text-black/50 font-normal">|</span>}
+                                <span>{fg.name}: {fg.count} ({fg.totalAmount.toLocaleString()}ج)</span>
+                                <span className="text-black/50 font-normal mr-1">|</span>
+                              </React.Fragment>
+                            ))}
+                            <span className="font-black text-black">
+                              الإجمالي: {(stats?.grandTotal || 0).toLocaleString()} ج.م
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
 

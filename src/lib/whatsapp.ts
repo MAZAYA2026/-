@@ -85,7 +85,12 @@ export function buildCustomersAndServicesWhatsAppBlock(
       ];
 
       // Government fine row if applicable
-      if (fineAmount > 0) {
+      if (Array.isArray(s.fines) && s.fines.length > 1) {
+        sBlock.push(`  ⚠️ *تشمل غرامات حكومية (+${fineAmount.toFixed(2)} ج.م للوحدة):*`);
+        s.fines.forEach(f => {
+          sBlock.push(`    • ${f.name}: +${f.amount.toFixed(2)} ج.م`);
+        });
+      } else if (fineAmount > 0) {
         sBlock.push(`  ⚠️ *تشمل غرامة حكومية (${s.fineName || "غرامة"}):* +${fineAmount.toFixed(2)} ج.م (للوحدة)`);
       }
 

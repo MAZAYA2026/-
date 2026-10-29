@@ -322,6 +322,7 @@ export default function InvoiceCreator({
     if (!isPass) {
       item.fineName = "";
       item.fineAmount = 0;
+      item.fines = [];
     }
 
     if (matched) {
@@ -368,51 +369,83 @@ export default function InvoiceCreator({
     setCustomers(updated);
   };
 
-  const handleFineSelect = (cIdx: number, sIdx: number, fineNameVal: string) => {
+  // Multi-fine support handlers for passport services (User requirement: امكانية اختيار اكثر من غرامة لنفس الشخص)
+  const handleAddFineToService = (cIdx: number, sIdx: number, fineNameVal: string) => {
+    if (!fineNameVal) return;
     const updated = [...customers];
     const item = updated[cIdx].services[sIdx];
-    if (!fineNameVal) {
-      item.fineName = "";
-      item.fineAmount = 0;
-    } else if (fineNameVal === "__custom__") {
-      item.fineName = "غرامة حكومية مخصصة";
-      item.fineAmount = 500;
+    if (!Array.isArray(item.fines)) {
+      item.fines = [];
+      if (item.fineName || (item.fineAmount && item.fineAmount > 0)) {
+        item.fines.push({ name: item.fineName || "غرامة حكومية", amount: item.fineAmount || 0 });
+      }
+    }
+
+    if (fineNameVal === "__custom__") {
+      item.fines.push({ name: "غرامة مخصصة", amount: 500 });
     } else {
-      const found = governmentFines.find(f => f.name === fineNameVal);
-      item.fineName = fineNameVal;
-      item.fineAmount = found ? found.amount : 0;
+      const found = governmentFines.find((f) => f.name === fineNameVal);
+      item.fines.push({ name: fineNameVal, amount: found ? found.amount : 0 });
     }
 
-    const matched = services.find(s => s.id === item.serviceId || s.name === item.serviceId);
+    item.fineAmount = item.fines.reduce((sum, f) => sum + (f.amount || 0), 0);
+    item.fineName = item.fines.map((f) => f.name).join(" + ");
+
+    const matched = services.find((s) => s.id === item.serviceId || s.name === item.serviceId);
     if (matched) {
       item.price = (matched.govPrice + (item.fineAmount || 0) + matched.officeFee) * item.quantity;
     }
     setCustomers(updated);
   };
 
-  const handleFineNameChange = (cIdx: number, sIdx: number, val: string) => {
-    const updated = [...customers];
-    updated[cIdx].services[sIdx].fineName = val;
-    setCustomers(updated);
-  };
-
-  const handleFineAmountChange = (cIdx: number, sIdx: number, val: number) => {
+  const handleUpdateFineInService = (cIdx: number, sIdx: number, fIdx: number, patch: Partial<{ name: string; amount: number }>) => {
     const updated = [...customers];
     const item = updated[cIdx].services[sIdx];
-    item.fineAmount = Math.max(0, val);
-    const matched = services.find(s => s.id === item.serviceId || s.name === item.serviceId);
+    if (!Array.isArray(item.fines)) {
+      item.fines = [];
+      if (item.fineName || (item.fineAmount && item.fineAmount > 0)) {
+        item.fines.push({ name: item.fineName || "غرامة حكومية", amount: item.fineAmount || 0 });
+      }
+    }
+    if (item.fines[fIdx]) {
+      item.fines[fIdx] = { ...item.fines[fIdx], ...patch };
+      if (patch.amount !== undefined) {
+        item.fines[fIdx].amount = Math.max(0, patch.amount);
+      }
+    }
+    item.fineAmount = item.fines.reduce((sum, f) => sum + (f.amount || 0), 0);
+    item.fineName = item.fines.map((f) => f.name).join(" + ");
+
+    const matched = services.find((s) => s.id === item.serviceId || s.name === item.serviceId);
     if (matched) {
       item.price = (matched.govPrice + (item.fineAmount || 0) + matched.officeFee) * item.quantity;
     }
     setCustomers(updated);
   };
 
-  const handleRemoveFine = (cIdx: number, sIdx: number) => {
+  const handleRemoveFineFromService = (cIdx: number, sIdx: number, fIdx: number) => {
     const updated = [...customers];
     const item = updated[cIdx].services[sIdx];
+    if (Array.isArray(item.fines)) {
+      item.fines = item.fines.filter((_, i) => i !== fIdx);
+    }
+    item.fineAmount = (item.fines || []).reduce((sum, f) => sum + (f.amount || 0), 0);
+    item.fineName = (item.fines || []).map((f) => f.name).join(" + ");
+
+    const matched = services.find((s) => s.id === item.serviceId || s.name === item.serviceId);
+    if (matched) {
+      item.price = (matched.govPrice + (item.fineAmount || 0) + matched.officeFee) * item.quantity;
+    }
+    setCustomers(updated);
+  };
+
+  const handleRemoveAllFines = (cIdx: number, sIdx: number) => {
+    const updated = [...customers];
+    const item = updated[cIdx].services[sIdx];
+    item.fines = [];
     item.fineName = "";
     item.fineAmount = 0;
-    const matched = services.find(s => s.id === item.serviceId || s.name === item.serviceId);
+    const matched = services.find((s) => s.id === item.serviceId || s.name === item.serviceId);
     if (matched) {
       item.price = (matched.govPrice + matched.officeFee) * item.quantity;
     }
@@ -1531,71 +1564,109 @@ export default function InvoiceCreator({
                             </div>
 
                             {/* Government Fines option for passport services starting with # */}
-                            {selectedServiceObj.name.trim().startsWith("#") && (
-                              <div className="bg-amber-50/80 border border-amber-200 rounded-lg p-2.5 space-y-2 text-xs">
-                                <div className="flex items-center justify-between">
-                                  <span className="font-bold text-amber-900 flex items-center gap-1.5">
-                                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
-                                    <span>إضافة غرامة حكومية للخدمة (اختياري: فقد / تالف / تأخير...):</span>
-                                  </span>
-                                  {((srv.fineAmount && srv.fineAmount > 0) || srv.fineName) ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleRemoveFine(cIdx, sIdx)}
-                                      className="text-[10px] text-red-600 hover:text-red-800 font-bold cursor-pointer"
-                                    >
-                                      إلغاء الغرامة ✕
-                                    </button>
-                                  ) : null}
-                                </div>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                  <select
-                                    value={srv.fineName || ""}
-                                    onChange={(e) => handleFineSelect(cIdx, sIdx, e.target.value)}
-                                    className="w-full bg-white border border-amber-300 rounded-lg px-2.5 py-1.5 text-xs text-amber-950 font-cairo"
-                                  >
-                                    <option value="">-- بدون غرامة حكومية --</option>
-                                    {governmentFines.map(f => (
-                                      <option key={f.id} value={f.name}>
-                                        {f.name} (+{f.amount} ج.م)
-                                      </option>
-                                    ))}
-                                    <option value="__custom__">غرامة أخرى بمبلغ مخصص...</option>
-                                  </select>
+                            {selectedServiceObj.name.trim().startsWith("#") && (() => {
+                              const currentFines: { name: string; amount: number }[] = Array.isArray(srv.fines) && srv.fines.length > 0
+                                ? srv.fines
+                                : (srv.fineName || (srv.fineAmount && srv.fineAmount > 0))
+                                  ? [{ name: srv.fineName || "غرامة حكومية", amount: srv.fineAmount || 0 }]
+                                  : [];
 
-                                  {((srv.fineName && srv.fineName !== "") || (srv.fineAmount && srv.fineAmount > 0)) && (
-                                    <div className="flex items-center gap-2">
-                                      <input
-                                        type="text"
-                                        placeholder="مسمى الغرامة..."
-                                        value={srv.fineName || ""}
-                                        onChange={(e) => handleFineNameChange(cIdx, sIdx, e.target.value)}
-                                        className="flex-1 bg-white border border-amber-300 rounded-lg px-2 py-1 text-xs text-amber-950 font-cairo"
-                                      />
-                                      <div className="relative w-24">
-                                        <input
-                                          type="number"
-                                          min="0"
-                                          placeholder="المبلغ"
-                                          value={srv.fineAmount || 0}
-                                          onChange={(e) => handleFineAmountChange(cIdx, sIdx, parseFloat(e.target.value) || 0)}
-                                          className="w-full bg-white border border-amber-300 rounded-lg px-2 py-1 text-xs font-mono text-amber-950 font-bold"
-                                        />
-                                        <span className="absolute left-1.5 top-1.5 text-[9px] text-slate-400">ج.م</span>
-                                      </div>
+                              return (
+                                <div className="bg-amber-50/80 border border-amber-200 rounded-lg p-2.5 space-y-2 text-xs">
+                                  <div className="flex items-center justify-between">
+                                    <span className="font-bold text-amber-900 flex items-center gap-1.5">
+                                      <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                                      <span>الغرامات الحكومية للخدمة (يمكنك إضافة أكثر من غرامة لنفس الجواز):</span>
+                                    </span>
+                                    {currentFines.length > 0 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleRemoveAllFines(cIdx, sIdx)}
+                                        className="text-[10px] text-red-600 hover:text-red-800 font-bold cursor-pointer"
+                                      >
+                                        إلغاء كافة الغرامات ✕
+                                      </button>
+                                    )}
+                                  </div>
+
+                                  {/* List of currently selected fines */}
+                                  {currentFines.length > 0 && (
+                                    <div className="space-y-1.5 pt-0.5">
+                                      {currentFines.map((fine, fIdx) => (
+                                        <div key={fIdx} className="flex items-center gap-2 bg-white border border-amber-300 rounded-lg p-1.5 shadow-2xs">
+                                          <span className="text-[11px] font-bold text-amber-800 shrink-0">
+                                            غرامة {fIdx + 1}:
+                                          </span>
+                                          <input
+                                            type="text"
+                                            value={fine.name}
+                                            onChange={(e) => handleUpdateFineInService(cIdx, sIdx, fIdx, { name: e.target.value })}
+                                            placeholder="مسمى الغرامة..."
+                                            className="flex-1 bg-amber-50/30 border border-amber-200 rounded-md px-2 py-1 text-xs text-amber-950 font-cairo font-semibold focus:outline-none focus:ring-1 focus:ring-amber-500"
+                                          />
+                                          <div className="relative w-24 shrink-0">
+                                            <input
+                                              type="number"
+                                              min="0"
+                                              value={fine.amount}
+                                              onChange={(e) => handleUpdateFineInService(cIdx, sIdx, fIdx, { amount: parseFloat(e.target.value) || 0 })}
+                                              placeholder="المبلغ"
+                                              className="w-full bg-amber-50/30 border border-amber-200 rounded-md px-2 py-1 text-xs font-mono text-amber-950 font-bold text-left focus:outline-none focus:ring-1 focus:ring-amber-500"
+                                            />
+                                            <span className="absolute left-1.5 top-1 text-[9px] text-slate-400">ج.م</span>
+                                          </div>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleRemoveFineFromService(cIdx, sIdx, fIdx)}
+                                            className="p-1 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors cursor-pointer shrink-0"
+                                            title="حذف هذه الغرامة"
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+
+                                  {/* Add new fine selector */}
+                                  <div className="flex items-center gap-2 pt-0.5">
+                                    <select
+                                      value=""
+                                      onChange={(e) => {
+                                        if (e.target.value) {
+                                          handleAddFineToService(cIdx, sIdx, e.target.value);
+                                          e.target.value = "";
+                                        }
+                                      }}
+                                      className="flex-1 bg-white border border-amber-300 rounded-lg px-2.5 py-1.5 text-xs text-amber-950 font-cairo cursor-pointer font-bold hover:bg-amber-50/50 transition-colors"
+                                    >
+                                      <option value="">
+                                        {currentFines.length === 0 ? "➕ إضافة غرامة حكومية للجواز..." : "➕ إضافة غرامة أخرى للجواز..."}
+                                      </option>
+                                      {governmentFines.map((f) => (
+                                        <option key={f.id} value={f.name}>
+                                          {f.name} (+{f.amount} ج.م)
+                                        </option>
+                                      ))}
+                                      <option value="__custom__">غرامة أخرى بمبلغ مخصص...</option>
+                                    </select>
+                                  </div>
+
+                                  {/* Subtotal of fines */}
+                                  {currentFines.length > 0 && (
+                                    <div className="bg-amber-100/70 border border-amber-300/80 rounded-md p-1.5 text-[11px] text-amber-900 font-bold flex items-center justify-between">
+                                      <span className="flex items-center gap-1">
+                                        <Check className="w-3.5 h-3.5 text-amber-700" />
+                                        <span>إجمالي الغرامات المضافة ({currentFines.length} غرامة):</span>
+                                      </span>
+                                      <span className="font-mono text-xs font-black text-amber-950">
+                                        +{(srv.fineAmount || 0) * srv.quantity} ج.م ({srv.fineAmount} ج.م × {srv.quantity})
+                                      </span>
                                     </div>
                                   )}
                                 </div>
-                                {srv.fineAmount && srv.fineAmount > 0 ? (
-                                  <div className="text-[10px] text-amber-800 font-bold flex items-center gap-1">
-                                    <Check className="w-3 h-3 text-amber-600" />
-                                    <span>
-                                      سيتم احتساب {srv.fineAmount * srv.quantity} ج.م كغرامة حكومية ({srv.fineAmount} ج.م × {srv.quantity}) تضاف لتكلفة الخدمة بالسعر الحكومي والإجمالي والواتساب.
-                                    </span>
-                                  </div>
-                                ) : null}
-                              </div>
-                            )}
+                              );
+                            })()}
 
                             {selectedServiceObj.notes && (
                               <div className="text-slate-500 bg-slate-50 p-1.5 rounded-sm">
