@@ -131,6 +131,17 @@ export interface AppSettings {
   applicantCapacities?: string[]; // خيارات صفة مقدم الطلب لمعاملات الجوازات (# و ##)
   amanNormalPrice?: number; // قيمة الجواز العادي في كشف أمان
   amanUrgentPrice?: number; // قيمة الجواز العاجل في كشف أمان
+  passportFormsStock?: {
+    normalTotalReceived?: number; // إجمالي استمارات العادي المستلمة (أو الرصيد التراكمي المضاف)
+    urgentTotalReceived?: number; // إجمالي استمارات العاجل المستلمة
+    logs?: {
+      id: string;
+      date: string;
+      normalAdded: number;
+      urgentAdded: number;
+      notes?: string;
+    }[];
+  };
 }
 
 export interface AmanPostponedItem {
@@ -138,6 +149,7 @@ export interface AmanPostponedItem {
   arabicName: string;
   birthDate: string;
   notes: string;
+  passportSerial?: string; // رقم مسلسل الجواز (8 أرقام)
   originalDate: string; // تاريخ الكشف الأصلي (YYYY-MM-DD)
   postponedAt: string; // وقت وتاريخ الترحيل
   invoiceId?: number;

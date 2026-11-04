@@ -52,11 +52,12 @@ export interface AmanRowItem {
   notes: string;
   date: string;
   isCustomManual?: boolean;
-  serviceType?: "عادي" | "مستعجل" | string;
+  serviceType?: "عادي" | "عاجل" | "مستعجل" | string;
   hasFine?: boolean;
   fineName?: string;
   fineAmount?: number;
   fines?: { name: string; amount: number }[];
+  passportSerial?: string; // رقم مسلسل الجواز (8 أرقام)
 }
 
 interface AmanReportProps {
@@ -100,14 +101,15 @@ export function resolveAmanDetails(
   services: Service[],
   governmentFines?: GovernmentFine[]
 ): {
-  serviceType: "عادي" | "مستعجل";
+  serviceType: "عادي" | "عاجل";
   hasFine: boolean;
   fineName: string;
   fineAmount: number;
   fines?: { name: string; amount: number }[];
   statusText: string;
 } {
-  let serviceType: "عادي" | "مستعجل" = (row.serviceType as any) === "مستعجل" ? "مستعجل" : "عادي";
+  // User explicit requirement: "في كشف امان غير مسمى كلمة مستعجل الى كلمة عاجل"
+  let serviceType: "عادي" | "عاجل" = (row.serviceType as any) === "مستعجل" || (row.serviceType as any) === "عاجل" ? "عاجل" : "عادي";
   let hasFine = row.hasFine;
   let fineName = (row.fineName || "").trim();
   let fineAmount = Number(row.fineAmount) || 0;
@@ -139,12 +141,12 @@ export function resolveAmanDetails(
         const fullName = matched?.name || srvId;
 
         const isUrgent = fullName.includes("مستعجل") || fullName.includes("عاجل") || fullName.includes("فورى");
-        serviceType = isUrgent ? "مستعجل" : "عادي";
+        serviceType = isUrgent ? "عاجل" : "عادي";
 
         // Multi-fine support from invoice
         if (Array.isArray(amanSrv.fines) && amanSrv.fines.length > 0) {
           rowFines = amanSrv.fines.map((f) => ({
-            name: f.name.trim().startsWith("غرامة") ? f.name.trim() : `غرامة ${f.name.trim()}`,
+            name: f.name.trim(),
             amount: Number(f.amount) || 0,
           }));
           fineAmount = rowFines.reduce((sum, f) => sum + f.amount, 0);
@@ -167,28 +169,31 @@ export function resolveAmanDetails(
 
   // Fallback checks from notes text if not resolved
   if (hasFine === undefined) {
-    if (rowNotes.includes("غرامة") && !rowNotes.includes("لا توجد غرامة")) {
+    if ((rowNotes.includes("غرامة") || rowNotes.includes("غ ")) && !rowNotes.includes("لا توجد غرامة")) {
       hasFine = true;
-      const m = rowNotes.match(/غرامة(?:\s*\(?([^)]+)\)?)?/);
+      const m = rowNotes.match(/(?:غرامة|غ)\s*(?:\(?([^)]+)\)?)?/);
       if (!fineName && m && m[1]) fineName = m[1].replace(/[()]/g, "").trim();
-      if (!fineName) fineName = "غرامة حكومية";
+      if (!fineName) fineName = "حكومية";
     } else {
       hasFine = false;
     }
   }
 
   if (!row.serviceType && (rowNotes.includes("مستعجل") || rowNotes.includes("عاجل"))) {
-    serviceType = "مستعجل";
+    serviceType = "عاجل";
   }
 
   // Exact matching against configured governmentFines ONLY (never substring match, to prevent reverting custom/renamed fines to old names)
   if (rowFines.length === 0 && governmentFines && Array.isArray(governmentFines) && fineName) {
-    // If fineName contains multiple fines e.g. "غرامة المؤهل + غرامة بدل فاقد"
+    // If fineName contains multiple fines e.g. "المؤهل + بدل فاقد" or "غرامة المؤهل + غرامة بدل فاقد"
     if (fineName.includes("+") || fineName.includes("،")) {
       const parts = fineName.split(/\s*[\+\،]\s*/).filter(Boolean);
       rowFines = parts.map((p) => {
-        const cleanP = p.trim().startsWith("غرامة") ? p.trim() : `غرامة ${p.trim()}`;
-        const match = governmentFines.find((f) => f.name.trim() === cleanP || f.name.trim() === p.trim());
+        const cleanP = p.trim().replace(/^(?:غرامة|غ)\s*/, "").trim();
+        const match = governmentFines.find((f) => {
+          const fClean = (f.name || "").replace(/^(?:غرامة|غ)\s*/, "").trim();
+          return fClean === cleanP || f.name.trim() === p.trim();
+        });
         return {
           name: cleanP,
           amount: match ? match.amount : getFineAmount({ fineName: cleanP }, governmentFines),
@@ -196,7 +201,11 @@ export function resolveAmanDetails(
       });
       fineAmount = rowFines.reduce((sum, f) => sum + f.amount, 0);
     } else {
-      const matchedFine = governmentFines.find((f) => f.name.trim() === fineName);
+      const cleanSingle = fineName.replace(/^(?:غرامة|غ)\s*/, "").trim();
+      const matchedFine = governmentFines.find((f) => {
+        const fClean = (f.name || "").replace(/^(?:غرامة|غ)\s*/, "").trim();
+        return fClean === cleanSingle || f.name.trim() === fineName;
+      });
       if (matchedFine) {
         fineName = matchedFine.name.trim();
         if (!fineAmount) fineAmount = matchedFine.amount;
@@ -204,12 +213,19 @@ export function resolveAmanDetails(
     }
   }
 
+  // User explicit requirement: "اختصر كلمة غرامة الى حرف غ فقط توفيرا فى المساحة"
+  // Format each fine name with "غ " instead of "غرامة "
+  const formatShortFine = (fName: string): string => {
+    const raw = (fName || "حكومية").trim();
+    const clean = raw.replace(/^(?:غرامة|غ)\s*/, "").trim();
+    return `غ ${clean}`;
+  };
+
   let fineLabel = "";
   if (rowFines.length > 0) {
-    fineLabel = rowFines.map((f) => (f.name.startsWith("غرامة") ? f.name : `غرامة ${f.name}`)).join(" + ");
+    fineLabel = rowFines.map((f) => formatShortFine(f.name)).join(" + ");
   } else if (hasFine && (fineName || fineAmount > 0)) {
-    const cleanFineName = (fineName || "غرامة حكومية").trim();
-    fineLabel = cleanFineName.startsWith("غرامة") ? cleanFineName : `غرامة ${cleanFineName}`;
+    fineLabel = formatShortFine(fineName);
   }
 
   const statusText = fineLabel ? `${serviceType} - ${fineLabel}` : serviceType;
@@ -263,7 +279,7 @@ export function computeAmanDetailedStats(
 
   activeRows.forEach((row) => {
     const details = resolveAmanDetails(row, invoices, services, governmentFines);
-    if (details.serviceType === "مستعجل") {
+    if (details.serviceType === "عاجل" || (details.serviceType as any) === "مستعجل") {
       urgentCount++;
     } else {
       normalCount++;
@@ -274,9 +290,9 @@ export function computeAmanDetailedStats(
       if (details.fines && details.fines.length > 0) {
         details.fines.forEach((f) => {
           finesCount++;
-          const cleanName = f.name.replace(/^غرامة\s+/, "").trim();
-          const displayName = cleanName.startsWith("غرامة") ? cleanName : `غرامة ${cleanName}`;
-          const unitPrice = f.amount > 0 ? f.amount : getFineAmount({ fineName: displayName }, governmentFines);
+          const cleanName = f.name.replace(/^(?:غرامة|غ)\s*/, "").trim();
+          const displayName = `غ ${cleanName}`;
+          const unitPrice = f.amount > 0 ? f.amount : getFineAmount({ fineName: cleanName }, governmentFines);
 
           if (!fineGroups[displayName]) {
             fineGroups[displayName] = { name: displayName, count: 0, unitPrice, totalAmount: 0 };
@@ -287,9 +303,9 @@ export function computeAmanDetailedStats(
         });
       } else {
         finesCount++;
-        const rawName = (details.fineName || "غرامة حكومية").trim();
-        const cleanName = rawName.replace(/^غرامة\s+/, "").trim();
-        const displayName = cleanName.startsWith("غرامة") ? cleanName : `غرامة ${cleanName}`;
+        const rawName = (details.fineName || "حكومية").trim();
+        const cleanName = rawName.replace(/^(?:غرامة|غ)\s*/, "").trim();
+        const displayName = `غ ${cleanName}`;
         const unitPrice = getFineAmount(details, governmentFines);
 
         if (!fineGroups[displayName]) {
@@ -567,6 +583,7 @@ export default function AmanReport({
           hasFine: details.hasFine,
           fineName: details.fineName,
           fineAmount: details.fineAmount,
+          passportSerial: row.passportSerial || "",
         };
       });
 
@@ -605,6 +622,7 @@ export default function AmanReport({
         arabicName: "",
         birthDate: "",
         notes: "",
+        passportSerial: "",
         date: dateFrom,
         isCustomManual: true,
       });
@@ -640,9 +658,15 @@ export default function AmanReport({
   };
 
   // Handle cell edit
-  const handleCellChange = (rowIndex: number, field: "arabicName" | "birthDate" | "notes", value: string) => {
+  const handleCellChange = (rowIndex: number, field: "arabicName" | "birthDate" | "notes" | "passportSerial", value: string) => {
     if (field === "arabicName" && /[a-zA-Z]/.test(value)) {
       playLanguageWarningSound();
+    }
+
+    // Limit passport serial to 8 numeric digits
+    let sanitizedValue = value;
+    if (field === "passportSerial") {
+      sanitizedValue = value.replace(/\D/g, "").slice(0, 8);
     }
 
     setHasUnsavedChanges(true);
@@ -656,13 +680,14 @@ export default function AmanReport({
           arabicName: "",
           birthDate: "",
           notes: "",
+          passportSerial: "",
           date: dateFrom,
           isCustomManual: true,
         });
       }
       copy[rowIndex] = {
         ...copy[rowIndex],
-        [field]: value,
+        [field]: sanitizedValue,
       };
       return copy;
     });
@@ -1348,6 +1373,32 @@ export default function AmanReport({
     return computeAmanDetailedStats(displayRows, invoices, services, governmentFines, normalPrice, urgentPrice);
   }, [displayRows, invoices, services, governmentFines, normalPrice, urgentPrice]);
 
+  // User explicit requirement:
+  // "عايز اعمل مخزون للاستمارت يعنى مكان اسجل فية عدد الاستمارات المخزنة استمارات العاجل عددها واستمارات العادى عددها وامكانية اضافة استمارات اضافية يوميا علشان كل يوم بنستلم استمارات جديدة
+  // وسطر تفصيلة الكشف اللى فى نهاية الكشف عايز يضاف سطر تحتة يوضح المخزون الحالى المتبقى لدينا استمارات عاجل كذا عادى كذا لان فواتير الجوازات التى تبتدى بعلامة # الموجودة بكشف امان سيتم خصم عدد المستخدم من مخزون الاستمارات كلا على حسب العادى والعاجل"
+  const formsStockStats = useMemo(() => {
+    const stockConfig = settings?.passportFormsStock || { normalTotalReceived: 0, urgentTotalReceived: 0 };
+    const normalReceived = Number(stockConfig.normalTotalReceived) || 0;
+    const urgentReceived = Number(stockConfig.urgentTotalReceived) || 0;
+
+    // Count all passport transactions starting with # in the current Aman report
+    // (Used count in report according to service type normal vs urgent)
+    const normalUsed = overallStats.normalCount;
+    const urgentUsed = overallStats.urgentCount;
+
+    const normalRemaining = normalReceived - normalUsed;
+    const urgentRemaining = urgentReceived - urgentUsed;
+
+    return {
+      normalReceived,
+      urgentReceived,
+      normalUsed,
+      urgentUsed,
+      normalRemaining,
+      urgentRemaining,
+    };
+  }, [settings?.passportFormsStock, overallStats.normalCount, overallStats.urgentCount]);
+
   return (
     <div className="space-y-6 font-cairo">
       
@@ -1751,6 +1802,43 @@ export default function AmanReport({
               <span className="font-mono text-base font-black tracking-tight">{overallStats.grandTotal.toLocaleString()} ج.م</span>
             </div>
           </div>
+
+          {/* Dedicated Forms Stock Status Row (User requirement: رصيد استمارات الجوازات المتبقي) */}
+          <div className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2.5 text-xs">
+            <div className="flex items-center gap-2">
+              <span className="font-black text-slate-800 flex items-center gap-1.5">
+                <span className="p-1 bg-amber-100 text-amber-800 rounded-md">📦</span>
+                <span>المخزون الحالي المتبقي من الاستمارات:</span>
+              </span>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className={`px-2.5 py-1 rounded-lg font-bold border ${
+                  formsStockStats.normalRemaining <= 5 
+                    ? "bg-red-50 text-red-800 border-red-200" 
+                    : "bg-emerald-50 text-emerald-800 border-emerald-200"
+                }`}>
+                  استمارات عادي متبقية: <strong className="font-mono text-sm font-black">{formsStockStats.normalRemaining}</strong>
+                  <span className="text-[10px] text-slate-500 font-normal mr-1">
+                    (مستلم: {formsStockStats.normalReceived} - مستخدم: {formsStockStats.normalUsed})
+                  </span>
+                </span>
+
+                <span className={`px-2.5 py-1 rounded-lg font-bold border ${
+                  formsStockStats.urgentRemaining <= 5 
+                    ? "bg-red-50 text-red-800 border-red-200" 
+                    : "bg-amber-50 text-amber-900 border-amber-200"
+                }`}>
+                  استمارات عاجل متبقية: <strong className="font-mono text-sm font-black">{formsStockStats.urgentRemaining}</strong>
+                  <span className="text-[10px] text-slate-500 font-normal mr-1">
+                    (مستلم: {formsStockStats.urgentReceived} - مستخدم: {formsStockStats.urgentUsed})
+                  </span>
+                </span>
+              </div>
+            </div>
+
+            <span className="text-[11px] text-slate-400">
+              يتم الخصم تلقائياً بحسب فواتير الجوازات (#) المسجلة بالكشف، ويمكنك إضافة الاستمارات المستلمة يومياً من الإعدادات
+            </span>
+          </div>
         </div>
 
         {/* Informative helper when 0 transactions found for the currently selected date */}
@@ -1990,7 +2078,7 @@ export default function AmanReport({
                               </span>
                             </td>
 
-                            {/* 4. Notes - Light gray status: normal/urgent & fine status, readable and handwritten over */}
+                            {/* 4. Notes - Light gray status: normal/urgent & fine status + 8-digit passport serial number */}
                             <td 
                               className="border border-black text-right p-0 relative" 
                               style={{ 
@@ -2000,10 +2088,13 @@ export default function AmanReport({
                             >
                               {rowName.trim().length > 0 && (() => {
                                 const noteInfo = resolveAmanDetails(row, invoices, services, governmentFines);
+                                const serialVal = row.passportSerial || "";
+
                                 return (
-                                  <div className="w-full h-full flex items-center justify-between px-1.5 overflow-hidden">
+                                  <div className="w-full h-full flex items-center justify-between px-1.5 overflow-hidden gap-1">
+                                    {/* Service & Fine status (e.g. "عاجل - غ المؤهل") */}
                                     <span
-                                      className="notes-light-gray select-all font-semibold"
+                                      className="notes-light-gray select-all font-semibold shrink-0"
                                       style={{
                                         color: "#9ca3af",
                                         fontFamily: "'Cairo', sans-serif",
@@ -2016,6 +2107,54 @@ export default function AmanReport({
                                     >
                                       {noteInfo.statusText}
                                     </span>
+
+                                    {/* Separator between status and passport serial */}
+                                    <span 
+                                      className="font-bold select-none text-[11px] shrink-0"
+                                      style={{
+                                        color: "#cbd5e1",
+                                        WebkitPrintColorAdjust: "exact",
+                                        printColorAdjust: "exact",
+                                      }}
+                                    >
+                                      |
+                                    </span>
+
+                                    {/* 8-Digit Passport Serial Number (بنفس الخط الفاتح للكتابة باليد عليه) */}
+                                    <div className="flex-1 flex items-center justify-end">
+                                      {/* Screen input: typing 8 digits */}
+                                      <input
+                                        type="text"
+                                        maxLength={8}
+                                        value={serialVal}
+                                        placeholder="مسلسل الجواز (8 أرقام)..."
+                                        onChange={(e) => handleCellChange(globalIndex, "passportSerial", e.target.value)}
+                                        onBlur={() => handleCellBlur(globalIndex)}
+                                        className="w-full max-w-[130px] h-full bg-transparent border-0 px-1 text-center font-mono font-bold focus:outline-none focus:ring-1 focus:ring-blue-500 rounded-xs print:hidden"
+                                        style={{
+                                          color: "#6b7280",
+                                          fontSize: "12px",
+                                          direction: "ltr",
+                                        }}
+                                        title="رقم مسلسل الجواز مكون من 8 أرقام"
+                                      />
+                                      {/* Print text: Light gray for handwriting over */}
+                                      <span
+                                        className="hidden print:inline-block font-mono font-bold text-center px-1 tracking-wider"
+                                        style={{
+                                          color: "#9ca3af",
+                                          fontFamily: "'Cairo', sans-serif",
+                                          fontSize: "12.5px",
+                                          fontWeight: "700",
+                                          lineHeight: 1.1,
+                                          direction: "ltr",
+                                          WebkitPrintColorAdjust: "exact",
+                                          printColorAdjust: "exact",
+                                        }}
+                                      >
+                                        {serialVal || ""}
+                                      </span>
+                                    </div>
                                   </div>
                                 );
                               })()}
@@ -2082,7 +2221,6 @@ export default function AmanReport({
                   </div>
 
                   {/* Left: Financial breakdown statement in far left (أقصى اليسار - بعيداً تماماً عن توقيع رئيس القسم) */}
-                  {/* Left: Financial breakdown statement in far left (أقصى اليسار - بعيداً تماماً عن توقيع رئيس القسم) */}
                   <div 
                     className="shrink-0 flex items-center"
                     style={{ direction: "rtl" }}
@@ -2095,7 +2233,7 @@ export default function AmanReport({
                       if (!isMultiLine) {
                         return (
                           <div 
-                            className="inline-flex items-center gap-1.5 border border-black/60 px-2 py-0.5 rounded-xs bg-slate-50/90 print:bg-transparent print:border-black/70 flex-nowrap whitespace-nowrap"
+                            className="inline-flex flex-col gap-0.5 border border-black/60 px-2 py-0.5 rounded-xs bg-slate-50/90 print:bg-transparent print:border-black/70 text-right"
                             style={{ 
                               fontFamily: "'Cairo', sans-serif", 
                               fontSize: "9px", 
@@ -2103,22 +2241,32 @@ export default function AmanReport({
                               lineHeight: 1.2 
                             }}
                           >
-                            <span className="font-extrabold text-slate-950">📌 تفصيلة الكشف:</span>
-                            <span>عادي: {stats?.normalCount || 0} ({(stats?.normalTotal || 0).toLocaleString()}ج)</span>
-                            <span className="text-black/50 font-normal">|</span>
-                            <span>عاجل: {stats?.urgentCount || 0} ({(stats?.urgentTotal || 0).toLocaleString()}ج)</span>
-                            
-                            {fines.map((fg) => (
-                              <React.Fragment key={fg.name}>
-                                <span className="text-black/50 font-normal">|</span>
-                                <span>{fg.name}: {fg.count} ({fg.totalAmount.toLocaleString()}ج)</span>
-                              </React.Fragment>
-                            ))}
+                            <div className="flex items-center gap-1.5 flex-nowrap whitespace-nowrap">
+                              <span className="font-extrabold text-slate-950">📌 تفصيلة الكشف:</span>
+                              <span>عادي: {stats?.normalCount || 0} ({(stats?.normalTotal || 0).toLocaleString()}ج)</span>
+                              <span className="text-black/50 font-normal">|</span>
+                              <span>عاجل: {stats?.urgentCount || 0} ({(stats?.urgentTotal || 0).toLocaleString()}ج)</span>
+                              
+                              {fines.map((fg) => (
+                                <React.Fragment key={fg.name}>
+                                  <span className="text-black/50 font-normal">|</span>
+                                  <span>{fg.name}: {fg.count} ({fg.totalAmount.toLocaleString()}ج)</span>
+                                </React.Fragment>
+                              ))}
 
-                            <span className="text-black/50 font-normal">|</span>
-                            <span className="font-black text-black">
-                              الإجمالي: {(stats?.grandTotal || 0).toLocaleString()} ج.م
-                            </span>
+                              <span className="text-black/50 font-normal">|</span>
+                              <span className="font-black text-black">
+                                الإجمالي: {(stats?.grandTotal || 0).toLocaleString()} ج.م
+                              </span>
+                            </div>
+
+                            {/* سطر مخزون الاستمارات المتبقي تحت سطر تفصيلة الكشف */}
+                            <div className="flex items-center gap-1.5 flex-nowrap whitespace-nowrap text-[8px] font-bold text-slate-800 pt-0.5 border-t border-black/30 mt-0.5">
+                              <span className="font-extrabold text-black">📦 المخزون المتبقي:</span>
+                              <span>استمارات عاجل: {formsStockStats.urgentRemaining}</span>
+                              <span className="text-black/50 font-normal">|</span>
+                              <span>عادي: {formsStockStats.normalRemaining}</span>
+                            </div>
                           </div>
                         );
                       }
@@ -2133,9 +2281,9 @@ export default function AmanReport({
                           className="inline-flex flex-col gap-0.5 border border-black/60 px-2 py-0.5 rounded-xs bg-slate-50/90 print:bg-transparent print:border-black/70 text-right"
                           style={{ 
                             fontFamily: "'Cairo', sans-serif", 
-                            fontSize: "8.5px", 
+                            fontSize: "8px", 
                             fontWeight: "bold",
-                            lineHeight: 1.25 
+                            lineHeight: 1.2 
                           }}
                         >
                           {/* السطر الأول: عادي وعاجل ونصف الغرامات */}
@@ -2164,6 +2312,14 @@ export default function AmanReport({
                             <span className="font-black text-black">
                               الإجمالي: {(stats?.grandTotal || 0).toLocaleString()} ج.م
                             </span>
+                          </div>
+
+                          {/* سطر مخزون الاستمارات المتبقي تحت سطر تفصيلة الكشف */}
+                          <div className="flex items-center gap-1.5 flex-nowrap whitespace-nowrap text-[7.5px] font-bold text-slate-800 pt-0.5 border-t border-black/30 mt-0.5">
+                            <span className="font-extrabold text-black">📦 المخزون المتبقي:</span>
+                            <span>استمارات عاجل: {formsStockStats.urgentRemaining}</span>
+                            <span className="text-black/50 font-normal">|</span>
+                            <span>عادي: {formsStockStats.normalRemaining}</span>
                           </div>
                         </div>
                       );

@@ -214,7 +214,12 @@
       "وكيل بموجب توكيل"
     ],
     "amanNormalPrice": 1200,
-    "amanUrgentPrice": 1400
+    "amanUrgentPrice": 1400,
+    "passportFormsStock": {
+      "normalTotalReceived": 0,
+      "urgentTotalReceived": 0,
+      "logs": []
+    }
   },
   "services": [
     {

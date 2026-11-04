@@ -45,7 +45,8 @@ import {
   Info,
   UserCheck,
   ArrowUp,
-  ArrowDown
+  ArrowDown,
+  Package
 } from "lucide-react";
 import { 
   DEFAULT_OFFICIAL_HOLIDAYS, 
@@ -106,6 +107,20 @@ export default function SettingsConfig({
     return typeof settings.amanUrgentPrice === "number" ? settings.amanUrgentPrice : 1400;
   });
 
+  // Passport forms stock config (مخزون استمارات الجوازات)
+  const [passportFormsStock, setPassportFormsStock] = useState(() => {
+    return settings.passportFormsStock || {
+      normalTotalReceived: 0,
+      urgentTotalReceived: 0,
+      logs: [],
+    };
+  });
+  const [stockAddNormal, setStockAddNormal] = useState<number | "">("");
+  const [stockAddUrgent, setStockAddUrgent] = useState<number | "">("");
+  const [stockAddNotes, setStockAddNotes] = useState<string>("");
+  const [stockFeedback, setStockFeedback] = useState<string>("");
+  const [stockSaveLoading, setStockSaveLoading] = useState(false);
+
   // Business days & Holidays config
   const [includeSaturdayAsWeekend, setIncludeSaturdayAsWeekend] = useState(settings.includeSaturdayAsWeekend !== false);
   const [customHolidays, setCustomHolidays] = useState<HolidayItem[]>(() => {
@@ -151,6 +166,7 @@ export default function SettingsConfig({
         applicantCapacities: applicantCapacities.filter(c => c && c.trim()),
         amanNormalPrice: Number(amanNormalPrice) || 0,
         amanUrgentPrice: Number(amanUrgentPrice) || 0,
+        passportFormsStock: passportFormsStock,
       };
 
       const result = await updateSettingsOnServer(payload);
@@ -203,6 +219,7 @@ export default function SettingsConfig({
         applicantCapacities: capacitiesToSave.filter(c => c && c.trim()),
         amanNormalPrice: Number(amanNormalPrice) || 0,
         amanUrgentPrice: Number(amanUrgentPrice) || 0,
+        passportFormsStock: passportFormsStock,
       };
 
       const result = await updateSettingsOnServer(payload);
@@ -615,6 +632,7 @@ export default function SettingsConfig({
         applicantCapacities: applicantCapacities.filter(c => c && c.trim()),
         amanNormalPrice: Number(amanNormalPrice) || 0,
         amanUrgentPrice: Number(amanUrgentPrice) || 0,
+        passportFormsStock: passportFormsStock,
       };
 
       const result = await updateSettingsOnServer(payload);
@@ -745,6 +763,187 @@ export default function SettingsConfig({
               <span className="text-[10px] text-slate-400">القيمة الافتراضية: 1400 ج.م</span>
             </div>
           </div>
+        </div>
+
+        {/* Passport Forms Stock Management Card (مخزون استمارات الجوازات) */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <h3 className="font-bold text-sm text-slate-800 flex items-center gap-2">
+              <Package className="w-4.5 h-4.5 text-amber-600" />
+              <span>مخزون استمارات الجوازات (العادي والعاجل) وإضافة استمارات جديدة:</span>
+            </h3>
+            <span className="text-[10px] bg-amber-50 text-amber-800 border border-amber-200 font-bold px-2.5 py-0.5 rounded-full">
+              مخزون يومي
+            </span>
+          </div>
+
+          <p className="text-xs text-slate-500">
+            سجل إجمالي الاستمارات المخزنة لديك، وأضف ما يتم استلامه يومياً من استمارات عادية وعاجلة. يتم خصم الاستمارات تلقائياً بحسب فواتير الجوازات التي تبدأ بـ (#) والمسجلة بكشف أمان لبيان الرصيد المتبقي بدقة.
+          </p>
+
+          {/* Current Total Received Stats */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">
+            <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3.5 flex items-center justify-between">
+              <div>
+                <span className="text-xs font-bold text-emerald-900 block">إجمالي استمارات العادي المسجلة:</span>
+                <span className="text-[11px] text-emerald-700">الرصيد التراكمي المستلم</span>
+              </div>
+              <span className="font-mono text-2xl font-black text-emerald-950">
+                {passportFormsStock.normalTotalReceived || 0}
+              </span>
+            </div>
+
+            <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3.5 flex items-center justify-between">
+              <div>
+                <span className="text-xs font-bold text-amber-900 block">إجمالي استمارات العاجل المسجلة:</span>
+                <span className="text-[11px] text-amber-700">الرصيد التراكمي المستلم</span>
+              </div>
+              <span className="font-mono text-2xl font-black text-amber-950">
+                {passportFormsStock.urgentTotalReceived || 0}
+              </span>
+            </div>
+          </div>
+
+          {/* Add Daily Forms Form */}
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+            <h4 className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+              <Plus className="w-4 h-4 text-emerald-600" />
+              <span>إضافة استمارات جديدة مستلمة اليوم:</span>
+            </h4>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="space-y-1">
+                <label className="text-[11px] font-bold text-slate-700 block">عدد استمارات العادي:</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={stockAddNormal}
+                  onChange={(e) => setStockAddNormal(e.target.value === "" ? "" : Math.max(0, parseInt(e.target.value) || 0))}
+                  placeholder="0"
+                  className="w-full bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-mono font-bold text-emerald-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[11px] font-bold text-slate-700 block">عدد استمارات العاجل:</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={stockAddUrgent}
+                  onChange={(e) => setStockAddUrgent(e.target.value === "" ? "" : Math.max(0, parseInt(e.target.value) || 0))}
+                  placeholder="0"
+                  className="w-full bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-mono font-bold text-amber-900 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[11px] font-bold text-slate-700 block">ملاحظات الاستلام (اختياري):</label>
+                <input
+                  type="text"
+                  value={stockAddNotes}
+                  onChange={(e) => setStockAddNotes(e.target.value)}
+                  placeholder="دفعة صباحية من الجوازات..."
+                  className="w-full bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500 font-cairo"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between pt-1">
+              {stockFeedback ? (
+                <span className="text-xs font-bold text-emerald-700 animate-fade-in flex items-center gap-1">
+                  <Check className="w-4 h-4" />
+                  {stockFeedback}
+                </span>
+              ) : <span />}
+
+              <button
+                type="button"
+                disabled={stockSaveLoading || (!stockAddNormal && !stockAddUrgent)}
+                onClick={async () => {
+                  const addN = Number(stockAddNormal) || 0;
+                  const addU = Number(stockAddUrgent) || 0;
+                  if (addN === 0 && addU === 0) return;
+
+                  setStockSaveLoading(true);
+                  try {
+                    const today = new Date().toISOString().split("T")[0];
+                    const newLog = {
+                      id: `stock-log-${Date.now()}`,
+                      date: today,
+                      normalAdded: addN,
+                      urgentAdded: addU,
+                      notes: stockAddNotes.trim() || undefined,
+                    };
+                    const updatedStock = {
+                      normalTotalReceived: (passportFormsStock.normalTotalReceived || 0) + addN,
+                      urgentTotalReceived: (passportFormsStock.urgentTotalReceived || 0) + addU,
+                      logs: [newLog, ...(passportFormsStock.logs || [])],
+                    };
+                    setPassportFormsStock(updatedStock);
+                    setStockAddNormal("");
+                    setStockAddUrgent("");
+                    setStockAddNotes("");
+
+                    const payload: AppSettings = {
+                      ...settings,
+                      headerText: headerText.trim(),
+                      subHeaderText: subHeaderText.trim(),
+                      contactPhone: contactPhone.trim(),
+                      welcomeMessage: welcomeMessage.trim(),
+                      readyMessage: readyMessage.trim(),
+                      readyPassportMessage: readyPassportMessage.trim(),
+                      partialReadyMessage: partialReadyMessage.trim(),
+                      deliveryMessage: deliveryMessage.trim(),
+                      googleSheetId: settings.googleSheetId || "",
+                      googleSheetUrl: googleSheetUrl.trim(),
+                      googleSheetWebhookUrl: googleSheetWebhookUrl.trim(),
+                      autoSyncWebhook: false,
+                      footerText: footerText.trim(),
+                      googleSheetsConnected: !!(googleSheetWebhookUrl.trim() || googleSheetUrl.trim() || settings.googleSheetsConnected),
+                      includeSaturdayAsWeekend: includeSaturdayAsWeekend,
+                      customHolidays: customHolidays,
+                      applicantCapacities: applicantCapacities.filter((c) => c && c.trim()),
+                      amanNormalPrice: Number(amanNormalPrice) || 0,
+                      amanUrgentPrice: Number(amanUrgentPrice) || 0,
+                      passportFormsStock: updatedStock,
+                    };
+
+                    const result = await updateSettingsOnServer(payload);
+                    onSettingsUpdated(result);
+                    setStockFeedback("تمت إضافة الاستمارات وتحديث رصيد المخزون بنجاح! 📦✅");
+                    setTimeout(() => setStockFeedback(""), 4000);
+                  } catch (err: any) {
+                    alert("حدث خطأ أثناء حفظ رصيد الاستمارات: " + err.message);
+                  } finally {
+                    setStockSaveLoading(false);
+                  }
+                }}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs disabled:opacity-50"
+              >
+                <Plus className="w-4 h-4" />
+                <span>{stockSaveLoading ? "جاري الحفظ..." : "إضافة وتأكيد الاستلام ➕"}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Logs of Received Forms */}
+          {passportFormsStock.logs && passportFormsStock.logs.length > 0 && (
+            <div className="space-y-2 pt-1">
+              <span className="text-xs font-bold text-slate-700 block">سجل الاستلامات السابقة:</span>
+              <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
+                {passportFormsStock.logs.map((log) => (
+                  <div key={log.id} className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-3">
+                      <span className="font-mono text-slate-500 font-bold">{log.date}</span>
+                      <span className="text-emerald-800 font-bold">عادي: +{log.normalAdded}</span>
+                      <span className="text-amber-800 font-bold">عاجل: +{log.urgentAdded}</span>
+                      {log.notes && <span className="text-slate-500 text-[11px]">({log.notes})</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* WhatsApp Notification Message Templates Card */}
