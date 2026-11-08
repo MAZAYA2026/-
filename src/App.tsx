@@ -97,6 +97,12 @@ export default function App() {
   const handleUpdateEmployees = async (updatedEmployees: Employee[]) => {
     try {
       setEmployees(updatedEmployees);
+      if (activeEmployee) {
+        const fresh = updatedEmployees.find(e => e.username.toLowerCase() === activeEmployee.username.toLowerCase());
+        if (fresh) {
+          setActiveEmployee(fresh);
+        }
+      }
       const dbPayload = await fetchDB();
       dbPayload.employees = updatedEmployees;
       await saveDB(dbPayload);
@@ -360,19 +366,22 @@ export default function App() {
             </span>
           </button>
 
-          <button
-            onClick={() => setActiveTab("settings")}
-            className={`w-full text-right px-4 py-3 rounded-xl flex items-center justify-between text-xs font-bold transition-all ${
-              activeTab === "settings" 
-                ? "bg-slate-950 text-white shadow-md shadow-slate-950/10" 
-                : "bg-white text-slate-600 hover:bg-slate-200 border border-slate-200/60"
-            }`}
-          >
-            <span className="flex items-center gap-2">
-              <Settings className="w-4.5 h-4.5" />
-              إعدادات النظام
-            </span>
-          </button>
+          {activeEmployee.role === "admin" && (
+            <button
+              onClick={() => setActiveTab("settings")}
+              className={`w-full text-right px-4 py-3 rounded-xl flex items-center justify-between text-xs font-bold transition-all ${
+                activeTab === "settings" 
+                  ? "bg-slate-950 text-white shadow-md shadow-slate-950/10" 
+                  : "bg-white text-slate-600 hover:bg-slate-200 border border-slate-200/60"
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <Settings className="w-4.5 h-4.5 text-amber-500" />
+                إعدادات النظام
+              </span>
+              <span className="bg-amber-100 text-amber-900 text-[9px] px-1.5 py-0.5 rounded-sm font-bold font-cairo">المدير 🛡️</span>
+            </button>
+          )}
 
         </aside>
 
@@ -414,6 +423,7 @@ export default function App() {
               onInvoiceUpdated={handleInvoiceUpdated}
               onInvoiceCreated={handleInvoiceCreated}
               governmentFines={governmentFines}
+              onSettingsUpdated={handleSettingsUpdated}
             />
           )}
 
@@ -451,18 +461,48 @@ export default function App() {
           )}
 
           {activeTab === "settings" && (
-            <SettingsConfig 
-              settings={settings || { officeName: "مكتب مزايا للجوازات", phone: "", deliveryTerms: "" }} 
-              activeEmployee={activeEmployee} 
-              onSettingsUpdated={handleSettingsUpdated} 
-              employees={employees}
-              onEmployeesUpdated={handleUpdateEmployees}
-              dictionary={dictionary}
-              onDictionaryUpdated={(newDict) => setDictionary(newDict)}
-              governmentFines={governmentFines}
-              onGovernmentFinesUpdated={(fines) => setGovernmentFines(fines)}
-              onReloadDatabase={syncDatabase}
-            />
+            activeEmployee.role === "admin" ? (
+              <SettingsConfig 
+                settings={settings || { officeName: "مكتب مزايا للجوازات", phone: "", deliveryTerms: "" }} 
+                activeEmployee={activeEmployee} 
+                onSettingsUpdated={handleSettingsUpdated} 
+                employees={employees}
+                onEmployeesUpdated={handleUpdateEmployees}
+                dictionary={dictionary}
+                onDictionaryUpdated={(newDict) => setDictionary(newDict)}
+                governmentFines={governmentFines}
+                onGovernmentFinesUpdated={(fines) => setGovernmentFines(fines)}
+                onReloadDatabase={syncDatabase}
+                invoices={invoices}
+                services={services}
+              />
+            ) : (
+              <div className="py-20 text-center font-cairo">
+                <div className="w-20 h-20 rounded-3xl bg-rose-50 border border-rose-200 text-rose-600 flex items-center justify-center mx-auto mb-5 shadow-xs">
+                  <ShieldAlert className="w-10 h-10" />
+                </div>
+                <h3 className="text-xl font-black text-slate-900 font-cairo">صفحة إعدادات النظام مخصصة لحساب المدير فقط 🔒</h3>
+                <p className="text-xs text-slate-500 mt-2 max-w-md mx-auto leading-relaxed">
+                  عذراً يا <strong>{activeEmployee.name}</strong>، صفحة إعدادات النظام محمية ولا يمكن الوصول إليها إلا من خلال تسجيل الدخول بحساب المدير (Admin).
+                </p>
+                <div className="mt-6 flex items-center justify-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("create")}
+                    className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
+                  >
+                    العودة لإنشاء الفواتير
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
+                  >
+                    تسجيل الدخول بحساب المدير 🛡️
+                  </button>
+                </div>
+              </div>
+            )
           )}
 
           {activeTab === "prospects" && (

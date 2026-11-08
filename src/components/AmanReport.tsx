@@ -14,7 +14,8 @@ import {
   pullPostponedAmanFromGoogleSheets,
   cutAndPostponeAmanRow,
   insertPostponedAmanRow,
-  fetchDB
+  fetchDB,
+  updateSettingsOnServer
 } from "../lib/api";
 import { playLanguageWarningSound } from "../lib/audio";
 import { 
@@ -40,7 +41,8 @@ import {
   Download,
   Clock,
   ArrowRight,
-  UserCheck
+  UserCheck,
+  Package
 } from "lucide-react";
 
 export interface AmanRowItem {
@@ -68,6 +70,7 @@ interface AmanReportProps {
   onInvoiceUpdated?: (updated: Invoice) => void;
   onInvoiceCreated?: (newInv: Invoice) => void;
   governmentFines?: GovernmentFine[];
+  onSettingsUpdated?: (settings: AppSettings) => void;
 }
 
 // Helper function to normalize any date format into comparable YYYY-MM-DD
@@ -366,12 +369,21 @@ export default function AmanReport({
   settings, 
   onInvoiceUpdated, 
   onInvoiceCreated,
-  governmentFines
+  governmentFines,
+  onSettingsUpdated
 }: AmanReportProps) {
   // Date filters: from and to
   const todayStr = new Date().toISOString().split("T")[0];
   const [dateFrom, setDateFrom] = useState(todayStr);
   const [dateTo, setDateTo] = useState(todayStr);
+
+  // Quick Stock Management Modal state in Aman Report
+  const [isStockModalOpen, setIsStockModalOpen] = useState(false);
+  const [stockAddNormalInput, setStockAddNormalInput] = useState<number | "">("");
+  const [stockAddUrgentInput, setStockAddUrgentInput] = useState<number | "">("");
+  const [stockAddNotesInput, setStockAddNotesInput] = useState("");
+  const [stockModalFeedback, setStockModalFeedback] = useState("");
+  const [stockModalLoading, setStockModalLoading] = useState(false);
 
   // Auto-save feedback message
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
@@ -712,6 +724,7 @@ export default function AmanReport({
             ...r,
             birthDate: formatCleanBirthDate(r.birthDate),
             notes: det.statusText,
+            passportSerial: r.passportSerial || "",
             serviceType: det.serviceType,
             hasFine: det.hasFine,
             fineName: det.fineName,
@@ -948,6 +961,7 @@ export default function AmanReport({
       arabicName: cutName,
       birthDate: cutBirthDate,
       notes: cutNotes,
+      passportSerial: row.passportSerial || "",
       originalDate: row.date || dateFrom || todayStr,
       postponedAt: new Date().toLocaleString("ar-EG"),
       invoiceId: row.invoiceId,
@@ -992,7 +1006,7 @@ export default function AmanReport({
     };
     const cleanFineName = details.fineName;
     const fineLabel = details.hasFine
-      ? (cleanFineName ? (cleanFineName.startsWith("غرامة") ? cleanFineName : `غرامة ${cleanFineName}`) : "غرامة حكومية")
+      ? (cleanFineName ? (cleanFineName.startsWith("غ") ? cleanFineName : `غ ${cleanFineName.replace(/^غرامة\s*/, "")}`) : "غ حكومية")
       : "";
     const noteText = fineLabel ? `${details.serviceType} - ${fineLabel}` : details.serviceType;
 
@@ -1001,6 +1015,7 @@ export default function AmanReport({
       arabicName: item.arabicName,
       birthDate: formatCleanBirthDate(item.birthDate),
       notes: noteText,
+      passportSerial: item.passportSerial || "",
       date: dateFrom,
       invoiceId: item.invoiceId,
       serviceType: details.serviceType as any,
@@ -1076,10 +1091,10 @@ export default function AmanReport({
     let csvContent = "\ufeff";
     csvContent += "قسم جوازات طنطا - قائمة الأسماء المرحلة مؤقتاً من كشف أمان\r\n";
     csvContent += `تاريخ التصدير: ${new Date().toLocaleDateString("ar-EG")}\r\n\r\n`;
-    csvContent += "م,الاسم,تاريخ الميلاد,الملاحظات,تاريخ الكشف الأصلي,وقت الترحيل,رقم الفاتورة,الحالة\r\n";
+    csvContent += "م,الاسم,تاريخ الميلاد,الملاحظات,تاريخ الكشف الأصلي,وقت الترحيل,رقم الفاتورة,الحالة,مسلسل الاستمارة\r\n";
 
     postponedList.forEach((item, idx) => {
-      csvContent += `"${idx + 1}","${(item.arabicName || "").replace(/"/g, '""')}","${item.birthDate || ""}","${(item.notes || "").replace(/"/g, '""')}","${item.originalDate || ""}","${item.postponedAt || ""}","${item.invoiceId || ""}","${item.status || "مؤجل"}"\r\n`;
+      csvContent += `"${idx + 1}","${(item.arabicName || "").replace(/"/g, '""')}","${item.birthDate || ""}","${(item.notes || "").replace(/"/g, '""')}","${item.originalDate || ""}","${item.postponedAt || ""}","${item.invoiceId || ""}","${item.status || "مؤجل"}","${item.passportSerial || ""}"\r\n`;
     });
 
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
@@ -1104,7 +1119,7 @@ export default function AmanReport({
     return `${num}- ${trimmed}`;
   };
 
-  // Excel Export to CSV with 3 columns (الاسم, تاريخ الميلاد, الملاحظات)
+  // Excel Export to CSV with columns (الاسم, تاريخ الميلاد, الملاحظات, مسلسل الاستمارة)
   const handleExportToExcel = () => {
     const activeRows = displayRows.filter((c) => c.arabicName.trim().length > 0);
     if (activeRows.length === 0) {
@@ -1118,17 +1133,18 @@ export default function AmanReport({
     let csvContent = "\ufeff";
     csvContent += "قسم جوازات طنطا - كشف حركة التابع للخدمات الجماهيرية\r\n";
     csvContent += `التاريخ: ${todayDisplay}\r\n\r\n`;
-    csvContent += "الاسم,تاريخ الميلاد,الملاحظات\r\n";
+    csvContent += "الاسم,تاريخ الميلاد,الملاحظات,مسلسل الاستمارة\r\n";
 
     activeRows.forEach((cust, idx) => {
       const cleanName = cust.arabicName.replace(/,/g, " ");
       const formattedName = formatNameWithNumber(cleanName, idx + 1);
       const noteInfo = resolveAmanDetails(cust, invoices, services, governmentFines);
       const fullNote = noteInfo.statusText;
-      csvContent += `"${formattedName}","${cust.birthDate || ""}","${(fullNote || "").replace(/"/g, '""')}"\r\n`;
+      const serial = cust.passportSerial || "";
+      csvContent += `"${formattedName}","${cust.birthDate || ""}","${(fullNote || "").replace(/"/g, '""')}","${serial}"\r\n`;
     });
 
-    csvContent += "\r\n,,توقيع رئيس القسم\r\n";
+    csvContent += "\r\n,,,توقيع رئيس القسم\r\n";
 
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -1381,23 +1397,128 @@ export default function AmanReport({
     const normalReceived = Number(stockConfig.normalTotalReceived) || 0;
     const urgentReceived = Number(stockConfig.urgentTotalReceived) || 0;
 
-    // Count all passport transactions starting with # in the current Aman report
-    // (Used count in report according to service type normal vs urgent)
-    const normalUsed = overallStats.normalCount;
-    const urgentUsed = overallStats.urgentCount;
+    // 1. Used count in the CURRENT displayed Aman report sheet (date filter)
+    const reportNormalUsed = overallStats.normalCount;
+    const reportUrgentUsed = overallStats.urgentCount;
 
-    const normalRemaining = normalReceived - normalUsed;
-    const urgentRemaining = urgentReceived - urgentUsed;
+    // 2. Cumulative ALL passport operations executed across all invoices in the system (#)
+    let allNormalUsed = 0;
+    let allUrgentUsed = 0;
+    const countedInvoicesSet = new Set<number>();
+
+    if (Array.isArray(invoices)) {
+      invoices.forEach((inv) => {
+        if (!inv || !Array.isArray(inv.customers)) return;
+        countedInvoicesSet.add(inv.invoiceId);
+        inv.customers.forEach((cust) => {
+          if (!cust || !Array.isArray(cust.services)) return;
+          cust.services.forEach((s) => {
+            const srvId = String(s.serviceId || "").trim();
+            const matched = services.find((srv) => srv.id === srvId || srv.name === srvId);
+            const fullName = matched?.name || srvId;
+            if (fullName.startsWith("#") && !fullName.startsWith("##")) {
+              const isUrgent = fullName.includes("مستعجل") || fullName.includes("عاجل") || fullName.includes("فورى");
+              const qty = Number(s.quantity) || 1;
+              if (isUrgent) {
+                allUrgentUsed += qty;
+              } else {
+                allNormalUsed += qty;
+              }
+            }
+          });
+        });
+      });
+    }
+
+    // 3. Plus any custom/manual rows in tableRows that were added directly or loaded from sheet without an invoiceId
+    if (Array.isArray(tableRows)) {
+      tableRows.forEach((r) => {
+        if (!r.arabicName || !r.arabicName.trim()) return;
+        if (r.invoiceId && countedInvoicesSet.has(r.invoiceId)) return; // Avoid double counting
+        const details = resolveAmanDetails(r, invoices, services, governmentFines);
+        if (details.serviceType === "عاجل" || (details.serviceType as any) === "مستعجل") {
+          allUrgentUsed += 1;
+        } else {
+          allNormalUsed += 1;
+        }
+      });
+    }
+
+    // Cumulative remaining stock:
+    const normalRemaining = normalReceived > 0 ? normalReceived - allNormalUsed : (allNormalUsed > 0 ? -allNormalUsed : 0);
+    const urgentRemaining = urgentReceived > 0 ? urgentReceived - allUrgentUsed : (allUrgentUsed > 0 ? -allUrgentUsed : 0);
 
     return {
       normalReceived,
       urgentReceived,
-      normalUsed,
-      urgentUsed,
+      reportNormalUsed,
+      reportUrgentUsed,
+      allNormalUsed,
+      allUrgentUsed,
+      normalUsed: allNormalUsed,
+      urgentUsed: allUrgentUsed,
       normalRemaining,
       urgentRemaining,
+      isConfigured: normalReceived > 0 || urgentReceived > 0,
     };
-  }, [settings?.passportFormsStock, overallStats.normalCount, overallStats.urgentCount]);
+  }, [settings?.passportFormsStock, overallStats.normalCount, overallStats.urgentCount, invoices, services, tableRows, governmentFines]);
+
+  // Handler to add or save forms stock directly from Aman Report
+  const handleSaveStockFromAman = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const addN = Number(stockAddNormalInput) || 0;
+    const addU = Number(stockAddUrgentInput) || 0;
+    if (addN === 0 && addU === 0) return;
+
+    setStockModalLoading(true);
+    setStockModalFeedback("");
+    try {
+      const currentStock = settings?.passportFormsStock || {
+        normalTotalReceived: 0,
+        urgentTotalReceived: 0,
+        logs: [],
+      };
+      const today = new Date().toISOString().split("T")[0];
+      const newLog = {
+        id: `stock-log-${Date.now()}`,
+        date: today,
+        normalAdded: addN,
+        urgentAdded: addU,
+        notes: stockAddNotesInput.trim() || undefined,
+      };
+      const updatedStock = {
+        normalTotalReceived: (currentStock.normalTotalReceived || 0) + addN,
+        urgentTotalReceived: (currentStock.urgentTotalReceived || 0) + addU,
+        logs: [newLog, ...(currentStock.logs || [])],
+      };
+
+      const payload: AppSettings = {
+        ...settings,
+        headerText: settings?.headerText || "",
+        footerText: settings?.footerText || "",
+        welcomeMessage: settings?.welcomeMessage || "",
+        readyMessage: settings?.readyMessage || "",
+        passportFormsStock: updatedStock,
+      };
+
+      const result = await updateSettingsOnServer(payload);
+      if (onSettingsUpdated) {
+        onSettingsUpdated(result);
+      }
+      setStockModalFeedback("تم تسجيل استلام الاستمارات بنجاح وتحديث رصيد المخزون! 📦✅");
+      setStockAddNormalInput("");
+      setStockAddUrgentInput("");
+      setStockAddNotesInput("");
+      setTimeout(() => {
+        setStockModalFeedback("");
+        setIsStockModalOpen(false);
+      }, 2500);
+    } catch (err: any) {
+      alert("حدث خطأ أثناء حفظ رصيد الاستمارات: " + err.message);
+    } finally {
+      setStockModalLoading(false);
+    }
+  };
 
   return (
     <div className="space-y-6 font-cairo">
@@ -1803,41 +1924,85 @@ export default function AmanReport({
             </div>
           </div>
 
-          {/* Dedicated Forms Stock Status Row (User requirement: رصيد استمارات الجوازات المتبقي) */}
-          <div className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2.5 text-xs">
-            <div className="flex items-center gap-2">
-              <span className="font-black text-slate-800 flex items-center gap-1.5">
-                <span className="p-1 bg-amber-100 text-amber-800 rounded-md">📦</span>
-                <span>المخزون الحالي المتبقي من الاستمارات:</span>
-              </span>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className={`px-2.5 py-1 rounded-lg font-bold border ${
-                  formsStockStats.normalRemaining <= 5 
-                    ? "bg-red-50 text-red-800 border-red-200" 
-                    : "bg-emerald-50 text-emerald-800 border-emerald-200"
-                }`}>
-                  استمارات عادي متبقية: <strong className="font-mono text-sm font-black">{formsStockStats.normalRemaining}</strong>
-                  <span className="text-[10px] text-slate-500 font-normal mr-1">
-                    (مستلم: {formsStockStats.normalReceived} - مستخدم: {formsStockStats.normalUsed})
-                  </span>
-                </span>
-
-                <span className={`px-2.5 py-1 rounded-lg font-bold border ${
-                  formsStockStats.urgentRemaining <= 5 
-                    ? "bg-red-50 text-red-800 border-red-200" 
-                    : "bg-amber-50 text-amber-900 border-amber-200"
-                }`}>
-                  استمارات عاجل متبقية: <strong className="font-mono text-sm font-black">{formsStockStats.urgentRemaining}</strong>
-                  <span className="text-[10px] text-slate-500 font-normal mr-1">
-                    (مستلم: {formsStockStats.urgentReceived} - مستخدم: {formsStockStats.urgentUsed})
-                  </span>
-                </span>
+          {/* Dedicated Forms Stock Status Row (User requirement: رصيد استمارات الجوازات المتبقي وخصم كافة العمليات المنفذة) */}
+          <div className="mt-3 pt-3 border-t border-slate-100 space-y-2 text-xs">
+            {!formsStockStats.isConfigured ? (
+              <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-amber-950">
+                <div className="flex items-center gap-2">
+                  <span className="p-1.5 bg-amber-200/80 text-amber-900 rounded-lg">📦</span>
+                  <div>
+                    <span className="font-bold block">
+                      ⚠️ لم يتم تسجيل الرصيد التراكمي للاستمارات المستلمة بالمكتب بعد!
+                    </span>
+                    <span className="text-[11px] text-amber-800">
+                      إجمالي العمليات المنفذة المحفوظة بالنظام حتى الآن: <strong>{formsStockStats.allNormalUsed} عادي</strong> و <strong>{formsStockStats.allUrgentUsed} عاجل</strong>. سجل رصيد الاستمارات المستلمة لخصم العمليات تلقائياً فورياً.
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsStockModalOpen(true)}
+                  className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold text-xs flex items-center gap-1 shadow-xs transition-colors cursor-pointer shrink-0"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>تسجيل رصيد الاستمارات المستلمة 📦</span>
+                </button>
               </div>
-            </div>
+            ) : (
+              <div className="flex flex-wrap items-center justify-between gap-2.5">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-black text-slate-800 flex items-center gap-1.5">
+                    <span className="p-1 bg-amber-100 text-amber-800 rounded-md">📦</span>
+                    <span>المخزون الفعلي المتبقي بالمكتب:</span>
+                  </span>
+                  
+                  {/* Normal Forms Remaining */}
+                  <span className={`px-2.5 py-1 rounded-lg font-bold border ${
+                    formsStockStats.normalRemaining <= 5 
+                      ? "bg-red-50 text-red-800 border-red-200" 
+                      : "bg-emerald-50 text-emerald-800 border-emerald-200"
+                  }`}>
+                    استمارات عادي متبقية: <strong className="font-mono text-sm font-black">{formsStockStats.normalRemaining}</strong>
+                    <span className="text-[10px] text-slate-500 font-normal mr-1">
+                      (مستلم: {formsStockStats.normalReceived} - إجمالي المنفذ بالنظام: {formsStockStats.allNormalUsed})
+                    </span>
+                  </span>
 
-            <span className="text-[11px] text-slate-400">
-              يتم الخصم تلقائياً بحسب فواتير الجوازات (#) المسجلة بالكشف، ويمكنك إضافة الاستمارات المستلمة يومياً من الإعدادات
-            </span>
+                  {/* Urgent Forms Remaining */}
+                  <span className={`px-2.5 py-1 rounded-lg font-bold border ${
+                    formsStockStats.urgentRemaining <= 5 
+                      ? "bg-red-50 text-red-800 border-red-200" 
+                      : "bg-amber-50 text-amber-900 border-amber-200"
+                  }`}>
+                    استمارات عاجل متبقية: <strong className="font-mono text-sm font-black">{formsStockStats.urgentRemaining}</strong>
+                    <span className="text-[10px] text-slate-500 font-normal mr-1">
+                      (مستلم: {formsStockStats.urgentReceived} - إجمالي المنفذ بالنظام: {formsStockStats.allUrgentUsed})
+                    </span>
+                  </span>
+
+                  {/* This Report Used Count */}
+                  <span className="px-2.5 py-1 rounded-lg font-bold border bg-blue-50 text-blue-900 border-blue-200 text-[11px]">
+                    المنفذ بهذا الكشف ({headerDateDisplay}): <strong className="font-mono">{formsStockStats.reportNormalUsed}</strong> عادي | <strong className="font-mono">{formsStockStats.reportUrgentUsed}</strong> عاجل
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIsStockModalOpen(true)}
+                  className="px-3 py-1 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-bold text-xs flex items-center gap-1 shadow-xs transition-colors cursor-pointer shrink-0"
+                  title="تسجيل استلام استمارات عادية أو عاجلة جديدة واردة اليوم"
+                >
+                  <Plus className="w-3.5 h-3.5 text-amber-400" />
+                  <span>إضافة استمارات واردة 📦</span>
+                </button>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between text-[10.5px] text-slate-400">
+              <span>
+                💡 يتم خصم الاستمارات تلقائياً وتراكمياً من كافة فواتير ومعاملات الجوازات (#) المنفذة، ويظهر الرصيد المتبقي بدقة في نهاية الكشف المطبوع.
+              </span>
+            </div>
           </div>
         </div>
 
@@ -1883,7 +2048,7 @@ export default function AmanReport({
         )}
 
         {/* Report Print Canvas for Iframe / Native Print */}
-        <div ref={reportPrintRef} className="mx-auto text-black">
+        <div ref={reportPrintRef} className="mx-auto text-black overflow-x-auto pb-4">
           {Array.from({ length: totalPages }).map((_, pageIdx) => {
             const startIdx = pageIdx * ROWS_PER_PAGE;
             const pageCustomers = displayRows.slice(startIdx, startIdx + ROWS_PER_PAGE);
@@ -1932,13 +2097,13 @@ export default function AmanReport({
                     </div>
                   </div>
 
-                  {/* Table - 3 Columns: الاسم مع المسلسل (10.5cm), تاريخ الميلاد (3.5cm), الملاحظات (باقي المساحة) */}
-                  {/* User requirement: الاستغناء عن عامود مسلسل بكتابة العدد قبل الاسم مباشرة كمثال 1- محمد شريف توفيراً للمساحة */}
+                  {/* Table - 3 Official Columns: الاسم مع المسلسل (10.5cm), تاريخ الميلاد (3.5cm), الملاحظات + مسلسل الجواز (5.4cm) */}
+                  {/* Action buttons (قص وترحيل + إدراج) are detached and spaced cleanly to the left of the table grid */}
                   <table 
-                    className="w-full border-2 border-black text-right" 
+                    className="w-full print:w-full border-t-2 border-r-2 border-b-2 print:border-l-2 border-black border-l-0 text-right" 
                     style={{ 
                       borderCollapse: "collapse", 
-                      width: "100%", 
+                      width: "calc(100% + 88px)", 
                       tableLayout: "fixed",
                       fontFamily: "'Cairo', sans-serif", 
                       direction: "rtl" 
@@ -1948,7 +2113,7 @@ export default function AmanReport({
                       <col style={{ width: "10.5cm" }} />
                       <col style={{ width: "3.5cm" }} />
                       <col />
-                      <col className="print:hidden" style={{ width: "76px" }} />
+                      <col className="print:hidden" style={{ width: "88px" }} />
                     </colgroup>
                     <tbody>
                       {Array.from({ length: ROWS_PER_PAGE }).map((_, rIdx) => {
@@ -2079,26 +2244,31 @@ export default function AmanReport({
                             </td>
 
                             {/* 4. Notes - Light gray status: normal/urgent & fine status + 8-digit passport serial number */}
+                            {/* Column 3 has solid border-l-2 to cleanly terminate the official printed table */}
                             <td 
-                              className="border border-black text-right p-0 relative" 
+                              className="border-t border-b border-r border-black border-l-2 border-l-black text-right p-0 relative" 
                               style={{ 
                                 fontFamily: "'Cairo', sans-serif", 
                                 lineHeight: 1.1 
                               }}
                             >
-                              {rowName.trim().length > 0 && (() => {
+                              {(() => {
+                                const hasContent = rowName.trim().length > 0 || Boolean(row?.passportSerial);
+                                if (!hasContent) return null;
+
                                 const noteInfo = resolveAmanDetails(row, invoices, services, governmentFines);
-                                const serialVal = row.passportSerial || "";
+                                const serialVal = row?.passportSerial || "";
 
                                 return (
                                   <div className="w-full h-full flex items-center justify-between px-1.5 overflow-hidden gap-1">
-                                    {/* Service & Fine status (e.g. "عاجل - غ المؤهل") */}
+                                    {/* Service & Fine status (e.g. "عاجل - غ المؤهل") - flex-1 with truncate to never squeeze serial input */}
                                     <span
-                                      className="notes-light-gray select-all font-semibold shrink-0"
+                                      className="notes-light-gray select-all font-semibold flex-1 min-w-0 truncate text-right"
+                                      title={noteInfo.statusText}
                                       style={{
                                         color: "#9ca3af",
                                         fontFamily: "'Cairo', sans-serif",
-                                        fontSize: "12.5px",
+                                        fontSize: "12px",
                                         fontWeight: "600",
                                         lineHeight: 1.1,
                                         WebkitPrintColorAdjust: "exact",
@@ -2109,34 +2279,33 @@ export default function AmanReport({
                                     </span>
 
                                     {/* Separator between status and passport serial */}
-                                    <span 
-                                      className="font-bold select-none text-[11px] shrink-0"
-                                      style={{
-                                        color: "#cbd5e1",
-                                        WebkitPrintColorAdjust: "exact",
-                                        printColorAdjust: "exact",
-                                      }}
-                                    >
-                                      |
-                                    </span>
+                                    {noteInfo.statusText ? (
+                                      <span 
+                                        className="font-bold select-none text-[11px] shrink-0 text-slate-300 px-0.5"
+                                        style={{
+                                          WebkitPrintColorAdjust: "exact",
+                                          printColorAdjust: "exact",
+                                        }}
+                                      >
+                                        |
+                                      </span>
+                                    ) : null}
 
-                                    {/* 8-Digit Passport Serial Number (بنفس الخط الفاتح للكتابة باليد عليه) */}
-                                    <div className="flex-1 flex items-center justify-end">
-                                      {/* Screen input: typing 8 digits */}
+                                    {/* 8-Digit Passport Serial Number (مساحة مخصصة وثابتة وغير مضغوطة للكتابة بوضوح تام) */}
+                                    <div className="shrink-0 flex items-center justify-center">
+                                      {/* Screen input: typing 8 digits with guaranteed fixed width and clear border */}
                                       <input
                                         type="text"
                                         maxLength={8}
                                         value={serialVal}
-                                        placeholder="مسلسل الجواز (8 أرقام)..."
+                                        placeholder="مسلسل 8 أرقام"
                                         onChange={(e) => handleCellChange(globalIndex, "passportSerial", e.target.value)}
                                         onBlur={() => handleCellBlur(globalIndex)}
-                                        className="w-full max-w-[130px] h-full bg-transparent border-0 px-1 text-center font-mono font-bold focus:outline-none focus:ring-1 focus:ring-blue-500 rounded-xs print:hidden"
+                                        className="w-[84px] h-[21px] bg-slate-50 hover:bg-white focus:bg-white border border-slate-300 focus:border-blue-500 rounded text-center font-mono font-bold text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-colors print:hidden shadow-2xs"
                                         style={{
-                                          color: "#6b7280",
-                                          fontSize: "12px",
                                           direction: "ltr",
                                         }}
-                                        title="رقم مسلسل الجواز مكون من 8 أرقام"
+                                        title="رقم مسلسل استمارة الجواز مكون من 8 أرقام"
                                       />
                                       {/* Print text: Light gray for handwriting over */}
                                       <span
@@ -2144,7 +2313,7 @@ export default function AmanReport({
                                         style={{
                                           color: "#9ca3af",
                                           fontFamily: "'Cairo', sans-serif",
-                                          fontSize: "12.5px",
+                                          fontSize: "12px",
                                           fontWeight: "700",
                                           lineHeight: 1.1,
                                           direction: "ltr",
@@ -2161,36 +2330,38 @@ export default function AmanReport({
                             </td>
 
                             {/* 5. Row Action Buttons (Screen Only - Hidden in Print) */}
-                            {/* User explicit requirement: زرارين جنب كل صف حتى نهاية الورقة (قص وترحيل + إدراج اسم مرحل) */}
+                            {/* User explicit requirement: إبعاد علامات القص والترحيل وإدراج الاسم قليلاً عن الجدول لترك مساحة كافية لكتابة سريال الاستمارة بوضوح */}
                             <td 
-                              className="print:hidden border border-black/30 p-0 text-center align-middle bg-slate-50/70 select-none"
-                              style={{ width: "76px" }}
+                              className="print:hidden border-0 bg-transparent p-0 align-middle select-none"
+                              style={{ width: "88px" }}
                             >
-                              <div className="flex items-center justify-center gap-1 px-1 h-full">
-                                {/* الزرار الأول: قص وترحيل بيانات هذا الصف الاسم وتاريخ الميلاد */}
-                                <button
-                                  type="button"
-                                  onClick={() => handleCutRow(globalIndex)}
-                                  disabled={!rowName.trim()}
-                                  title={rowName.trim() ? `قص وترحيل (${rowName}) وحفظه في ورقة المؤجلين بالإكسيل` : "الصف فارغ"}
-                                  className={`p-1 rounded-md text-xs font-bold transition-all flex items-center justify-center cursor-pointer ${
-                                    rowName.trim()
-                                      ? "bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 shadow-xs hover:scale-110 active:scale-95"
-                                      : "bg-slate-100 text-slate-300 border border-slate-200 cursor-not-allowed opacity-40"
-                                  }`}
-                                >
-                                  <Scissors className="w-3.5 h-3.5" />
-                                </button>
+                              <div className="mr-3 flex items-center justify-center">
+                                <div className="flex items-center gap-1.5 px-1.5 py-0.5 bg-slate-100 hover:bg-slate-200/90 border border-slate-300/80 rounded-lg shadow-2xs transition-all">
+                                  {/* الزرار الأول: قص وترحيل بيانات هذا الصف الاسم وتاريخ الميلاد */}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCutRow(globalIndex)}
+                                    disabled={!rowName.trim()}
+                                    title={rowName.trim() ? `قص وترحيل (${rowName}) وحفظه في ورقة المؤجلين بالإكسيل` : "الصف فارغ"}
+                                    className={`p-1 rounded-md text-xs font-bold transition-all flex items-center justify-center cursor-pointer ${
+                                      rowName.trim()
+                                        ? "bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 shadow-xs hover:scale-110 active:scale-95"
+                                        : "bg-slate-100 text-slate-300 border border-slate-200 cursor-not-allowed opacity-40"
+                                    }`}
+                                  >
+                                    <Scissors className="w-3.5 h-3.5" />
+                                  </button>
 
-                                {/* الزرار الثاني: إدراج اسم من الأسماء المرحلة المحفوظة بورقة الإكسيل */}
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenInsertModal(globalIndex)}
-                                  title={`إدراج اسم من الأسماء المرحلة في هذا الصف (${absoluteNumber})`}
-                                  className="p-1 rounded-md text-xs font-bold bg-blue-100 hover:bg-blue-200 text-blue-900 border border-blue-300 shadow-xs hover:scale-110 active:scale-95 transition-all flex items-center justify-center cursor-pointer"
-                                >
-                                  <FolderInput className="w-3.5 h-3.5" />
-                                </button>
+                                  {/* الزرار الثاني: إدراج اسم من الأسماء المرحلة المحفوظة بورقة الإكسيل */}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenInsertModal(globalIndex)}
+                                    title={`إدراج اسم من الأسماء المرحلة في هذا الصف (${absoluteNumber})`}
+                                    className="p-1 rounded-md text-xs font-bold bg-blue-100 hover:bg-blue-200 text-blue-900 border border-blue-300 shadow-xs hover:scale-110 active:scale-95 transition-all flex items-center justify-center cursor-pointer"
+                                  >
+                                    <FolderInput className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
                               </div>
                             </td>
                           </tr>
@@ -2475,7 +2646,12 @@ export default function AmanReport({
                           )}
                           {item.fineName && (
                             <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-purple-100 text-purple-800">
-                              غرامة: {item.fineName}
+                              غ: {item.fineName}
+                            </span>
+                          )}
+                          {item.passportSerial && (
+                            <span className="text-[10px] font-bold font-mono px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-300">
+                              استمارة: {item.passportSerial}
                             </span>
                           )}
                         </div>
@@ -2670,6 +2846,130 @@ export default function AmanReport({
               </button>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* Quick Stock Management Modal in Aman Report */}
+      {isStockModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-fade-in font-cairo">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden flex flex-col animate-scale-up">
+            <div className="px-5 py-4 bg-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Package className="w-5 h-5 text-amber-400" />
+                <h3 className="font-extrabold text-sm">
+                  تسجيل وإضافة استمارات الجوازات المستلمة بالمخزون 📦
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsStockModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveStockFromAman} className="p-5 space-y-4">
+              {/* Current Overview */}
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3">
+                  <span className="text-[11px] font-bold text-emerald-800 block">استمارات العادي المستلمة حالياً:</span>
+                  <div className="flex items-baseline justify-between mt-1">
+                    <span className="text-xl font-black font-mono text-emerald-950">
+                      {formsStockStats.normalReceived}
+                    </span>
+                    <span className="text-[10px] text-emerald-700">
+                      المنفذ: {formsStockStats.allNormalUsed} | المتبقي: {formsStockStats.normalRemaining}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+                  <span className="text-[11px] font-bold text-amber-800 block">استمارات العاجل المستلمة حالياً:</span>
+                  <div className="flex items-baseline justify-between mt-1">
+                    <span className="text-xl font-black font-mono text-amber-950">
+                      {formsStockStats.urgentReceived}
+                    </span>
+                    <span className="text-[10px] text-amber-700">
+                      المنفذ: {formsStockStats.allUrgentUsed} | المتبقي: {formsStockStats.urgentRemaining}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {stockModalFeedback && (
+                <div className="p-3 bg-emerald-100 text-emerald-900 rounded-xl text-xs font-bold flex items-center gap-1.5 animate-fade-in">
+                  <Check className="w-4 h-4 text-emerald-700" />
+                  <span>{stockModalFeedback}</span>
+                </div>
+              )}
+
+              {/* Add form */}
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-3">
+                <h4 className="text-xs font-bold text-slate-800">إضافة كمية استمارات جديدة مستلمة:</h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-slate-700 block">
+                      عدد استمارات العادي الواردة:
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={stockAddNormalInput}
+                      onChange={(e) => setStockAddNormalInput(e.target.value === "" ? "" : Math.max(0, parseInt(e.target.value) || 0))}
+                      placeholder="0"
+                      className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono font-bold text-emerald-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-slate-700 block">
+                      عدد استمارات العاجل الواردة:
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={stockAddUrgentInput}
+                      onChange={(e) => setStockAddUrgentInput(e.target.value === "" ? "" : Math.max(0, parseInt(e.target.value) || 0))}
+                      placeholder="0"
+                      className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono font-bold text-amber-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-slate-700 block">
+                    ملاحظات الدفعة (اختياري):
+                  </label>
+                  <input
+                    type="text"
+                    value={stockAddNotesInput}
+                    onChange={(e) => setStockAddNotesInput(e.target.value)}
+                    placeholder="مثال: دفعة جديدة من قسم الجوازات..."
+                    className="w-full bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 font-cairo"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsStockModalOpen(false)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={stockModalLoading || (!stockAddNormalInput && !stockAddUrgentInput)}
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs disabled:opacity-50"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>{stockModalLoading ? "جاري الحفظ..." : "حفظ وتأكيد الإضافة للمخزون 💾"}</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

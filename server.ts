@@ -10,7 +10,7 @@ import { google } from "googleapis";
 dotenv.config();
 
 const app = express();
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = Number(process.env.DEFAULT_APP_PORT) || 3000;
 
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
@@ -2203,7 +2203,27 @@ app.post("/api/sheets/webhook/pull-aman", async (req, res) => {
       ...(db?.invoices && Array.isArray(db.invoices) ? db.invoices : []),
     ];
 
+    // Index local aman rows by invoiceId or name to preserve passportSerial
+    const localAmanMap = new Map<string, any>();
+    if (Array.isArray(db.amanReport)) {
+      db.amanReport.forEach((r: any) => {
+        if (r.invoiceId) localAmanMap.set(`inv-${r.invoiceId}-${r.customerIndex ?? 0}`, r);
+        if (r.arabicName) localAmanMap.set(`name-${r.arabicName.trim()}`, r);
+      });
+    }
+
     rawAman.forEach((row: any) => {
+      // Retain or restore passportSerial
+      if (!row.passportSerial) {
+        const local = (row.invoiceId ? localAmanMap.get(`inv-${row.invoiceId}-${row.customerIndex ?? 0}`) : null) ||
+                      (row.arabicName ? localAmanMap.get(`name-${row.arabicName.trim()}`) : null);
+        if (local && local.passportSerial) {
+          row.passportSerial = local.passportSerial;
+        } else {
+          row.passportSerial = "";
+        }
+      }
+
       if (!row.serviceType || row.hasFine === undefined) {
         let matchedInv = row.invoiceId ? allInvoices.find((i: any) => i.invoiceId === row.invoiceId) : undefined;
         if (!matchedInv && row.arabicName) {
@@ -2218,7 +2238,7 @@ app.post("/api/sheets/webhook/pull-aman", async (req, res) => {
             });
             if (amanSrv) {
               const srvName = String(amanSrv.serviceId || "");
-              row.serviceType = (srvName.includes("مستعجل") || srvName.includes("عاجل") || srvName.includes("فورى")) ? "مستعجل" : "عادي";
+              row.serviceType = (srvName.includes("مستعجل") || srvName.includes("عاجل") || srvName.includes("فورى")) ? "عاجل" : "عادي";
               row.hasFine = !!(amanSrv.fineName || (amanSrv.fineAmount && amanSrv.fineAmount > 0));
               row.fineName = amanSrv.fineName || "";
               row.fineAmount = amanSrv.fineAmount || 0;

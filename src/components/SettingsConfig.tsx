@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from "react";
-import { AppSettings, Employee, DictionaryItem, DEFAULT_APPLICANT_CAPACITIES } from "../types";
+import React, { useState, useEffect, useMemo } from "react";
+import { AppSettings, Employee, DictionaryItem, DEFAULT_APPLICANT_CAPACITIES, Invoice, Service } from "../types";
+import EmployeeManager from "./EmployeeManager";
 import { APPS_SCRIPT_CODE } from "../lib/appsScriptTemplate";
 import { 
   updateSettingsOnServer, 
@@ -72,6 +73,8 @@ interface SettingsConfigProps {
   governmentFines?: GovernmentFine[];
   onGovernmentFinesUpdated?: (fines: GovernmentFine[]) => void;
   onReloadDatabase?: () => Promise<void>;
+  invoices?: Invoice[];
+  services?: Service[];
 }
 
 export default function SettingsConfig({ 
@@ -84,7 +87,9 @@ export default function SettingsConfig({
   onDictionaryUpdated,
   governmentFines = [],
   onGovernmentFinesUpdated,
-  onReloadDatabase
+  onReloadDatabase,
+  invoices = [],
+  services = []
 }: SettingsConfigProps) {
   const [headerText, setHeaderText] = useState(settings.headerText || "مكتب مزايا للجوازات والمعاملات");
   const [subHeaderText, setSubHeaderText] = useState(settings.subHeaderText ?? "جوازات طنطا والمعاملات الحكومية");
@@ -120,6 +125,47 @@ export default function SettingsConfig({
   const [stockAddNotes, setStockAddNotes] = useState<string>("");
   const [stockFeedback, setStockFeedback] = useState<string>("");
   const [stockSaveLoading, setStockSaveLoading] = useState(false);
+
+  // Passport forms stock calculation: deducts all executed passport operations (#) across invoices
+  const formsStockUsedStats = useMemo(() => {
+    let allNormalUsed = 0;
+    let allUrgentUsed = 0;
+    if (Array.isArray(invoices)) {
+      invoices.forEach((inv) => {
+        if (!inv || !Array.isArray(inv.customers)) return;
+        inv.customers.forEach((cust) => {
+          if (!cust || !Array.isArray(cust.services)) return;
+          cust.services.forEach((s) => {
+            const srvId = String(s.serviceId || "").trim();
+            const matched = (services || []).find((srv) => srv.id === srvId || srv.name === srvId);
+            const fullName = matched?.name || srvId;
+            if (fullName.startsWith("#") && !fullName.startsWith("##")) {
+              const isUrgent = fullName.includes("مستعجل") || fullName.includes("عاجل") || fullName.includes("فورى");
+              const qty = Number(s.quantity) || 1;
+              if (isUrgent) {
+                allUrgentUsed += qty;
+              } else {
+                allNormalUsed += qty;
+              }
+            }
+          });
+        });
+      });
+    }
+
+    const normalRec = Number(passportFormsStock.normalTotalReceived) || 0;
+    const urgentRec = Number(passportFormsStock.urgentTotalReceived) || 0;
+    const normalRemaining = normalRec > 0 ? normalRec - allNormalUsed : (allNormalUsed > 0 ? -allNormalUsed : 0);
+    const urgentRemaining = urgentRec > 0 ? urgentRec - allUrgentUsed : (allUrgentUsed > 0 ? -allUrgentUsed : 0);
+
+    return {
+      allNormalUsed,
+      allUrgentUsed,
+      normalRemaining,
+      urgentRemaining,
+      isConfigured: normalRec > 0 || urgentRec > 0,
+    };
+  }, [invoices, services, passportFormsStock]);
 
   // Business days & Holidays config
   const [includeSaturdayAsWeekend, setIncludeSaturdayAsWeekend] = useState(settings.includeSaturdayAsWeekend !== false);
@@ -646,6 +692,21 @@ export default function SettingsConfig({
     }
   };
 
+  // Guard: Settings page is strictly accessible to manager / admin only
+  if (activeEmployee.role !== "admin") {
+    return (
+      <div className="p-8 max-w-lg mx-auto my-12 bg-white border border-rose-200 rounded-2xl shadow-sm text-center font-cairo space-y-4">
+        <div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-2xl flex items-center justify-center mx-auto">
+          <Lock className="w-8 h-8" />
+        </div>
+        <h2 className="text-xl font-black text-slate-800">صفحة إعدادات النظام مخصصة للمدير فقط 🔒</h2>
+        <p className="text-sm text-slate-500 leading-relaxed">
+          عذراً، الوصول لصفحة إعدادات النظام وتعديل صلاحيات الموظفين والربط مقتصر حصرياً على حساب المدير العام.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6 font-cairo">
       
@@ -781,26 +842,48 @@ export default function SettingsConfig({
             سجل إجمالي الاستمارات المخزنة لديك، وأضف ما يتم استلامه يومياً من استمارات عادية وعاجلة. يتم خصم الاستمارات تلقائياً بحسب فواتير الجوازات التي تبدأ بـ (#) والمسجلة بكشف أمان لبيان الرصيد المتبقي بدقة.
           </p>
 
-          {/* Current Total Received Stats */}
+          {/* Current Total Received Stats & Live Deductions */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">
-            <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3.5 flex items-center justify-between">
-              <div>
-                <span className="text-xs font-bold text-emerald-900 block">إجمالي استمارات العادي المسجلة:</span>
-                <span className="text-[11px] text-emerald-700">الرصيد التراكمي المستلم</span>
+            {/* Normal Stock Card */}
+            <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3.5 space-y-2">
+              <div className="flex items-center justify-between border-b border-emerald-100 pb-2">
+                <div>
+                  <span className="text-xs font-extrabold text-emerald-950 block">استمارات العادي (مخزون ورصيد):</span>
+                  <span className="text-[11px] text-emerald-700">المستلم التراكمي: {passportFormsStock.normalTotalReceived || 0}</span>
+                </div>
+                <span className="text-[10px] bg-emerald-100/80 text-emerald-900 border border-emerald-300 font-bold px-2 py-0.5 rounded-md">
+                  منفذ بالفواتير: {formsStockUsedStats.allNormalUsed}
+                </span>
               </div>
-              <span className="font-mono text-2xl font-black text-emerald-950">
-                {passportFormsStock.normalTotalReceived || 0}
-              </span>
+              <div className="flex items-center justify-between pt-1">
+                <span className="text-xs font-bold text-slate-700">الرصيد الفعلي المتبقي لدينا:</span>
+                <span className={`font-mono text-2xl font-black ${
+                  formsStockUsedStats.normalRemaining <= 5 ? "text-red-700" : "text-emerald-950"
+                }`}>
+                  {formsStockUsedStats.normalRemaining}
+                </span>
+              </div>
             </div>
 
-            <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3.5 flex items-center justify-between">
-              <div>
-                <span className="text-xs font-bold text-amber-900 block">إجمالي استمارات العاجل المسجلة:</span>
-                <span className="text-[11px] text-amber-700">الرصيد التراكمي المستلم</span>
+            {/* Urgent Stock Card */}
+            <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3.5 space-y-2">
+              <div className="flex items-center justify-between border-b border-amber-100 pb-2">
+                <div>
+                  <span className="text-xs font-extrabold text-amber-950 block">استمارات العاجل (مخزون ورصيد):</span>
+                  <span className="text-[11px] text-amber-700">المستلم التراكمي: {passportFormsStock.urgentTotalReceived || 0}</span>
+                </div>
+                <span className="text-[10px] bg-amber-100/80 text-amber-900 border border-amber-300 font-bold px-2 py-0.5 rounded-md">
+                  منفذ بالفواتير: {formsStockUsedStats.allUrgentUsed}
+                </span>
               </div>
-              <span className="font-mono text-2xl font-black text-amber-950">
-                {passportFormsStock.urgentTotalReceived || 0}
-              </span>
+              <div className="flex items-center justify-between pt-1">
+                <span className="text-xs font-bold text-slate-700">الرصيد الفعلي المتبقي لدينا:</span>
+                <span className={`font-mono text-2xl font-black ${
+                  formsStockUsedStats.urgentRemaining <= 5 ? "text-red-700" : "text-amber-950"
+                }`}>
+                  {formsStockUsedStats.urgentRemaining}
+                </span>
+              </div>
             </div>
           </div>
 
@@ -1591,105 +1674,12 @@ _{الترويسة_الفرعية}_
           </div>
         </div>
 
-        {/* Passcode / Privacy Management Card */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
-          <h3 className="font-bold text-sm text-slate-800 flex items-center gap-1.5 border-b border-slate-100 pb-2">
-            <ShieldCheck className="w-4.5 h-4.5 text-blue-500" />
-            إدارة الخصوصية والأرقام السرية (للموظفين):
-          </h3>
-
-          <div className="grid md:grid-cols-2 gap-6 text-xs">
-            {/* Section A: Change my own passcode */}
-            <div className="bg-slate-50 p-4 rounded-xl space-y-3.5 border border-slate-150">
-              <h4 className="font-bold text-slate-700 flex items-center gap-1.5 border-b border-slate-200 pb-1.5">
-                <span className="w-2 h-2 bg-blue-500 rounded-full"></span>
-                تغيير الرقم السري الخاص بك ({activeEmployee.name})
-              </h4>
-              <div className="space-y-2">
-                {activeEmployee.password && activeEmployee.password.trim() !== "" && (
-                  <div className="space-y-1">
-                    <label className="text-[11px] text-slate-500 font-medium block">الرقم السري الحالي للتحقق:</label>
-                    <input 
-                      type="password" 
-                      value={myCurrentPassword}
-                      onChange={(e) => setMyCurrentPassword(e.target.value)}
-                      placeholder="أدخل رقمك السري الحالي"
-                      className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-mono"
-                    />
-                  </div>
-                )}
-                <div className="space-y-1">
-                  <label className="text-[11px] text-slate-500 font-medium block">الرقم السري الجديد:</label>
-                  <input 
-                    type="password" 
-                    value={myNewPassword}
-                    onChange={(e) => setMyNewPassword(e.target.value)}
-                    placeholder="أدخل الرقم السري الجديد"
-                    className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-mono"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[11px] text-slate-500 font-medium block">تأكيد الرقم السري الجديد:</label>
-                  <input 
-                    type="password" 
-                    value={myConfirmPassword}
-                    onChange={(e) => setMyConfirmPassword(e.target.value)}
-                    placeholder="أدخل الرقم السري الجديد مرة أخرى"
-                    className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-mono"
-                  />
-                </div>
-                <button
-                  type="button"
-                  onClick={handleChangeMyPassword}
-                  className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg transition-colors cursor-pointer"
-                >
-                  تحديث الرقم السري الخاص بي 🔐
-                </button>
-              </div>
-            </div>
-
-            {/* Section B: Admin Password Reset (Only visible to admin) */}
-            <div className="bg-slate-50 p-4 rounded-xl space-y-3.5 border border-slate-150 flex flex-col justify-between">
-              <div>
-                <h4 className="font-bold text-slate-700 flex items-center gap-1.5 border-b border-slate-200 pb-1.5">
-                  <span className="w-2 h-2 bg-amber-500 rounded-full"></span>
-                  لوحة تحكم المدير لإدارة حسابات الموظفين
-                </h4>
-                {activeEmployee.role === "admin" ? (
-                  <div className="space-y-3 pt-1">
-                    <p className="text-[11px] text-slate-500">
-                      بصفتك مديراً للنظام، يمكنك تصفير أو تعديل الرقم السري لأي موظف كاونتر في حال فقدانه أو لتحديثه:
-                    </p>
-                    <div className="space-y-2 max-h-[150px] overflow-y-auto pr-1">
-                      {employees && employees.map((emp) => (
-                        <div key={emp.username} className="flex items-center justify-between p-2 bg-white rounded-lg border border-slate-150 text-[11px]">
-                          <div className="flex flex-col">
-                            <span className="font-bold text-slate-700">{emp.name} ({emp.username})</span>
-                            <span className="text-[9px] text-slate-400">
-                              {emp.password ? `🔒 محمي برقم سري: ${emp.password}` : "🔓 غير محمي برقم سري"}
-                            </span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => handleAdminResetPassword(emp)}
-                            className="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-bold rounded-md transition-colors cursor-pointer"
-                          >
-                            تعديل الرقم السري ✏️
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="p-4 text-center text-slate-400 bg-white/50 rounded-xl border border-dashed border-slate-200 flex flex-col items-center justify-center gap-1.5 mt-4">
-                    <AlertCircle className="w-5 h-5 text-slate-400" />
-                    <span>هذه اللوحة مخصصة لمدير النظام فقط لإعادة ضبط أرقام الموظفين عند فقدانها.</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
+        {/* Card 4: Employee Accounts & Permissions Management */}
+        <EmployeeManager
+          employees={employees}
+          activeEmployee={activeEmployee}
+          onEmployeesUpdated={onEmployeesUpdated}
+        />
 
         {/* Card 5: Dedicated Customer Name Dictionary Management */}
         <div className="bg-white border border-slate-200 rounded-2xl shadow-xs overflow-hidden">

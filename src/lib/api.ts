@@ -405,6 +405,7 @@ export async function syncAmanReportToGoogleSheets(payload: {
     notes: string;
     invoiceId?: number;
     date?: string;
+    passportSerial?: string;
   }>;
   webhookUrl?: string;
 }): Promise<{
@@ -436,6 +437,7 @@ export async function fetchAmanReportFromGoogleSheets(params?: {
     notes: string;
     invoiceId?: number;
     date?: string;
+    passportSerial?: string;
   }>;
   totalRows: number;
   message: string;

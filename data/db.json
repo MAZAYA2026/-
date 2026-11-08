@@ -2172,7 +2172,8 @@
       "serviceType": "مستعجل",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-100-c-0",
@@ -2185,7 +2186,8 @@
       "serviceType": "مستعجل",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-102-c-0",
@@ -2198,7 +2200,8 @@
       "serviceType": "مستعجل",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-106-c-0",
@@ -2211,7 +2214,8 @@
       "serviceType": "عادي",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-107-c-0",
@@ -2224,7 +2228,8 @@
       "serviceType": "عادي",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-108-c-0",
@@ -2237,7 +2242,8 @@
       "serviceType": "عادي",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-109-c-0",
@@ -2250,7 +2256,8 @@
       "serviceType": "عادي",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-111-c-0",
@@ -2263,7 +2270,8 @@
       "serviceType": "عادي",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-112-c-0",
@@ -2276,7 +2284,8 @@
       "serviceType": "عادي",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-112-c-1",
@@ -2289,7 +2298,8 @@
       "serviceType": "عادي",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-115-c-0",
@@ -2302,7 +2312,8 @@
       "serviceType": "عادي",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-116-c-0",
@@ -2315,7 +2326,8 @@
       "serviceType": "عادي",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-117-c-0",
@@ -2328,7 +2340,8 @@
       "serviceType": "عادي",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-118-c-0",
@@ -2341,7 +2354,8 @@
       "serviceType": "عادي",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-119-c-0",
@@ -2354,7 +2368,8 @@
       "serviceType": "مستعجل",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-120-c-0",
@@ -2367,7 +2382,8 @@
       "serviceType": "عادي",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-121-c-0",
@@ -2380,7 +2396,8 @@
       "serviceType": "عادي",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-123-c-0",
@@ -2393,7 +2410,8 @@
       "serviceType": "عادي",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-123-c-1",
@@ -2406,7 +2424,8 @@
       "serviceType": "عادي",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-123-c-2",
@@ -2419,7 +2438,8 @@
       "serviceType": "عادي",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-123-c-3",
@@ -2432,7 +2452,8 @@
       "serviceType": "عادي",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-124-c-0",
@@ -2445,7 +2466,8 @@
       "serviceType": "عادي",
       "hasFine": true,
       "fineName": "عدم وجود مؤهل",
-      "fineAmount": 450
+      "fineAmount": 450,
+      "passportSerial": ""
     },
     {
       "id": "inv-125-c-0",
@@ -2458,7 +2480,8 @@
       "serviceType": "مستعجل",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-126-c-0",
@@ -2471,7 +2494,8 @@
       "serviceType": "عادي",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-126-c-1",
@@ -2484,7 +2508,8 @@
       "serviceType": "عادي",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-127-c-0",
@@ -2497,7 +2522,8 @@
       "serviceType": "عادي",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-128-c-0",
@@ -2510,7 +2536,8 @@
       "serviceType": "عادي",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-128-c-1",
@@ -2523,7 +2550,8 @@
       "serviceType": "عادي",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-129-c-0",
@@ -2536,7 +2564,8 @@
       "serviceType": "عادي",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-130-c-0",
@@ -2549,7 +2578,8 @@
       "serviceType": "عادي",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-131-c-0",
@@ -2562,7 +2592,8 @@
       "serviceType": "عادي",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-132-c-0",
@@ -2575,7 +2606,8 @@
       "serviceType": "مستعجل",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-133-c-0",
@@ -2588,7 +2620,8 @@
       "serviceType": "مستعجل",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-134-c-0",
@@ -2601,7 +2634,8 @@
       "serviceType": "مستعجل",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-135-c-0",
@@ -2614,7 +2648,8 @@
       "serviceType": "مستعجل",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-136-c-0",
@@ -2627,7 +2662,8 @@
       "serviceType": "عادي",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-137-c-0",
@@ -2640,7 +2676,8 @@
       "serviceType": "مستعجل",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-137-c-1",
@@ -2653,7 +2690,8 @@
       "serviceType": "مستعجل",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-137-c-2",
@@ -2666,7 +2704,8 @@
       "serviceType": "مستعجل",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-138-c-1",
@@ -2679,7 +2718,8 @@
       "serviceType": "عادي",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-138-c-2",
@@ -2692,7 +2732,8 @@
       "serviceType": "عادي",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     },
     {
       "id": "inv-139-c-0",
@@ -2705,7 +2746,8 @@
       "serviceType": "مستعجل",
       "hasFine": false,
       "fineName": "",
-      "fineAmount": 0
+      "fineAmount": 0,
+      "passportSerial": ""
     }
   ],
   "potentialCustomers": []

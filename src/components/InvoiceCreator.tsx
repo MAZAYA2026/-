@@ -667,27 +667,9 @@ export default function InvoiceCreator({
     setLoading(true);
 
     try {
-      // Auto-save any new word tokens from customer names into dictionary and Google Sheets (as atomic words)
-      for (const cust of customers) {
-        if (cust.arabicName && cust.englishName && cust.englishNameOption !== "previous") {
-          const tokens = extractAtomicWordTokens(cust.arabicName, cust.englishName);
-          for (const token of tokens) {
-            const exists = dictionary.some(
-              d => normalizeArabic(d.arabic) === normalizeArabic(token.arabic) && d.english.toUpperCase() === token.english.toUpperCase()
-            );
-            if (!exists) {
-              try {
-                const newDict = await saveDictionaryWord(token.arabic, token.english);
-                if (onDictionaryUpdated) {
-                  onDictionaryUpdated(newDict);
-                }
-              } catch (e) {
-                console.warn("Could not auto-save token:", token, e);
-              }
-            }
-          }
-        }
-      }
+      // User explicit requirement:
+      // "عند عمل فواتير خاصة بالجوازات عايز امكانية التعديل فى الاسم المعروض بالانجليزى الذى يتم جلبة من القاموس دون ان يتم حفظة فى قاعدة البيانات حيث ان هذا التعديل بيكون مؤقت فقط خاص لهذا العميل وليس بوجة عام لجميع المواطنين"
+      // Custom English name modifications stay strictly on this invoice and are NOT auto-saved to the global dictionary.
 
       // Calculate totals
       let totalGov = 0;
@@ -1329,6 +1311,13 @@ export default function InvoiceCreator({
                           </button>
                         )}
                       </div>
+
+                      {customer.englishNameOption !== "previous" && (
+                        <p className="text-[11px] text-slate-500 font-cairo flex items-center gap-1.5 mt-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0"></span>
+                          <span>متاح تعديل الاسم الإنجليزي المعروض بحرية؛ وسيبقى التعديل مؤقتاً خاصاً بهذا العميل في هذه الفاتورة فقط ولن يغير القاموس العام للمواطنين الآخرين.</span>
+                        </p>
+                      )}
 
                       {customer.englishNameOption !== "previous" && /[\u0600-\u06FF]/.test(customer.englishName) && (
                         <div className="bg-amber-100 border border-amber-300 text-amber-950 px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 mt-1.5 animate-pulse font-cairo">
