@@ -1317,6 +1317,9 @@ export default function AmanReport({
         .print\\:hidden {
           display: none !important;
         }
+        .print-full-width {
+          width: 100% !important;
+        }
         .print\\:inline-block {
           display: inline-block !important;
         }
@@ -2058,7 +2061,7 @@ export default function AmanReport({
                 key={pageIdx} 
                 className="a4-print-page bg-white border border-slate-300 shadow-md mx-auto mb-8 last:mb-0 text-black flex flex-col justify-between"
                 style={{ 
-                  width: "210mm", 
+                  width: "234mm", 
                   height: "297mm", 
                   maxHeight: "297mm",
                   padding: "5mm 8mm",
@@ -2069,8 +2072,8 @@ export default function AmanReport({
                 <div>
                   {/* Header Banner - Single Line Layout (بداية الصف: قسم جوازات طنطا | وسط الصف: كشف حركة التابع للخدمات الجماهيرية | نهاية الصف: التاريخ :     /    / 2026) */}
                   <div 
-                    className="flex justify-between items-center border-b-2 border-black pb-1 mb-1 text-black font-cairo flex-nowrap whitespace-nowrap overflow-hidden"
-                    style={{ width: "100%", whiteSpace: "nowrap", direction: "rtl" }}
+                    className="flex justify-between items-center border-b-2 border-black pb-1 mb-1 text-black font-cairo flex-nowrap whitespace-nowrap overflow-hidden print-full-width"
+                    style={{ width: "calc(100% - 88px)", whiteSpace: "nowrap", direction: "rtl" }}
                   >
                     {/* بداية الصف من اليمين: قسم جوازات طنطا */}
                     <div 
@@ -2103,7 +2106,7 @@ export default function AmanReport({
                     className="w-full print:w-full border-t-2 border-r-2 border-b-2 print:border-l-2 border-black border-l-0 text-right" 
                     style={{ 
                       borderCollapse: "collapse", 
-                      width: "calc(100% + 88px)", 
+                      width: "100%", 
                       tableLayout: "fixed",
                       fontFamily: "'Cairo', sans-serif", 
                       direction: "rtl" 
@@ -2373,9 +2376,9 @@ export default function AmanReport({
 
                 {/* Signoff Section & Small Reference Breakdown requested by user */}
                 <div 
-                  className="w-full flex justify-between items-center px-1 pt-1 mt-1 border-t-2 border-black text-black font-cairo"
+                  className="w-full flex justify-between items-center px-1 pt-1 mt-1 border-t-2 border-black text-black font-cairo print-full-width"
                   style={{ 
-                    width: "100%", 
+                    width: "calc(100% - 88px)", 
                     direction: "rtl",
                     height: "14mm", 
                     maxHeight: "15mm", 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Invoice, Service, AppSettings, Employee, CollectionClosing, DictionaryItem, GovernmentFine, PotentialCustomer } from "./types";
-import { fetchDB, saveDB } from "./lib/api";
+import { fetchDB, saveDB, updateEmployeesOnServer } from "./lib/api";
 import EmployeeLogin from "./components/EmployeeLogin";
 import InvoiceCreator from "./components/InvoiceCreator";
 import InvoiceQuery from "./components/InvoiceQuery";
@@ -86,9 +86,7 @@ export default function App() {
     try {
       const updatedEmployees = [...employees, newEmp];
       setEmployees(updatedEmployees);
-      const dbPayload = await fetchDB();
-      dbPayload.employees = updatedEmployees;
-      await saveDB(dbPayload);
+      await updateEmployeesOnServer(updatedEmployees);
     } catch (err) {
       console.error("Failed to add employee:", err);
     }
@@ -103,9 +101,7 @@ export default function App() {
           setActiveEmployee(fresh);
         }
       }
-      const dbPayload = await fetchDB();
-      dbPayload.employees = updatedEmployees;
-      await saveDB(dbPayload);
+      await updateEmployeesOnServer(updatedEmployees);
     } catch (err) {
       console.error("Failed to update employees:", err);
     }
@@ -208,7 +204,7 @@ export default function App() {
       
       {/* Upper Navigation Navbar Banner */}
       <header className="bg-slate-950 text-white shadow-lg border-b border-slate-900 no-print">
-        <div className="max-w-7xl mx-auto px-4 lg:px-6 h-16 flex items-center justify-between">
+        <div className="max-w-[1720px] 2xl:max-w-[1850px] w-full mx-auto px-3 sm:px-4 lg:px-6 h-16 flex items-center justify-between">
           
           <div className="flex items-center gap-2.5">
             <div className="w-10 h-10 bg-amber-500 text-slate-950 rounded-xl flex items-center justify-center font-black text-lg shadow-md font-cairo">م</div>
@@ -250,10 +246,10 @@ export default function App() {
       </header>
 
       {/* Primary Workspace Layout (Sidebar on Desktop, Top buttons on Mobile) */}
-      <div className="max-w-7xl mx-auto w-full flex-1 flex flex-col md:flex-row p-4 lg:p-6 gap-6">
+      <div className="max-w-[1720px] 2xl:max-w-[1850px] w-full flex-1 flex flex-col md:flex-row p-3 sm:p-4 lg:p-5 gap-5">
         
         {/* Sidebar Nav Panels */}
-        <aside className="w-full md:w-64 shrink-0 flex flex-col gap-2.5 no-print font-cairo">
+        <aside className="w-full md:w-56 lg:w-60 shrink-0 flex flex-col gap-2.5 no-print font-cairo">
           
           <button
             onClick={() => setActiveTab("create")}
@@ -386,7 +382,7 @@ export default function App() {
         </aside>
 
         {/* Primary Workspace View Area */}
-        <main className="flex-1 bg-white border border-slate-200/60 shadow-xs rounded-3xl p-5 lg:p-7 min-h-[600px] overflow-hidden">
+        <main className="min-w-0 flex-1 bg-white border border-slate-200/60 shadow-xs rounded-3xl p-4 sm:p-5 lg:p-6 min-h-[600px] overflow-hidden">
           {activeTab === "create" && (
             <InvoiceCreator 
               services={services} 

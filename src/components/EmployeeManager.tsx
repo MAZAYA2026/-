@@ -16,20 +16,30 @@ import {
   CheckCircle, 
   UserPlus, 
   Eye, 
-  EyeOff 
+  EyeOff,
+  Cloud,
+  Download,
+  RefreshCw,
+  FileSpreadsheet
 } from "lucide-react";
+import { syncEmployeesToGoogleSheets, pullEmployeesFromGoogleSheets } from "../lib/api";
 
 interface EmployeeManagerProps {
   employees: Employee[];
   activeEmployee: Employee;
   onEmployeesUpdated: (employees: Employee[]) => Promise<void> | void;
+  googleSheetWebhookUrl?: string;
 }
 
 export default function EmployeeManager({
   employees,
   activeEmployee,
   onEmployeesUpdated,
+  googleSheetWebhookUrl,
 }: EmployeeManagerProps) {
+  // Sync to Google Sheets states
+  const [syncLoading, setSyncLoading] = useState(false);
+  const [syncFeedback, setSyncFeedback] = useState("");
   // Passcode change for active employee
   const [myCurrentPassword, setMyCurrentPassword] = useState("");
   const [myNewPassword, setMyNewPassword] = useState("");
@@ -290,6 +300,46 @@ export default function EmployeeManager({
     }
   };
 
+  // Sync employees and access permissions to Google Sheets
+  const handleSyncToSheets = async () => {
+    setSyncLoading(true);
+    setSyncFeedback("جاري مزامنة بيانات الموظفين والصلاحيات مع شيت جوجل درايف...");
+    try {
+      const res = await syncEmployeesToGoogleSheets(googleSheetWebhookUrl);
+      setSyncFeedback(res.message || "تم تسجيل وتحديث بيانات الموظفين وصلاحيات الدخول في شيت جوجل درايف بنجاح! 👥☁️✅");
+      setTimeout(() => setSyncFeedback(""), 6000);
+    } catch (err: any) {
+      setSyncFeedback(`فشل الحفظ في جوجل درايف: ${err.message}`);
+      setTimeout(() => setSyncFeedback(""), 6000);
+    } finally {
+      setSyncLoading(false);
+    }
+  };
+
+  // Pull employees from Google Sheets
+  const handlePullFromSheets = async () => {
+    const confirmPull = window.confirm("هل أنت متأكد من استيراد بيانات الموظفين وصلاحياتهم من شيت جوجل درايف؟\nسيتم تحديث قائمة الموظفين بناءً على المسجل في الشيت.");
+    if (!confirmPull) return;
+
+    setSyncLoading(true);
+    setSyncFeedback("جاري استيراد الموظفين من شيت جوجل درايف...");
+    try {
+      const res = await pullEmployeesFromGoogleSheets(googleSheetWebhookUrl);
+      if (res.employees && res.employees.length > 0) {
+        await onEmployeesUpdated(res.employees);
+        setSyncFeedback(res.message || "تم استيراد بيانات الموظفين وصلاحياتهم بنجاح! 📥✅");
+      } else {
+        setSyncFeedback(res.message || "لم يتم العثور على موظفين في الشيت.");
+      }
+      setTimeout(() => setSyncFeedback(""), 6000);
+    } catch (err: any) {
+      setSyncFeedback(`فشل الاستيراد من جوجل درايف: ${err.message}`);
+      setTimeout(() => setSyncFeedback(""), 6000);
+    } finally {
+      setSyncLoading(false);
+    }
+  };
+
   return (
     <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-6 font-cairo">
       {/* Header */}
@@ -304,15 +354,58 @@ export default function EmployeeManager({
           </p>
         </div>
 
-        {isAdmin && (
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Direct Google Sheets Sync Button */}
           <button
             type="button"
-            onClick={() => setIsAddingEmp(true)}
-            className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer shrink-0"
+            disabled={syncLoading}
+            onClick={handleSyncToSheets}
+            className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+            title="حفظ ومزامنة بيانات وصلاحيات الموظفين في ورقة Employees_الموظفين_والصلاحيات بملف جوجل شيت"
           >
-            <UserPlus className="w-4 h-4" />
-            <span>إضافة موظف جديد ➕</span>
+            {syncLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Cloud className="w-4 h-4 text-emerald-200" />}
+            <span>مزامنة مع جوجل درايف ☁️</span>
           </button>
+
+          {/* Direct Google Sheets Pull Button */}
+          <button
+            type="button"
+            disabled={syncLoading}
+            onClick={handlePullFromSheets}
+            className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+            title="استيراد وتحديث بيانات الموظفين من ورقة جوجل شيت"
+          >
+            <Download className="w-4 h-4 text-blue-600" />
+            <span>استيراد من الشيت 📥</span>
+          </button>
+
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => setIsAddingEmp(true)}
+              className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer shrink-0"
+            >
+              <UserPlus className="w-4 h-4" />
+              <span>إضافة موظف جديد ➕</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Google Sheets Sync Status Bar */}
+      <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
+        <div className="flex items-center gap-2">
+          <FileSpreadsheet className="w-4.5 h-4.5 text-emerald-600 shrink-0" />
+          <div className="text-[11.5px] text-emerald-950 font-bold leading-relaxed">
+            <span>ملف جوجل درايف مرتبط: يتم تسجيل وتحديث بيانات الموظفين وصلاحيات الدخول في ورقة </span>
+            <code className="font-mono bg-white px-1.5 py-0.5 rounded border border-emerald-300 text-emerald-800 text-[11px]">Employees_الموظفين_والصلاحيات</code>
+            <span> لتبقى مرجعاً دائماً وموثقاً لأي تحديثات مستقبلية.</span>
+          </div>
+        </div>
+        {syncFeedback && (
+          <span className="text-[11px] font-bold text-emerald-900 bg-white border border-emerald-300 px-2.5 py-1 rounded-lg shrink-0 animate-fade-in shadow-2xs">
+            {syncFeedback}
+          </span>
         )}
       </div>
 

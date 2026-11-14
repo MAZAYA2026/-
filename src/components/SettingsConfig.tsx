@@ -1585,7 +1585,7 @@ _{الترويسة_الفرعية}_
                   لوحة التصدير والاستيراد الموحدة الشاملة لكافة بيانات النظام:
                 </span>
                 <span className="text-[10px] text-emerald-800 bg-emerald-100/70 border border-emerald-200 px-2 py-0.5 rounded-md font-mono font-bold">
-                  زر واحد موحد يجلب كل شيء (الخدمات + الغرامات + الفواتير + القاموس + الإعدادات)
+                  زر واحد موحد يجلب كل شيء (الخدمات + الغرامات + الموظفين والصلاحيات + الفواتير + القاموس + الإعدادات)
                 </span>
               </div>
 
@@ -1599,10 +1599,10 @@ _{الترويسة_الفرعية}_
                 >
                   <div className="flex items-center gap-2 text-sm font-extrabold">
                     <Download className="w-4 h-4 text-blue-200" />
-                    <span>استيراد كافة البيانات وبنود الغرامات من جوجل شيت 📥</span>
+                    <span>استيراد كافة البيانات والموظفين من جوجل شيت 📥</span>
                   </div>
                   <span className="text-[10px] text-blue-100 font-normal leading-relaxed">
-                    زر واحد موحد يجلب كل شيء: كتالوج الخدمات، بنود الغرامات الحكومية، الفواتير، قاموس الأسماء، وقوالب رسائل الواتساب
+                    زر واحد موحد يجلب كل شيء: كتالوج الخدمات، بنود الغرامات الحكومية، حسابات وصلاحيات الموظفين، الفواتير، قاموس الأسماء، وقوالب رسائل الواتساب
                   </span>
                 </button>
 
@@ -1615,10 +1615,10 @@ _{الترويسة_الفرعية}_
                 >
                   <div className="flex items-center gap-2 text-sm font-extrabold">
                     <Download className="w-4 h-4 rotate-180 text-emerald-400" />
-                    <span>تصدير وحفظ كافة البيانات وبنود الغرامات على جوجل شيت 📤</span>
+                    <span>تصدير وحفظ كافة البيانات والموظفين على جوجل شيت 📤</span>
                   </div>
                   <span className="text-[10px] text-slate-300 font-normal leading-relaxed">
-                    حفظ شامل لكل البيانات: كتالوج الخدمات، بنود الغرامات الحكومية، الفواتير، قاموس الأسماء، وقوالب رسائل الواتساب
+                    حفظ شامل لكل البيانات: كتالوج الخدمات، بنود الغرامات الحكومية، حسابات وصلاحيات الموظفين، الفواتير، قاموس الأسماء، وقوالب رسائل الواتساب
                   </span>
                 </button>
               </div>
@@ -1679,6 +1679,7 @@ _{الترويسة_الفرعية}_
           employees={employees}
           activeEmployee={activeEmployee}
           onEmployeesUpdated={onEmployeesUpdated}
+          googleSheetWebhookUrl={googleSheetWebhookUrl || settings.googleSheetWebhookUrl}
         />
 
         {/* Card 5: Dedicated Customer Name Dictionary Management */}

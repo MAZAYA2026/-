@@ -365,6 +365,64 @@ function doPost(e) {
             potSheet.setColumnWidth(11, 120);
             potSheet.setColumnWidth(12, 100);
           } catch(cwErr) {}
+      // --- Sheet 10: Employees_الموظفين_والصلاحيات ---
+      var empList = contents.employees || db.employees || (contents.db && contents.db.employees) || [];
+      if (Array.isArray(empList) && empList.length > 0) {
+        var empSheet = findOrCreateSheet(ss, ["Employees_الموظفين_والصلاحيات", "Employees_الموظفين", "الموظفين_والصلاحيات", "الموظفين", "Employees"], "Employees_الموظفين_والصلاحيات");
+        empSheet.clearContents();
+        var empHeaders = [
+          "م", 
+          "اسم المستخدم (Username)", 
+          "اسم الموظف", 
+          "الدور والوظيفة", 
+          "الرقم السري / كلمة المرور", 
+          "إنشاء الفواتير", 
+          "تعديل الفواتير", 
+          "الخزينة والتقفيل", 
+          "إدارة الخدمات والأسعار", 
+          "كشف حركة أمان", 
+          "تاريخ التحديث",
+          "بيانات الصلاحيات كاملة (JSON)"
+        ];
+        var empRows = [empHeaders];
+        var nowStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || "GMT+2", "yyyy-MM-dd HH:mm:ss");
+        for (var em = 0; em < empList.length; em++) {
+          var empItem = empList[em];
+          if (empItem && empItem.username) {
+            var perms = empItem.permissions || {};
+            empRows.push([
+              em + 1,
+              empItem.username || "",
+              empItem.name || "",
+              empItem.role === "admin" ? "مدير النظام (Admin)" : "موظف (Employee)",
+              empItem.password ? ("'" + empItem.password) : "",
+              perms.canCreateInvoices !== false ? "نعم" : "لا",
+              perms.canEditInvoices !== false ? "نعم" : "لا",
+              perms.canViewCollection !== false ? "نعم" : "لا",
+              perms.canManageServices === true ? "نعم" : "لا",
+              perms.canViewAmanReport !== false ? "نعم" : "لا",
+              nowStr,
+              JSON.stringify(empItem)
+            ]);
+          }
+        }
+        if (empRows.length > 0) {
+          empSheet.getRange(1, 1, empRows.length, empHeaders.length).setValues(empRows);
+          formatHeader(empSheet, empHeaders.length);
+          try {
+            empSheet.setColumnWidth(1, 50);
+            empSheet.setColumnWidth(2, 160);
+            empSheet.setColumnWidth(3, 220);
+            empSheet.setColumnWidth(4, 160);
+            empSheet.setColumnWidth(5, 150);
+            empSheet.setColumnWidth(6, 120);
+            empSheet.setColumnWidth(7, 120);
+            empSheet.setColumnWidth(8, 140);
+            empSheet.setColumnWidth(9, 140);
+            empSheet.setColumnWidth(10, 130);
+            empSheet.setColumnWidth(11, 160);
+            empSheet.setColumnWidth(12, 280);
+          } catch(cwErr) {}
         }
       }
 
@@ -698,6 +756,74 @@ function doPost(e) {
       }
     }
 
+    // 7. Direct Specific Employees & Permissions Push
+    if (action === "push_employees" || action === "sync_employees") {
+      var eList = contents.employees || (contents.db && contents.db.employees) || [];
+      if (Array.isArray(eList)) {
+        var empDirectSheet = findOrCreateSheet(ss, ["Employees_الموظفين_والصلاحيات", "Employees_الموظفين", "الموظفين_والصلاحيات", "الموظفين", "Employees"], "Employees_الموظفين_والصلاحيات");
+        empDirectSheet.clearContents();
+        var empDirectHeaders = [
+          "م", 
+          "اسم المستخدم (Username)", 
+          "اسم الموظف", 
+          "الدور والوظيفة", 
+          "الرقم السري / كلمة المرور", 
+          "إنشاء الفواتير", 
+          "تعديل الفواتير", 
+          "الخزينة والتقفيل", 
+          "إدارة الخدمات والأسعار", 
+          "كشف حركة أمان", 
+          "تاريخ التحديث",
+          "بيانات الصلاحيات كاملة (JSON)"
+        ];
+        var empDirectRows = [empDirectHeaders];
+        var updateTimestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || "GMT+2", "yyyy-MM-dd HH:mm:ss");
+        for (var eIdx = 0; eIdx < eList.length; eIdx++) {
+          var eObj = eList[eIdx];
+          if (eObj && eObj.username) {
+            var ePerms = eObj.permissions || {};
+            empDirectRows.push([
+              eIdx + 1,
+              eObj.username || "",
+              eObj.name || "",
+              eObj.role === "admin" ? "مدير النظام (Admin)" : "موظف (Employee)",
+              eObj.password ? ("'" + eObj.password) : "",
+              ePerms.canCreateInvoices !== false ? "نعم" : "لا",
+              ePerms.canEditInvoices !== false ? "نعم" : "لا",
+              ePerms.canViewCollection !== false ? "نعم" : "لا",
+              ePerms.canManageServices === true ? "نعم" : "لا",
+              ePerms.canViewAmanReport !== false ? "نعم" : "لا",
+              updateTimestamp,
+              JSON.stringify(eObj)
+            ]);
+          }
+        }
+        if (empDirectRows.length > 0) {
+          empDirectSheet.getRange(1, 1, empDirectRows.length, empDirectHeaders.length).setValues(empDirectRows);
+          formatHeader(empDirectSheet, empDirectHeaders.length);
+          try {
+            empDirectSheet.setColumnWidth(1, 50);
+            empDirectSheet.setColumnWidth(2, 160);
+            empDirectSheet.setColumnWidth(3, 220);
+            empDirectSheet.setColumnWidth(4, 160);
+            empDirectSheet.setColumnWidth(5, 150);
+            empDirectSheet.setColumnWidth(6, 120);
+            empDirectSheet.setColumnWidth(7, 120);
+            empDirectSheet.setColumnWidth(8, 140);
+            empDirectSheet.setColumnWidth(9, 140);
+            empDirectSheet.setColumnWidth(10, 130);
+            empDirectSheet.setColumnWidth(11, 160);
+            empDirectSheet.setColumnWidth(12, 280);
+          } catch(cwErr) {}
+        }
+        return ContentService.createTextOutput(JSON.stringify({ 
+          status: "success", 
+          message: "تم حفظ وتحديث بيانات الموظفين وصلاحيات الدخول في ورقة (Employees_الموظفين_والصلاحيات) بجوجل درايف بنجاح! 👥✅",
+          count: empDirectRows.length - 1
+        })).setMimeType(ContentService.MimeType.JSON);
+      }
+    }
+
     return ContentService.createTextOutput(JSON.stringify({ 
       error: "إجراء غير معروف" 
     })).setMimeType(ContentService.MimeType.JSON);
@@ -720,7 +846,8 @@ function doGet(e) {
       dictionary: [],
       governmentFines: [],
       amanReport: [],
-      amanPostponedRows: []
+      amanPostponedRows: [],
+      employees: []
     };
 
     // 1. Read Settings
@@ -901,6 +1028,47 @@ function doGet(e) {
               status: pStatus,
               passportSerial: pPassportSerial
             });
+          }
+        }
+      }
+    }
+
+    // 9. Read Employees & Access Permissions
+    var empReadSheet = findOrCreateSheet(ss, ["Employees_الموظفين_والصلاحيات", "Employees_الموظفين", "الموظفين_والصلاحيات", "الموظفين", "Employees"], "Employees_الموظفين_والصلاحيات");
+    db.employees = [];
+    if (empReadSheet) {
+      var eValRange = empReadSheet.getDataRange().getValues();
+      if (eValRange && eValRange.length > 1) {
+        for (var erIdx = 1; erIdx < eValRange.length; erIdx++) {
+          var eRowData = eValRange[erIdx];
+          var eUName = String(eRowData[1] || "").trim();
+          if (eUName) {
+            var jsonCol = eRowData[11];
+            var parsedE = null;
+            if (jsonCol) {
+              try {
+                parsedE = JSON.parse(jsonCol);
+              } catch(eJsonErr) {}
+            }
+            if (parsedE && parsedE.username) {
+              db.employees.push(parsedE);
+            } else {
+              var isAdmRole = String(eRowData[3] || "").toLowerCase().indexOf("admin") !== -1 || String(eRowData[3] || "").indexOf("مدير") !== -1;
+              var rawPwd = eRowData[4] !== undefined && eRowData[4] !== null ? String(eRowData[4]).replace(/^'/, '') : "";
+              db.employees.push({
+                username: eUName,
+                name: String(eRowData[2] || eUName).trim(),
+                role: isAdmRole ? "admin" : "employee",
+                password: rawPwd,
+                permissions: {
+                  canCreateInvoices: String(eRowData[5] || "").indexOf("نعم") !== -1 || eRowData[5] === true,
+                  canEditInvoices: String(eRowData[6] || "").indexOf("نعم") !== -1 || eRowData[6] === true,
+                  canViewCollection: String(eRowData[7] || "").indexOf("نعم") !== -1 || eRowData[7] === true,
+                  canManageServices: String(eRowData[8] || "").indexOf("نعم") !== -1 || eRowData[8] === true,
+                  canViewAmanReport: String(eRowData[9] || "").indexOf("نعم") !== -1 || eRowData[9] === true
+                }
+              });
+            }
           }
         }
       }

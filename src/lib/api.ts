@@ -723,3 +723,60 @@ export function exportPotentialCustomersToExcel(customers: PotentialCustomer[]) 
   link.click();
   document.body.removeChild(link);
 }
+
+// 7. Sync Employees & Access Permissions to Google Sheets Webhook
+export async function syncEmployeesToGoogleSheets(webhookUrl?: string): Promise<{
+  status: string;
+  message: string;
+  count?: number;
+  savedInSheet?: boolean;
+}> {
+  const response = await fetch("/api/sheets/webhook/sync-employees", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ webhookUrl }),
+  });
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || "فشل مزامنة بيانات الموظفين مع شيت جوجل درايف");
+  }
+  return response.json();
+}
+
+// Pull Employees from Google Sheets Webhook
+export async function pullEmployeesFromGoogleSheets(webhookUrl?: string): Promise<{
+  status: string;
+  message: string;
+  employees: Employee[];
+  count: number;
+}> {
+  const response = await fetch("/api/sheets/webhook/pull-employees", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ webhookUrl }),
+  });
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || "فشل استيراد بيانات الموظفين من شيت جوجل درايف");
+  }
+  return response.json();
+}
+
+// Save Employees directly on server with auto-sync to Google Sheets
+export async function updateEmployeesOnServer(employees: Employee[]): Promise<{
+  status: string;
+  message: string;
+  employees: Employee[];
+  sheetSynced?: boolean;
+}> {
+  const response = await fetch("/api/db/employees", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ employees }),
+  });
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || "فشل حفظ بيانات الموظفين على الخادم");
+  }
+  return response.json();
+}

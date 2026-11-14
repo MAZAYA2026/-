@@ -753,14 +753,14 @@ export default function ServicesConfig({
           <table className="w-full text-right text-xs">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-100 text-slate-500 font-bold">
-                <th className="p-3 w-28 text-center">الترتيب والتحريك</th>
-                <th className="p-3">اسم الخدمة بالكامل</th>
-                <th className="p-3">الرسوم الحكومية</th>
-                <th className="p-3">رسوم أتعاب المكتب</th>
-                <th className="p-3">الإجمالي الجاري</th>
-                <th className="p-3">مدة تنفيذ الخدمة</th>
-                <th className="p-3">التعليمات</th>
-                <th className="p-3 text-left">الخيارات</th>
+                <th className="px-2 py-2.5 w-24 text-center">الترتيب</th>
+                <th className="px-2.5 py-2.5">اسم الخدمة</th>
+                <th className="px-2.5 py-2.5 whitespace-nowrap">الرسوم الحكومية</th>
+                <th className="px-2.5 py-2.5 whitespace-nowrap">أتعاب المكتب</th>
+                <th className="px-2.5 py-2.5 whitespace-nowrap">الإجمالي</th>
+                <th className="px-2.5 py-2.5 whitespace-nowrap">مدة التنفيذ</th>
+                <th className="px-2.5 py-2.5">التعليمات</th>
+                <th className="px-2 py-2.5 text-left w-20">الخيارات</th>
               </tr>
             </thead>
             <tbody>
@@ -771,7 +771,7 @@ export default function ServicesConfig({
                 return (
                   <tr key={srv.id} className="border-b border-slate-150 hover:bg-slate-50/50 transition-colors">
                     {/* Reorder controls */}
-                    <td className="p-2.5 text-center">
+                    <td className="px-2 py-2 text-center">
                       <div className="flex items-center justify-center gap-1">
                         <span className="w-6 h-6 rounded-md bg-slate-100 text-slate-700 text-[11px] font-mono font-black flex items-center justify-center border border-slate-200">
                           {idx + 1}
@@ -833,7 +833,7 @@ export default function ServicesConfig({
                       </div>
                     </td>
 
-                    <td className="p-3">
+                    <td className="px-2.5 py-2">
                       <div className="font-bold text-slate-900 flex items-center gap-1.5">
                         <span>{srv.name}</span>
                         {isPassport && (
@@ -844,12 +844,12 @@ export default function ServicesConfig({
                       </div>
                       {srv.notes && <div className="text-[10px] text-slate-400 mt-0.5">{srv.notes}</div>}
                     </td>
-                    <td className="p-3 font-mono font-bold text-slate-800">{srv.govPrice.toFixed(2)} ج.م</td>
-                    <td className="p-3 font-mono font-bold text-emerald-600">{srv.officeFee.toFixed(2)} ج.م</td>
-                    <td className="p-3 font-mono font-black text-slate-900">{total.toFixed(2)} ج.م</td>
-                    <td className="p-3 text-slate-600 font-medium">{srv.duration}</td>
-                    <td className="p-3 text-slate-400 max-w-xs truncate" title={srv.instructions}>{srv.instructions}</td>
-                    <td className="p-3 text-left">
+                    <td className="px-2.5 py-2 font-mono font-bold text-slate-800 whitespace-nowrap">{srv.govPrice.toFixed(2)} ج.م</td>
+                    <td className="px-2.5 py-2 font-mono font-bold text-emerald-600 whitespace-nowrap">{srv.officeFee.toFixed(2)} ج.م</td>
+                    <td className="px-2.5 py-2 font-mono font-black text-slate-900 whitespace-nowrap">{total.toFixed(2)} ج.م</td>
+                    <td className="px-2.5 py-2 text-slate-600 font-medium whitespace-nowrap">{srv.duration}</td>
+                    <td className="px-2.5 py-2 text-slate-400 max-w-[200px] xl:max-w-xs truncate" title={srv.instructions}>{srv.instructions}</td>
+                    <td className="px-2 py-2 text-left">
                       <div className="inline-flex gap-1">
                         <button
                           onClick={() => handleOpenEdit(srv)}

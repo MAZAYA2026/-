@@ -453,6 +453,61 @@ app.post("/api/db/save", (req, res) => {
   res.json({ status: "success", message: "Database saved successfully" });
 });
 
+// Dedicated Update Employees Endpoint with immediate Google Sheet Sync
+app.post("/api/db/employees", async (req, res) => {
+  const { employees } = req.body;
+  if (!Array.isArray(employees)) {
+    return res.status(400).json({ error: "بيانات الموظفين غير صالحة" });
+  }
+
+  const db = readDB();
+  db.employees = employees;
+  writeDB(db);
+
+  // If Google Sheets webhook is configured, sync employees to sheet immediately
+  const targetUrl = db.settings?.googleSheetWebhookUrl;
+  let sheetSynced = false;
+  let sheetMessage = "";
+
+  if (targetUrl && targetUrl.startsWith("http")) {
+    try {
+      const response = await fetch(targetUrl, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({
+          action: "push_employees",
+          employees: db.employees,
+          db: { employees: db.employees }
+        }),
+        redirect: "follow",
+      });
+      const text = await response.text();
+      let data: any = {};
+      try { data = JSON.parse(text); } catch { data = { message: text }; }
+
+      if (
+        text.includes("غير معروف") || 
+        text.includes("Unknown action") || 
+        (data && data.error && String(data.error).includes("غير معروف"))
+      ) {
+        console.log("push_employees not recognized by older script, falling back to full push...");
+        await pushToGoogleWebhook(targetUrl, db);
+      }
+      sheetSynced = true;
+      sheetMessage = "وتم حفظ وتحديث بيانات وصلاحيات الموظفين في شيت جوجل درايف بنجاح! 👥✅";
+    } catch (sheetErr: any) {
+      console.warn("Could not sync employees to Google Sheets:", sheetErr.message);
+    }
+  }
+
+  res.json({
+    status: "success",
+    message: "تم تحديث بيانات وصلاحيات الموظفين بنجاح! 🛡️" + (sheetMessage ? ` (${sheetMessage})` : ""),
+    employees: db.employees,
+    sheetSynced
+  });
+});
+
 // Helper to directly push invoices sheet to Google Sheets
 // Universal clean birth date formatter
 function formatCleanBirthDate(val: any): string {
@@ -1734,7 +1789,8 @@ async function pushToGoogleWebhook(webhookUrl: string, db: any) {
         collectionClosings: db.collectionClosings || [],
         governmentFines: db.governmentFines || [],
         amanReport: db.amanReport || [],
-        amanPostponedRows: db.amanPostponedRows || []
+        amanPostponedRows: db.amanPostponedRows || [],
+        employees: db.employees || []
       }),
       redirect: "follow",
     });
@@ -2041,6 +2097,100 @@ app.post("/api/sheets/webhook/sync-fines", async (req, res) => {
     });
   } catch (err: any) {
     res.status(500).json({ error: "فشل إرسال بنود الغرامات إلى السكربت: " + err.message });
+  }
+});
+
+// Dedicated Webhook Sync Employees Endpoint
+app.post("/api/sheets/webhook/sync-employees", async (req, res) => {
+  const { webhookUrl } = req.body;
+  const db = readDB();
+  const targetUrl = webhookUrl || db.settings.googleSheetWebhookUrl;
+
+  if (!targetUrl || !targetUrl.startsWith("http")) {
+    return res.status(400).json({ error: "الرجاء إدخال رابط سكربت Webhook صالح أولاً في قسم إعدادات جوجل شيت." });
+  }
+
+  try {
+    const employees = db.employees || [];
+    const response = await fetch(targetUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        action: "push_employees",
+        employees: employees,
+        db: { employees: employees }
+      }),
+      redirect: "follow",
+    });
+
+    const text = await response.text();
+    let data: any = {};
+    try { data = JSON.parse(text); } catch { data = { message: text }; }
+
+    if (
+      text.includes("غير معروف") || 
+      text.includes("Unknown action") || 
+      (data && data.error && String(data.error).includes("غير معروف"))
+    ) {
+      console.log("push_employees not recognized by older script, falling back to full push...");
+      try {
+        await pushToGoogleWebhook(targetUrl, db);
+      } catch (fbErr) {
+        console.warn("Fallback push employees error:", fbErr);
+      }
+    }
+
+    return res.json({
+      status: "success",
+      savedInSheet: true,
+      count: employees.length,
+      message: `تم تسجيل وتأكيد حفظ ${employees.length} حساب موظف وصلاحياتهم في ورقة (Employees_الموظفين_والصلاحيات) بملف جوجل درايف بنجاح! 👥✅`
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: "فشل إرسال بيانات وصلاحيات الموظفين إلى السكربت: " + err.message });
+  }
+});
+
+// Dedicated Webhook Pull Employees Endpoint
+app.post("/api/sheets/webhook/pull-employees", async (req, res) => {
+  const { webhookUrl } = req.body;
+  const db = readDB();
+  const targetUrl = webhookUrl || db.settings.googleSheetWebhookUrl;
+
+  if (!targetUrl || !targetUrl.startsWith("http")) {
+    return res.status(400).json({ error: "الرجاء إدخال رابط سكربت Webhook صالح أولاً في قسم إعدادات جوجل شيت." });
+  }
+
+  try {
+    const pulledDB = await pullFromGoogleWebhook(targetUrl);
+    if (pulledDB && Array.isArray(pulledDB.employees) && pulledDB.employees.length > 0) {
+      // Merge with existing passwords if pulled sheet didn't include password
+      const mergedEmployees = pulledDB.employees.map((pEmp: any) => {
+        const local = (db.employees || []).find((e: any) => e.username === pEmp.username);
+        return {
+          ...pEmp,
+          password: pEmp.password || local?.password || ""
+        };
+      });
+      db.employees = mergedEmployees;
+      writeDB(db);
+
+      return res.json({
+        status: "success",
+        message: `تم استيراد وتحديث ${mergedEmployees.length} حساب موظف وصلاحياتهم من شيت جوجل درايف بنجاح! 📥`,
+        employees: mergedEmployees,
+        count: mergedEmployees.length
+      });
+    }
+
+    return res.json({
+      status: "success",
+      message: "لم يتم العثور على موظفين في شيت جوجل درايف، تم الاحتفاظ بالموظفين الحاليين.",
+      employees: db.employees || [],
+      count: db.employees?.length || 0
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: "فشل استيراد بيانات الموظفين من السكربت: " + err.message });
   }
 });
 
@@ -2577,9 +2727,17 @@ app.post("/api/sheets/webhook/pull", async (req, res) => {
       pulledDB.services = db.services || [];
     }
 
-    // Retain local employees
+    // Merge or retain employees
     if (!pulledDB.employees || pulledDB.employees.length === 0) {
       pulledDB.employees = db.employees || [];
+    } else {
+      pulledDB.employees = pulledDB.employees.map((pEmp: any) => {
+        const local = (db.employees || []).find((e: any) => e.username === pEmp.username);
+        return {
+          ...pEmp,
+          password: pEmp.password || local?.password || ""
+        };
+      });
     }
 
     // If pulledDB has governmentFines, retain them, otherwise fallback to local db or defaults
