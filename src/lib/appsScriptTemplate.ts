@@ -251,7 +251,7 @@ function doPost(e) {
                     var sType = (sId.indexOf("مستعجل") !== -1 || sId.indexOf("عاجل") !== -1 || sId.indexOf("فورى") !== -1) ? "عاجل" : "عادي";
                     var fName = String(aCust.services[asIdx].fineName || "").trim();
                     var fAmt = Number(aCust.services[asIdx].fineAmount) || 0;
-                    var finePart = (fName || fAmt > 0) ? (" - " + (fName ? (fName.indexOf("غ") === 0 ? fName : "غ " + fName.replace(/^غرامة\s*/, '')) : "غ حكومية")) : "";
+                    var finePart = (fName || fAmt > 0) ? (" - " + (fName ? (fName.indexOf("غ") === 0 ? fName : "غ " + fName.replace(/^غرامة\\s*/, '')) : "غ حكومية")) : "";
                     aNote = sType + finePart;
                     break;
                   }
@@ -365,6 +365,9 @@ function doPost(e) {
             potSheet.setColumnWidth(11, 120);
             potSheet.setColumnWidth(12, 100);
           } catch(cwErr) {}
+        }
+      }
+
       // --- Sheet 10: Employees_الموظفين_والصلاحيات ---
       var empList = contents.employees || db.employees || (contents.db && contents.db.employees) || [];
       if (Array.isArray(empList) && empList.length > 0) {
@@ -1112,7 +1115,7 @@ function findOrCreateSheet(ss, candidates, defaultName) {
       .replace(/[أإآ]/g, "ا")
       .replace(/ة/g, "ه")
       .replace(/ى/g, "ي")
-      .replace(/[\s_\-]+/g, "");
+      .replace(/[\\s_\\-]+/g, "");
   }
   for (var i = 0; i < candidates.length; i++) {
     var candNorm = normAr(candidates[i]);
@@ -1146,7 +1149,7 @@ function formatSheetDate(val) {
     return Utilities.formatDate(val, Session.getScriptTimeZone() || "GMT+3", "yyyy/MM/dd");
   }
   var s = String(val).trim();
-  if (s.indexOf("GMT") !== -1 || /^[A-Za-z]{3}\s+[A-Za-z]{3}/.test(s)) {
+  if (s.indexOf("GMT") !== -1 || /^[A-Za-z]{3}\\s+[A-Za-z]{3}/.test(s)) {
     try {
       var d = new Date(s);
       if (!isNaN(d.getTime())) {
@@ -1154,11 +1157,11 @@ function formatSheetDate(val) {
       }
     } catch(e) {}
   }
-  var iso = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  var iso = s.match(/^(\\d{4})[-/](\\d{1,2})[-/](\\d{1,2})/);
   if (iso) {
     return iso[1] + "/" + (iso[2].length === 1 ? "0" + iso[2] : iso[2]) + "/" + (iso[3].length === 1 ? "0" + iso[3] : iso[3]);
   }
-  var dmy = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+  var dmy = s.match(/^(\\d{1,2})[-/](\\d{1,2})[-/](\\d{4})/);
   if (dmy) {
     return dmy[3] + "/" + (dmy[2].length === 1 ? "0" + dmy[2] : dmy[2]) + "/" + (dmy[1].length === 1 ? "0" + dmy[1] : dmy[1]);
   }
