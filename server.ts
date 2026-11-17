@@ -452,6 +452,148 @@ app.post("/api/db/save", (req, res) => {
   res.json({ status: "success", message: "Database saved successfully" });
 });
 
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number = 15000): Promise<Response> {
+  const controller = new AbortController();
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      fetch(url, { ...options, signal: controller.signal }),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          reject(new Error("انتهت مهلة الاتصال بجوجل شيت (Timeout)"));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+// Shared helper: Sync employees & login credentials to Google Sheets Apps Script cleanly with strict error checking
+async function syncEmployeesListToWebhook(targetUrl: string, db: any): Promise<{
+  sheetSynced: boolean;
+  needsScriptUpdate?: boolean;
+  sheetError?: string;
+  count: number;
+  message: string;
+}> {
+  const employees = db.employees || [];
+  if (!targetUrl || !targetUrl.startsWith("http")) {
+    return {
+      sheetSynced: false,
+      count: employees.length,
+      sheetError: "لم يتم ضبط رابط سكربت جوجل شيت (Webhook URL) في الإعدادات.",
+      message: "تم الحفظ في الخادم المحلي فقط (رابط جوجل شيت غير مضبوط)."
+    };
+  }
+
+  try {
+    const response = await fetchWithTimeout(targetUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        action: "push_employees",
+        employees: employees,
+        db: { employees: employees }
+      }),
+      redirect: "follow",
+    }, 15000);
+
+    const text = await response.text();
+    let data: any = null;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      if (text.includes("Script function not found")) {
+        return {
+          sheetSynced: false,
+          needsScriptUpdate: true,
+          count: employees.length,
+          sheetError: "دالة الحفظ غير منشورة في Apps Script (Script function not found: doPost). يرجى نشر إصدار جديد (Deploy > New version).",
+          message: "تم الحفظ محلياً فقط — يرجى تحديث نشر كود Apps Script في جوجل شيت."
+        };
+      }
+      if (text.includes("Authorization is required") || text.includes("accounts.google.com")) {
+        return {
+          sheetSynced: false,
+          count: employees.length,
+          sheetError: "السكربت يتطلب صلاحية وصول (Who has access = Anyone).",
+          message: "تم الحفظ محلياً فقط — تعذر الوصول لجوجل شيت بسبب صلاحيات السكربت."
+        };
+      }
+      if (text.includes("<!DOCTYPE") || text.includes("<html")) {
+        return {
+          sheetSynced: false,
+          count: employees.length,
+          sheetError: "الرابط أرجع صفحة خطأ من جوجل بدلاً من استجابة السكربت. تأكد من رابط Web App URL.",
+          message: "تم الحفظ محلياً فقط — استجابة غير صالحة من جوجل شيت."
+        };
+      }
+    }
+
+    const isUnknownAction =
+      text.includes("غير معروف") ||
+      text.includes("Unknown action") ||
+      (data && data.error && (String(data.error).includes("غير معروف") || String(data.error).includes("Unknown")));
+
+    if (isUnknownAction) {
+      console.log("push_employees not recognized by older Apps Script, falling back to full push...");
+      try {
+        await pushToGoogleWebhook(targetUrl, db);
+        // Verify whether the deployed script actually wrote Employees_الموظفين_والصلاحيات
+        try {
+          const pulledCheck = await pullFromGoogleWebhook(targetUrl);
+          if (Array.isArray(pulledCheck?.employees) && pulledCheck.employees.length > 0) {
+            return {
+              sheetSynced: true,
+              count: employees.length,
+              message: `تم تسجيل وتأكيد حفظ ${employees.length} حساب موظف وصلاحياتهم في ورقة (Employees_الموظفين_والصلاحيات) بملف جوجل درايف بنجاح! 👥✅`
+            };
+          }
+        } catch {}
+        return {
+          sheetSynced: false,
+          needsScriptUpdate: true,
+          count: employees.length,
+          sheetError: "كود Apps Script المنشور حالياً في جوجل شيت من إصدار قديم لا يدعم ورقة الموظفين (Employees_الموظفين_والصلاحيات). يرجى نسخ كود السكربت المحدث من قسم إعدادات جوجل شيت ثم عمل (Deploy > New version).",
+          message: "تم الحفظ في الخادم المحلي، لكن كود Apps Script في جوجل شيت قديم ويحتاج تحديثاً لحفظ ورقة الموظفين."
+        };
+      } catch (fbErr: any) {
+        return {
+          sheetSynced: false,
+          count: employees.length,
+          sheetError: fbErr.message || "فشل تحديث بيانات الموظفين في جوجل شيت.",
+          message: "تم الحفظ محلياً فقط — تعذر الإرسال إلى جوجل شيت."
+        };
+      }
+    }
+
+    if (data && data.error) {
+      return {
+        sheetSynced: false,
+        count: employees.length,
+        sheetError: String(data.error),
+        message: "تم الحفظ محلياً فقط — خطأ من سكربت جوجل شيت: " + String(data.error)
+      };
+    }
+
+    return {
+      sheetSynced: true,
+      count: employees.length,
+      message: data?.message || `تم حفظ وتحديث ${employees.length} حساب موظف وصلاحيات الدخول في ورقة (Employees_الموظفين_والصلاحيات) بملف جوجل درايف بنجاح! 👥✅`
+    };
+  } catch (sheetErr: any) {
+    console.warn("Could not sync employees to Google Sheets:", sheetErr.message);
+    return {
+      sheetSynced: false,
+      count: employees.length,
+      sheetError: sheetErr.message || "تعذر الاتصال برابط جوجل شيت.",
+      message: "تم الحفظ محلياً، وتعذر الاتصال بجوجل شيت حالياً: " + (sheetErr.message || "")
+    };
+  }
+}
+
 // Dedicated Update Employees Endpoint with immediate Google Sheet Sync
 app.post("/api/db/employees", async (req, res) => {
   const { employees } = req.body;
@@ -459,51 +601,38 @@ app.post("/api/db/employees", async (req, res) => {
     return res.status(400).json({ error: "بيانات الموظفين غير صالحة" });
   }
 
+  const normalizedEmployees = employees
+    .filter((emp: any) => emp && typeof emp.username === "string" && emp.username.trim().length > 0)
+    .map((emp: any) => ({
+      username: emp.username.trim(),
+      name: (emp.name || emp.username).toString().trim(),
+      role: emp.role === "admin" ? "admin" : "employee",
+      ...(emp.password && String(emp.password).trim() ? { password: String(emp.password).trim() } : {}),
+      permissions: {
+        canCreateInvoices: emp.permissions?.canCreateInvoices !== false,
+        canEditInvoices: emp.permissions?.canEditInvoices !== false,
+        canViewCollection: emp.role === "admin" ? true : Boolean(emp.permissions?.canViewCollection),
+        canManageServices: emp.role === "admin" ? true : Boolean(emp.permissions?.canManageServices),
+        canViewAmanReport: emp.permissions?.canViewAmanReport !== false,
+      },
+    }));
+
   const db = readDB();
-  db.employees = employees;
+  db.employees = normalizedEmployees;
   writeDB(db);
 
-  // If Google Sheets webhook is configured, sync employees to sheet immediately
   const targetUrl = db.settings?.googleSheetWebhookUrl;
-  let sheetSynced = false;
-  let sheetMessage = "";
-
-  if (targetUrl && targetUrl.startsWith("http")) {
-    try {
-      const response = await fetch(targetUrl, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify({
-          action: "push_employees",
-          employees: db.employees,
-          db: { employees: db.employees }
-        }),
-        redirect: "follow",
-      });
-      const text = await response.text();
-      let data: any = {};
-      try { data = JSON.parse(text); } catch { data = { message: text }; }
-
-      if (
-        text.includes("غير معروف") || 
-        text.includes("Unknown action") || 
-        (data && data.error && String(data.error).includes("غير معروف"))
-      ) {
-        console.log("push_employees not recognized by older script, falling back to full push...");
-        await pushToGoogleWebhook(targetUrl, db);
-      }
-      sheetSynced = true;
-      sheetMessage = "وتم حفظ وتحديث بيانات وصلاحيات الموظفين في شيت جوجل درايف بنجاح! 👥✅";
-    } catch (sheetErr: any) {
-      console.warn("Could not sync employees to Google Sheets:", sheetErr.message);
-    }
-  }
+  const syncResult = await syncEmployeesListToWebhook(targetUrl, db);
 
   res.json({
     status: "success",
-    message: "تم تحديث بيانات وصلاحيات الموظفين بنجاح! 🛡️" + (sheetMessage ? ` (${sheetMessage})` : ""),
+    message: syncResult.sheetSynced
+      ? `تم تحديث وحفظ بيانات وصلاحيات الموظفين محلياً وفي جوجل شيت بنجاح! 👥☁️✅`
+      : `تم الحفظ في الخادم المحلي! ⚠️ (${syncResult.sheetError || syncResult.message})`,
     employees: db.employees,
-    sheetSynced
+    sheetSynced: syncResult.sheetSynced,
+    needsScriptUpdate: Boolean(syncResult.needsScriptUpdate),
+    sheetError: syncResult.sheetError,
   });
 });
 
@@ -1813,7 +1942,7 @@ app.post("/api/sheets/pull", async (req, res) => {
 // Google Apps Script Webhook Helpers & Endpoints
 async function pushToGoogleWebhook(webhookUrl: string, db: any) {
   try {
-    const response = await fetch(webhookUrl, {
+    const response = await fetchWithTimeout(webhookUrl, {
       method: "POST",
       headers: {
         "Content-Type": "text/plain;charset=utf-8",
@@ -1832,7 +1961,7 @@ async function pushToGoogleWebhook(webhookUrl: string, db: any) {
         employees: db.employees || []
       }),
       redirect: "follow",
-    });
+    }, 25000);
 
     const text = await response.text();
     let result: any;
@@ -1863,10 +1992,10 @@ async function pushToGoogleWebhook(webhookUrl: string, db: any) {
 
 async function pullFromGoogleWebhook(webhookUrl: string) {
   try {
-    const response = await fetch(webhookUrl, {
+    const response = await fetchWithTimeout(webhookUrl, {
       method: "GET",
       redirect: "follow",
-    });
+    }, 25000);
 
     const text = await response.text();
     let result: any;
@@ -2149,45 +2278,21 @@ app.post("/api/sheets/webhook/sync-employees", async (req, res) => {
     return res.status(400).json({ error: "الرجاء إدخال رابط سكربت Webhook صالح أولاً في قسم إعدادات جوجل شيت." });
   }
 
-  try {
-    const employees = db.employees || [];
-    const response = await fetch(targetUrl, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({
-        action: "push_employees",
-        employees: employees,
-        db: { employees: employees }
-      }),
-      redirect: "follow",
+  const syncResult = await syncEmployeesListToWebhook(targetUrl, db);
+  if (!syncResult.sheetSynced) {
+    return res.status(syncResult.needsScriptUpdate ? 400 : 500).json({
+      error: syncResult.sheetError || syncResult.message,
+      needsScriptUpdate: Boolean(syncResult.needsScriptUpdate),
+      savedInSheet: false
     });
-
-    const text = await response.text();
-    let data: any = {};
-    try { data = JSON.parse(text); } catch { data = { message: text }; }
-
-    if (
-      text.includes("غير معروف") || 
-      text.includes("Unknown action") || 
-      (data && data.error && String(data.error).includes("غير معروف"))
-    ) {
-      console.log("push_employees not recognized by older script, falling back to full push...");
-      try {
-        await pushToGoogleWebhook(targetUrl, db);
-      } catch (fbErr) {
-        console.warn("Fallback push employees error:", fbErr);
-      }
-    }
-
-    return res.json({
-      status: "success",
-      savedInSheet: true,
-      count: employees.length,
-      message: `تم تسجيل وتأكيد حفظ ${employees.length} حساب موظف وصلاحياتهم في ورقة (Employees_الموظفين_والصلاحيات) بملف جوجل درايف بنجاح! 👥✅`
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: "فشل إرسال بيانات وصلاحيات الموظفين إلى السكربت: " + err.message });
   }
+
+  return res.json({
+    status: "success",
+    savedInSheet: true,
+    count: syncResult.count,
+    message: syncResult.message
+  });
 });
 
 // Dedicated Webhook Pull Employees Endpoint
@@ -2205,10 +2310,11 @@ app.post("/api/sheets/webhook/pull-employees", async (req, res) => {
     if (pulledDB && Array.isArray(pulledDB.employees) && pulledDB.employees.length > 0) {
       // Merge with existing passwords if pulled sheet didn't include password
       const mergedEmployees = pulledDB.employees.map((pEmp: any) => {
-        const local = (db.employees || []).find((e: any) => e.username === pEmp.username);
+        const pUName = String(pEmp.username || "").trim().toLowerCase();
+        const local = (db.employees || []).find((e: any) => String(e.username || "").trim().toLowerCase() === pUName);
         return {
           ...pEmp,
-          password: pEmp.password || local?.password || ""
+          password: (pEmp.password && String(pEmp.password).trim()) ? String(pEmp.password).trim() : (local?.password || "")
         };
       });
       db.employees = mergedEmployees;
@@ -2771,10 +2877,11 @@ app.post("/api/sheets/webhook/pull", async (req, res) => {
       pulledDB.employees = db.employees || [];
     } else {
       pulledDB.employees = pulledDB.employees.map((pEmp: any) => {
-        const local = (db.employees || []).find((e: any) => e.username === pEmp.username);
+        const pUName = String(pEmp.username || "").trim().toLowerCase();
+        const local = (db.employees || []).find((e: any) => String(e.username || "").trim().toLowerCase() === pUName);
         return {
           ...pEmp,
-          password: pEmp.password || local?.password || ""
+          password: (pEmp.password && String(pEmp.password).trim()) ? String(pEmp.password).trim() : (local?.password || "")
         };
       });
     }

@@ -67,7 +67,7 @@ interface SettingsConfigProps {
   activeEmployee: Employee;
   onSettingsUpdated: (settings: AppSettings) => void;
   employees: Employee[];
-  onEmployeesUpdated: (employees: Employee[]) => void;
+  onEmployeesUpdated: (employees: Employee[], previousUsername?: string) => Promise<any> | void;
   dictionary?: DictionaryItem[];
   onDictionaryUpdated?: (newDict: DictionaryItem[]) => void;
   governmentFines?: GovernmentFine[];
@@ -619,13 +619,15 @@ export default function SettingsConfig({
     );
 
     try {
-      await onEmployeesUpdated(updatedEmployees);
-      alert("تم تحديث وتلقيم رقمك السري بنجاح في قاعدة البيانات الآمنة للخصوصية 🔐");
+      const res = await onEmployeesUpdated(updatedEmployees, activeEmployee.username);
+      if (res && res.sheetSynced === false) {
+        alert(res.message || "تم تحديث رقمك السري محلياً، وتعذر الحفظ في جوجل شيت حالياً.");
+      } else {
+        alert("تم تحديث وتلقيم رقمك السري بنجاح محلياً وفي جوجل شيت 🔐✅");
+      }
       setMyCurrentPassword("");
       setMyNewPassword("");
       setMyConfirmPassword("");
-      // Update local reference to reflect immediately
-      activeEmployee.password = myNewPassword.trim();
     } catch (err) {
       console.error(err);
       alert("حدث خطأ أثناء حفظ الرقم السري.");
@@ -641,8 +643,12 @@ export default function SettingsConfig({
     );
 
     try {
-      await onEmployeesUpdated(updatedEmployees);
-      alert(`تم تحديث الرقم السري للموظف (${emp.name}) بنجاح في الخادم.`);
+      const res = await onEmployeesUpdated(updatedEmployees, emp.username);
+      if (res && res.sheetSynced === false) {
+        alert(res.message || `تم تحديث الرقم السري للموظف (${emp.name}) محلياً، وتعذر الحفظ في جوجل شيت.`);
+      } else {
+        alert(`تم تحديث الرقم السري للموظف (${emp.name}) بنجاح في الخادم وجوجل شيت.`);
+      }
     } catch (err) {
       console.error(err);
       alert("حدث خطأ أثناء تعديل رقم الموظف.");

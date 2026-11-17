@@ -22,12 +22,12 @@ import {
   RefreshCw,
   FileSpreadsheet
 } from "lucide-react";
-import { syncEmployeesToGoogleSheets, pullEmployeesFromGoogleSheets } from "../lib/api";
+import { syncEmployeesToGoogleSheets, pullEmployeesFromGoogleSheets, EmployeesSaveResponse } from "../lib/api";
 
 interface EmployeeManagerProps {
   employees: Employee[];
   activeEmployee: Employee;
-  onEmployeesUpdated: (employees: Employee[]) => Promise<void> | void;
+  onEmployeesUpdated: (employees: Employee[], previousUsername?: string) => Promise<EmployeesSaveResponse | void> | void;
   googleSheetWebhookUrl?: string;
 }
 
@@ -40,6 +40,7 @@ export default function EmployeeManager({
   // Sync to Google Sheets states
   const [syncLoading, setSyncLoading] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState("");
+  const [syncFeedbackType, setSyncFeedbackType] = useState<"info" | "success" | "warning" | "error">("info");
   // Passcode change for active employee
   const [myCurrentPassword, setMyCurrentPassword] = useState("");
   const [myNewPassword, setMyNewPassword] = useState("");
@@ -78,7 +79,34 @@ export default function EmployeeManager({
   });
 
   const [feedback, setFeedback] = useState("");
+  const [feedbackType, setFeedbackType] = useState<"success" | "warning" | "error">("success");
   const [loading, setLoading] = useState(false);
+
+  const applySaveFeedback = (res: EmployeesSaveResponse | void, successMessage: string) => {
+    if (res && res.sheetSynced === true) {
+      setFeedbackType("success");
+      setFeedback(`${successMessage} وتم الحفظ في شيت جوجل درايف بنجاح ☁️✅`);
+      setSyncFeedbackType("success");
+      setSyncFeedback("تم تحديث ورقة Employees_الموظفين_والصلاحيات في جوجل شيت تلقائياً ✅");
+    } else if (res && res.needsScriptUpdate) {
+      setFeedbackType("warning");
+      setFeedback(
+        `${successMessage} محلياً، ولكن كود Apps Script في جوجل شيت قديم ولا يحتوي على مزامنة الموظفين. يرجى نسخ الكود الجديد ونشر إصدار جديد (New version) في جوجل شيت.`
+      );
+      setSyncFeedbackType("warning");
+      setSyncFeedback("يتطلب تحديث كود Apps Script في جوجل شيت (New version) لحفظ الموظفين ⚠️");
+    } else if (res && res.sheetSynced === false) {
+      setFeedbackType("warning");
+      setFeedback(res.message || `${successMessage} محلياً، وتعذر الحفظ في جوجل شيت حالياً.`);
+      setSyncFeedbackType("warning");
+      setSyncFeedback(res.sheetError || "لم يكتمل الحفظ التلقائي في جوجل شيت ⚠️");
+    } else {
+      setFeedbackType("success");
+      setFeedback(successMessage);
+    }
+    setTimeout(() => setFeedback(""), 8000);
+    setTimeout(() => setSyncFeedback(""), 8000);
+  };
 
   const isAdmin = activeEmployee.role === "admin";
 
@@ -110,13 +138,16 @@ export default function EmployeeManager({
           : emp
       );
 
-      await onEmployeesUpdated(updatedEmployees);
-      setMyPassFeedback("تم تحديث وتلقيم رقمك السري بنجاح في قاعدة البيانات 🔐");
+      const res = await onEmployeesUpdated(updatedEmployees, activeEmployee.username);
+      if (res && res.sheetSynced === false) {
+        setMyPassFeedback("تم تحديث رقمك السري محلياً ⚠️ " + (res.sheetError || "تعذر المزامنة مع جوجل شيت"));
+      } else {
+        setMyPassFeedback("تم تحديث وحفظ رقمك السري محلياً وفي جوجل شيت بنجاح 🔐✅");
+      }
       setMyCurrentPassword("");
       setMyNewPassword("");
       setMyConfirmPassword("");
-      activeEmployee.password = myNewPassword.trim();
-      setTimeout(() => setMyPassFeedback(""), 4000);
+      setTimeout(() => setMyPassFeedback(""), 5000);
     } catch (err) {
       console.error(err);
       alert("حدث خطأ أثناء حفظ الرقم السري.");
@@ -195,13 +226,13 @@ export default function EmployeeManager({
         return emp;
       });
 
-      await onEmployeesUpdated(updatedEmployees);
-      setFeedback(`تم تحديث وحفظ بيانات وصلاحيات الموظف (${trimmedName}) بنجاح! 💾✅`);
+      const res = await onEmployeesUpdated(updatedEmployees, editingEmp.username);
       setEditingEmp(null);
-      setTimeout(() => setFeedback(""), 4500);
+      applySaveFeedback(res, `تم تحديث وحفظ بيانات وصلاحيات الموظف (${trimmedName})!`);
     } catch (err: any) {
       console.error(err);
-      alert("حدث خطأ أثناء حفظ التعديلات: " + err.message);
+      setFeedbackType("error");
+      setFeedback("حدث خطأ أثناء حفظ التعديلات: " + err.message);
     } finally {
       setLoading(false);
     }
@@ -243,8 +274,7 @@ export default function EmployeeManager({
       };
 
       const updated = [...employees, newEmp];
-      await onEmployeesUpdated(updated);
-      setFeedback(`تم إضافة الموظف الجديد (${trimmedName}) بنجاح! 👤✨`);
+      const res = await onEmployeesUpdated(updated);
       setIsAddingEmp(false);
       setNewName("");
       setNewUsername("");
@@ -257,10 +287,11 @@ export default function EmployeeManager({
         canManageServices: false,
         canViewAmanReport: true,
       });
-      setTimeout(() => setFeedback(""), 4500);
+      applySaveFeedback(res, `تم إضافة الموظف الجديد (${trimmedName})!`);
     } catch (err: any) {
       console.error(err);
-      alert("حدث خطأ أثناء إضافة الموظف: " + err.message);
+      setFeedbackType("error");
+      setFeedback("حدث خطأ أثناء إضافة الموظف: " + err.message);
     } finally {
       setLoading(false);
     }
@@ -289,12 +320,12 @@ export default function EmployeeManager({
     setLoading(true);
     try {
       const updated = employees.filter((e) => e.username !== emp.username);
-      await onEmployeesUpdated(updated);
-      setFeedback(`تم حذف حساب الموظف (${emp.name}) بنجاح.`);
-      setTimeout(() => setFeedback(""), 4000);
+      const res = await onEmployeesUpdated(updated);
+      applySaveFeedback(res, `تم حذف حساب الموظف (${emp.name})`);
     } catch (err: any) {
       console.error(err);
-      alert("حدث خطأ أثناء حذف الموظف: " + err.message);
+      setFeedbackType("error");
+      setFeedback("حدث خطأ أثناء حذف الموظف: " + err.message);
     } finally {
       setLoading(false);
     }
@@ -303,14 +334,22 @@ export default function EmployeeManager({
   // Sync employees and access permissions to Google Sheets
   const handleSyncToSheets = async () => {
     setSyncLoading(true);
+    setSyncFeedbackType("info");
     setSyncFeedback("جاري مزامنة بيانات الموظفين والصلاحيات مع شيت جوجل درايف...");
     try {
       const res = await syncEmployeesToGoogleSheets(googleSheetWebhookUrl);
-      setSyncFeedback(res.message || "تم تسجيل وتحديث بيانات الموظفين وصلاحيات الدخول في شيت جوجل درايف بنجاح! 👥☁️✅");
-      setTimeout(() => setSyncFeedback(""), 6000);
+      if (res.savedInSheet === false || res.needsScriptUpdate) {
+        setSyncFeedbackType("warning");
+        setSyncFeedback(res.message || "تعذر التأكد من الحفظ في جوجل شيت — يرجى تحديث كود Apps Script (New version)");
+      } else {
+        setSyncFeedbackType("success");
+        setSyncFeedback(res.message || "تم تسجيل وتحديث بيانات الموظفين وصلاحيات الدخول في شيت جوجل درايف بنجاح! 👥☁️✅");
+      }
+      setTimeout(() => setSyncFeedback(""), 8000);
     } catch (err: any) {
+      setSyncFeedbackType("error");
       setSyncFeedback(`فشل الحفظ في جوجل درايف: ${err.message}`);
-      setTimeout(() => setSyncFeedback(""), 6000);
+      setTimeout(() => setSyncFeedback(""), 8000);
     } finally {
       setSyncLoading(false);
     }
@@ -322,19 +361,23 @@ export default function EmployeeManager({
     if (!confirmPull) return;
 
     setSyncLoading(true);
+    setSyncFeedbackType("info");
     setSyncFeedback("جاري استيراد الموظفين من شيت جوجل درايف...");
     try {
       const res = await pullEmployeesFromGoogleSheets(googleSheetWebhookUrl);
       if (res.employees && res.employees.length > 0) {
         await onEmployeesUpdated(res.employees);
+        setSyncFeedbackType("success");
         setSyncFeedback(res.message || "تم استيراد بيانات الموظفين وصلاحياتهم بنجاح! 📥✅");
       } else {
+        setSyncFeedbackType("warning");
         setSyncFeedback(res.message || "لم يتم العثور على موظفين في الشيت.");
       }
-      setTimeout(() => setSyncFeedback(""), 6000);
+      setTimeout(() => setSyncFeedback(""), 8000);
     } catch (err: any) {
+      setSyncFeedbackType("error");
       setSyncFeedback(`فشل الاستيراد من جوجل درايف: ${err.message}`);
-      setTimeout(() => setSyncFeedback(""), 6000);
+      setTimeout(() => setSyncFeedback(""), 8000);
     } finally {
       setSyncLoading(false);
     }
@@ -403,7 +446,17 @@ export default function EmployeeManager({
           </div>
         </div>
         {syncFeedback && (
-          <span className="text-[11px] font-bold text-emerald-900 bg-white border border-emerald-300 px-2.5 py-1 rounded-lg shrink-0 animate-fade-in shadow-2xs">
+          <span
+            className={`text-[11px] font-bold px-2.5 py-1 rounded-lg shrink-0 animate-fade-in shadow-2xs border ${
+              syncFeedbackType === "error"
+                ? "text-rose-900 bg-rose-50 border-rose-300"
+                : syncFeedbackType === "warning"
+                ? "text-amber-950 bg-amber-50 border-amber-300"
+                : syncFeedbackType === "info"
+                ? "text-blue-900 bg-blue-50 border-blue-300"
+                : "text-emerald-900 bg-white border-emerald-300"
+            }`}
+          >
             {syncFeedback}
           </span>
         )}
@@ -411,8 +464,24 @@ export default function EmployeeManager({
 
       {/* Global Feedback Alert */}
       {feedback && (
-        <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs font-bold text-emerald-800 flex items-center gap-2 animate-fade-in">
-          <CheckCircle className="w-4.5 h-4.5 text-emerald-600 shrink-0" />
+        <div
+          className={`p-3.5 border rounded-xl text-xs font-bold flex items-center gap-2 animate-fade-in ${
+            feedbackType === "error"
+              ? "bg-rose-50 border-rose-200 text-rose-800"
+              : feedbackType === "warning"
+              ? "bg-amber-50 border-amber-300 text-amber-950"
+              : "bg-emerald-50 border-emerald-200 text-emerald-800"
+          }`}
+        >
+          {feedbackType === "success" ? (
+            <CheckCircle className="w-4.5 h-4.5 text-emerald-600 shrink-0" />
+          ) : (
+            <AlertCircle
+              className={`w-4.5 h-4.5 shrink-0 ${
+                feedbackType === "error" ? "text-rose-600" : "text-amber-600"
+              }`}
+            />
+          )}
           <span>{feedback}</span>
         </div>
       )}

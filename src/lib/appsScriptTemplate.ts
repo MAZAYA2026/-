@@ -819,8 +819,10 @@ function doPost(e) {
             empDirectSheet.setColumnWidth(12, 280);
           } catch(cwErr) {}
         }
+        SpreadsheetApp.flush();
         return ContentService.createTextOutput(JSON.stringify({ 
           status: "success", 
+          sheetSynced: true,
           message: "تم حفظ وتحديث بيانات الموظفين وصلاحيات الدخول في ورقة (Employees_الموظفين_والصلاحيات) بجوجل درايف بنجاح! 👥✅",
           count: empDirectRows.length - 1
         })).setMimeType(ContentService.MimeType.JSON);
@@ -1053,25 +1055,32 @@ function doGet(e) {
                 parsedE = JSON.parse(jsonCol);
               } catch(eJsonErr) {}
             }
-            if (parsedE && parsedE.username) {
-              db.employees.push(parsedE);
-            } else {
-              var isAdmRole = String(eRowData[3] || "").toLowerCase().indexOf("admin") !== -1 || String(eRowData[3] || "").indexOf("مدير") !== -1;
-              var rawPwd = eRowData[4] !== undefined && eRowData[4] !== null ? String(eRowData[4]).replace(/^'/, '') : "";
-              db.employees.push({
-                username: eUName,
-                name: String(eRowData[2] || eUName).trim(),
-                role: isAdmRole ? "admin" : "employee",
-                password: rawPwd,
-                permissions: {
-                  canCreateInvoices: String(eRowData[5] || "").indexOf("نعم") !== -1 || eRowData[5] === true,
-                  canEditInvoices: String(eRowData[6] || "").indexOf("نعم") !== -1 || eRowData[6] === true,
-                  canViewCollection: String(eRowData[7] || "").indexOf("نعم") !== -1 || eRowData[7] === true,
-                  canManageServices: String(eRowData[8] || "").indexOf("نعم") !== -1 || eRowData[8] === true,
-                  canViewAmanReport: String(eRowData[9] || "").indexOf("نعم") !== -1 || eRowData[9] === true
-                }
-              });
-            }
+            var cellName = String(eRowData[2] || "").trim();
+            var cellRole = String(eRowData[3] || "").trim();
+            var isAdmRole = cellRole ? (cellRole.toLowerCase().indexOf("admin") !== -1 || cellRole.indexOf("مدير") !== -1) : (parsedE && parsedE.role === "admin");
+            var rawPwd = eRowData[4] !== undefined && eRowData[4] !== null ? String(eRowData[4]).replace(/^'/, "").trim() : "";
+            var cellHasPerms = eRowData[5] !== undefined && eRowData[5] !== "";
+            var resolvedPerms = cellHasPerms ? {
+              canCreateInvoices: String(eRowData[5] || "").indexOf("نعم") !== -1 || eRowData[5] === true,
+              canEditInvoices: String(eRowData[6] || "").indexOf("نعم") !== -1 || eRowData[6] === true,
+              canViewCollection: String(eRowData[7] || "").indexOf("نعم") !== -1 || eRowData[7] === true,
+              canManageServices: String(eRowData[8] || "").indexOf("نعم") !== -1 || eRowData[8] === true,
+              canViewAmanReport: String(eRowData[9] || "").indexOf("نعم") !== -1 || eRowData[9] === true
+            } : (parsedE && parsedE.permissions ? parsedE.permissions : {
+              canCreateInvoices: true,
+              canEditInvoices: true,
+              canViewCollection: isAdmRole,
+              canManageServices: isAdmRole,
+              canViewAmanReport: true
+            });
+
+            db.employees.push({
+              username: eUName,
+              name: cellName || (parsedE && parsedE.name) || eUName,
+              role: isAdmRole ? "admin" : "employee",
+              password: rawPwd || (parsedE && parsedE.password) || undefined,
+              permissions: resolvedPerms
+            });
           }
         }
       }

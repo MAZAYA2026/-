@@ -6,8 +6,8 @@ interface EmployeeLoginProps {
   employees: Employee[];
   activeEmployee: Employee | null;
   onLogin: (employee: Employee) => void;
-  onAddEmployee: (employee: Employee) => void;
-  onUpdateEmployees?: (employees: Employee[]) => void;
+  onAddEmployee: (employee: Employee) => Promise<any> | void;
+  onUpdateEmployees?: (employees: Employee[], previousUsername?: string) => Promise<any> | void;
 }
 
 export default function EmployeeLogin({ employees, activeEmployee, onLogin, onAddEmployee, onUpdateEmployees }: EmployeeLoginProps) {
@@ -33,6 +33,7 @@ export default function EmployeeLogin({ employees, activeEmployee, onLogin, onAd
   // Password Setup on Login State
   const [newPasscode, setNewPasscode] = useState("");
   const [confirmNewPasscode, setConfirmNewPasscode] = useState("");
+  const [savingAuth, setSavingAuth] = useState(false);
 
   const handleEmployeeClick = (emp: Employee) => {
     setSelectedEmpForAuth(emp);
@@ -60,7 +61,7 @@ export default function EmployeeLogin({ employees, activeEmployee, onLogin, onAd
     }
   };
 
-  const handleSetPasswordOnLogin = (e: React.FormEvent) => {
+  const handleSetPasswordOnLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedEmpForAuth) return;
 
@@ -73,16 +74,24 @@ export default function EmployeeLogin({ employees, activeEmployee, onLogin, onAd
       return;
     }
 
-    // Save and update
-    const updatedEmployees = employees.map((emp) => 
-      emp.username === selectedEmpForAuth.username ? { ...emp, password: newPasscode.trim() } : emp
+    // Save and update before logging in so syncDatabase cannot race with stale password
+    const trimmedPass = newPasscode.trim();
+    const updatedEmployees = employees.map((emp) =>
+      emp.username === selectedEmpForAuth.username ? { ...emp, password: trimmedPass } : emp
     );
 
-    if (onUpdateEmployees) {
-      onUpdateEmployees(updatedEmployees);
+    setSavingAuth(true);
+    setAuthError("");
+    try {
+      if (onUpdateEmployees) {
+        await onUpdateEmployees(updatedEmployees, selectedEmpForAuth.username);
+      }
+      onLogin({ ...selectedEmpForAuth, password: trimmedPass });
+    } catch (err: any) {
+      setAuthError(err?.message || "حدث خطأ أثناء حفظ الرقم السري.");
+    } finally {
+      setSavingAuth(false);
     }
-
-    onLogin({ ...selectedEmpForAuth, password: newPasscode.trim() });
   };
 
   const handleLoginWithoutPassword = () => {
@@ -90,12 +99,18 @@ export default function EmployeeLogin({ employees, activeEmployee, onLogin, onAd
     onLogin(selectedEmpForAuth);
   };
 
-  const handleCreateEmployee = (e: React.FormEvent) => {
+  const handleCreateEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newUsername.trim() || !newName.trim()) return;
 
+    const trimmedUsername = newUsername.trim().toLowerCase();
+    if (employees.some((emp) => emp.username.toLowerCase() === trimmedUsername)) {
+      setAuthError("كود المستخدم مستخدم بالفعل من قبل موظف آخر.");
+      return;
+    }
+
     const newEmp: Employee = {
-      username: newUsername.trim().toLowerCase(),
+      username: trimmedUsername,
       name: newName.trim(),
       role: newRole,
       password: newPassword.trim() || undefined,
@@ -108,12 +123,20 @@ export default function EmployeeLogin({ employees, activeEmployee, onLogin, onAd
       }
     };
 
-    onAddEmployee(newEmp);
-    setNewUsername("");
-    setNewName("");
-    setNewPassword("");
-    setNewRole("employee");
-    setShowAddForm(false);
+    setSavingAuth(true);
+    setAuthError("");
+    try {
+      await onAddEmployee(newEmp);
+      setNewUsername("");
+      setNewName("");
+      setNewPassword("");
+      setNewRole("employee");
+      setShowAddForm(false);
+    } catch (err: any) {
+      setAuthError(err?.message || "حدث خطأ أثناء حفظ الموظف.");
+    } finally {
+      setSavingAuth(false);
+    }
   };
 
   return (
@@ -343,10 +366,11 @@ export default function EmployeeLogin({ employees, activeEmployee, onLogin, onAd
                     <div className="space-y-2 pt-2">
                       <button 
                         type="submit"
-                        className="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold py-2.5 px-3 rounded-lg transition-colors flex items-center justify-center gap-1.5"
+                        disabled={savingAuth}
+                        className="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold py-2.5 px-3 rounded-lg transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50"
                       >
                         <Lock className="w-4 h-4" />
-                        حفظ الرقم السري وتأمين الدخول
+                        {savingAuth ? "جاري الحفظ..." : "حفظ الرقم السري وتأمين الدخول"}
                       </button>
                       <div className="flex gap-2">
                         <button 
@@ -452,12 +476,20 @@ export default function EmployeeLogin({ employees, activeEmployee, onLogin, onAd
                   </div>
                 )}
 
+                {authError && (
+                  <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-xs px-3 py-2 rounded-lg flex items-center gap-1.5 font-semibold">
+                    <AlertTriangle className="w-4 h-4 shrink-0" />
+                    <span>{authError}</span>
+                  </div>
+                )}
+
                 <div className="flex gap-2 pt-2">
                   <button 
                     type="submit"
-                    className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold py-2 px-3 rounded-lg transition-colors flex items-center justify-center gap-1.5"
+                    disabled={savingAuth}
+                    className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold py-2 px-3 rounded-lg transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50"
                   >
-                    حفظ الموظف
+                    {savingAuth ? "جاري الحفظ..." : "حفظ الموظف"}
                   </button>
                   <button 
                     type="button"

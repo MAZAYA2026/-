@@ -730,6 +730,8 @@ export async function syncEmployeesToGoogleSheets(webhookUrl?: string): Promise<
   message: string;
   count?: number;
   savedInSheet?: boolean;
+  needsScriptUpdate?: boolean;
+  sheetError?: string;
 }> {
   const response = await fetch("/api/sheets/webhook/sync-employees", {
     method: "POST",
@@ -762,13 +764,17 @@ export async function pullEmployeesFromGoogleSheets(webhookUrl?: string): Promis
   return response.json();
 }
 
-// Save Employees directly on server with auto-sync to Google Sheets
-export async function updateEmployeesOnServer(employees: Employee[]): Promise<{
+export interface EmployeesSaveResponse {
   status: string;
   message: string;
   employees: Employee[];
   sheetSynced?: boolean;
-}> {
+  needsScriptUpdate?: boolean;
+  sheetError?: string;
+}
+
+// Save Employees directly on server with auto-sync to Google Sheets
+export async function updateEmployeesOnServer(employees: Employee[]): Promise<EmployeesSaveResponse> {
   const response = await fetch("/api/db/employees", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

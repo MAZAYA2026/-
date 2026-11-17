@@ -68,9 +68,10 @@ export default function App() {
     }
   };
 
+  const isLoggedIn = Boolean(activeEmployee);
   useEffect(() => {
     syncDatabase();
-  }, [activeEmployee]);
+  }, [isLoggedIn]);
 
   // Handle successful logins
   const handleLoginSuccess = (employee: Employee) => {
@@ -83,28 +84,32 @@ export default function App() {
   };
 
   const handleAddEmployee = async (newEmp: Employee) => {
-    try {
-      const updatedEmployees = [...employees, newEmp];
-      setEmployees(updatedEmployees);
-      await updateEmployeesOnServer(updatedEmployees);
-    } catch (err) {
-      console.error("Failed to add employee:", err);
-    }
+    const updatedEmployees = [...employees, newEmp];
+    const res = await updateEmployeesOnServer(updatedEmployees);
+    const savedList = res.employees || updatedEmployees;
+    setEmployees(savedList);
+    return res;
   };
 
-  const handleUpdateEmployees = async (updatedEmployees: Employee[]) => {
-    try {
-      setEmployees(updatedEmployees);
-      if (activeEmployee) {
-        const fresh = updatedEmployees.find(e => e.username.toLowerCase() === activeEmployee.username.toLowerCase());
-        if (fresh) {
-          setActiveEmployee(fresh);
+  const handleUpdateEmployees = async (updatedEmployees: Employee[], previousUsername?: string) => {
+    const res = await updateEmployeesOnServer(updatedEmployees);
+    const savedList = res.employees || updatedEmployees;
+    setEmployees(savedList);
+    if (activeEmployee) {
+      const currentLower = activeEmployee.username.toLowerCase();
+      let targetUsername = currentLower;
+      if (previousUsername && previousUsername.toLowerCase() === currentLower) {
+        const oldIdx = employees.findIndex((e) => e.username.toLowerCase() === previousUsername.toLowerCase());
+        if (oldIdx >= 0 && updatedEmployees[oldIdx]) {
+          targetUsername = updatedEmployees[oldIdx].username.toLowerCase();
         }
       }
-      await updateEmployeesOnServer(updatedEmployees);
-    } catch (err) {
-      console.error("Failed to update employees:", err);
+      const fresh = savedList.find((e) => e.username.toLowerCase() === targetUsername);
+      if (fresh) {
+        setActiveEmployee(fresh);
+      }
     }
+    return res;
   };
 
   // State handlers for downstream modifications: ensure latest operations appear first
