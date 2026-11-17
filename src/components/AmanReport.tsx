@@ -54,7 +54,7 @@ export interface AmanRowItem {
   notes: string;
   date: string;
   isCustomManual?: boolean;
-  serviceType?: "عادي" | "عاجل" | "مستعجل" | string;
+  serviceType?: "عادي" | "سريع" | "عاجل" | "مستعجل" | string;
   hasFine?: boolean;
   fineName?: string;
   fineAmount?: number;
@@ -104,15 +104,15 @@ export function resolveAmanDetails(
   services: Service[],
   governmentFines?: GovernmentFine[]
 ): {
-  serviceType: "عادي" | "عاجل";
+  serviceType: "عادي" | "سريع";
   hasFine: boolean;
   fineName: string;
   fineAmount: number;
   fines?: { name: string; amount: number }[];
   statusText: string;
 } {
-  // User explicit requirement: "في كشف امان غير مسمى كلمة مستعجل الى كلمة عاجل"
-  let serviceType: "عادي" | "عاجل" = (row.serviceType as any) === "مستعجل" || (row.serviceType as any) === "عاجل" ? "عاجل" : "عادي";
+  // User explicit requirement: "فى شيت امان غير كلمة عاجل الى سريع"
+  let serviceType: "عادي" | "سريع" = (row.serviceType as any) === "مستعجل" || (row.serviceType as any) === "عاجل" || (row.serviceType as any) === "سريع" ? "سريع" : "عادي";
   let hasFine = row.hasFine;
   let fineName = (row.fineName || "").trim();
   let fineAmount = Number(row.fineAmount) || 0;
@@ -143,8 +143,8 @@ export function resolveAmanDetails(
         const matched = services.find((srv) => srv.id === srvId || srv.name === srvId);
         const fullName = matched?.name || srvId;
 
-        const isUrgent = fullName.includes("مستعجل") || fullName.includes("عاجل") || fullName.includes("فورى");
-        serviceType = isUrgent ? "عاجل" : "عادي";
+        const isUrgent = fullName.includes("مستعجل") || fullName.includes("عاجل") || fullName.includes("سريع") || fullName.includes("فورى");
+        serviceType = isUrgent ? "سريع" : "عادي";
 
         // Multi-fine support from invoice
         if (Array.isArray(amanSrv.fines) && amanSrv.fines.length > 0) {
@@ -182,8 +182,8 @@ export function resolveAmanDetails(
     }
   }
 
-  if (!row.serviceType && (rowNotes.includes("مستعجل") || rowNotes.includes("عاجل"))) {
-    serviceType = "عاجل";
+  if (!row.serviceType && (rowNotes.includes("مستعجل") || rowNotes.includes("عاجل") || rowNotes.includes("سريع"))) {
+    serviceType = "سريع";
   }
 
   // Exact matching against configured governmentFines ONLY (never substring match, to prevent reverting custom/renamed fines to old names)
@@ -282,7 +282,7 @@ export function computeAmanDetailedStats(
 
   activeRows.forEach((row) => {
     const details = resolveAmanDetails(row, invoices, services, governmentFines);
-    if (details.serviceType === "عاجل" || (details.serviceType as any) === "مستعجل") {
+    if (details.serviceType === "سريع" || (details.serviceType as any) === "عاجل" || (details.serviceType as any) === "مستعجل") {
       urgentCount++;
     } else {
       normalCount++;
@@ -504,7 +504,7 @@ export default function AmanReport({
           const srvId = String(amanService.serviceId || "").trim();
           const matched = services.find((srv) => srv.id === srvId || srv.name === srvId);
           const fullName = matched?.name || srvId;
-          const isUrgent = fullName.includes("مستعجل") || fullName.includes("عاجل") || fullName.includes("فورى");
+          const isUrgent = fullName.includes("مستعجل") || fullName.includes("عاجل") || fullName.includes("سريع") || fullName.includes("فورى");
           const hasFine = !!(amanService.fineName && amanService.fineName.trim().length > 0) || !!(amanService.fineAmount && amanService.fineAmount > 0);
 
           list.push({
@@ -515,7 +515,7 @@ export default function AmanReport({
             date: inv.date,
             invoiceId: inv.invoiceId,
             customerIndex: cIdx,
-            serviceType: isUrgent ? "مستعجل" : "عادي",
+            serviceType: isUrgent ? "سريع" : "عادي",
             hasFine,
             fineName: amanService.fineName || "",
             fineAmount: amanService.fineAmount || 0,
@@ -805,7 +805,7 @@ export default function AmanReport({
             const srvId = String(amanService.serviceId || "").trim();
             const matched = services.find((srv) => srv.id === srvId || srv.name === srvId);
             const fullName = matched?.name || srvId;
-            const isUrgent = fullName.includes("مستعجل") || fullName.includes("عاجل") || fullName.includes("فورى");
+            const isUrgent = fullName.includes("مستعجل") || fullName.includes("عاجل") || fullName.includes("سريع") || fullName.includes("فورى");
             const hasFine = !!(amanService.fineName && amanService.fineName.trim().length > 0) || !!(amanService.fineAmount && amanService.fineAmount > 0);
 
             let finePart = "";
@@ -813,7 +813,7 @@ export default function AmanReport({
               const cleanName = (amanService.fineName || "").trim() || "غرامة حكومية";
               finePart = cleanName.startsWith("غرامة") ? cleanName : `غرامة ${cleanName}`;
             }
-            const noteText = finePart ? `${isUrgent ? "مستعجل" : "عادي"} - ${finePart}` : (isUrgent ? "مستعجل" : "عادي");
+            const noteText = finePart ? `${isUrgent ? "سريع" : "عادي"} - ${finePart}` : (isUrgent ? "سريع" : "عادي");
 
             const item: AmanRowItem = {
               id: `inv-${inv.invoiceId}-c-${cIdx}`,
@@ -823,7 +823,7 @@ export default function AmanReport({
               date: inv.date,
               invoiceId: inv.invoiceId,
               customerIndex: cIdx,
-              serviceType: isUrgent ? "مستعجل" : "عادي",
+              serviceType: isUrgent ? "سريع" : "عادي",
               hasFine,
               fineName: amanService.fineName || "",
               fineAmount: amanService.fineAmount || 0,
@@ -998,8 +998,10 @@ export default function AmanReport({
   };
 
   const handleInsertPostponedItem = async (item: AmanPostponedItem) => {
+    const rawType = (item.serviceType || "عادي").trim();
+    const normalizedType = (rawType === "عاجل" || rawType === "مستعجل" || rawType === "سريع") ? "سريع" : "عادي";
     const details = {
-      serviceType: item.serviceType || "عادي",
+      serviceType: normalizedType,
       fineName: item.fineName || "",
       fineAmount: item.fineAmount || 0,
       hasFine: !!(item.fineName || (item.fineAmount && item.fineAmount > 0)),
@@ -1420,7 +1422,7 @@ export default function AmanReport({
             const matched = services.find((srv) => srv.id === srvId || srv.name === srvId);
             const fullName = matched?.name || srvId;
             if (fullName.startsWith("#") && !fullName.startsWith("##")) {
-              const isUrgent = fullName.includes("مستعجل") || fullName.includes("عاجل") || fullName.includes("فورى");
+              const isUrgent = fullName.includes("مستعجل") || fullName.includes("عاجل") || fullName.includes("سريع") || fullName.includes("فورى");
               const qty = Number(s.quantity) || 1;
               if (isUrgent) {
                 allUrgentUsed += qty;
@@ -1439,7 +1441,7 @@ export default function AmanReport({
         if (!r.arabicName || !r.arabicName.trim()) return;
         if (r.invoiceId && countedInvoicesSet.has(r.invoiceId)) return; // Avoid double counting
         const details = resolveAmanDetails(r, invoices, services, governmentFines);
-        if (details.serviceType === "عاجل" || (details.serviceType as any) === "مستعجل") {
+        if (details.serviceType === "سريع" || (details.serviceType as any) === "عاجل" || (details.serviceType as any) === "مستعجل") {
           allUrgentUsed += 1;
         } else {
           allNormalUsed += 1;
@@ -1898,7 +1900,7 @@ export default function AmanReport({
             </div>
 
             <div className="flex items-center gap-1.5 bg-amber-50 text-amber-900 px-3 py-1.5 rounded-xl text-xs font-bold border border-amber-200">
-              <span>عاجل:</span>
+              <span>سريع:</span>
               <span className="font-mono text-sm text-amber-950 font-black">{overallStats.urgentCount}</span>
               <span className="text-[11px] text-amber-800 font-bold">
                 ({overallStats.urgentTotal.toLocaleString()}ج)
@@ -1938,7 +1940,7 @@ export default function AmanReport({
                       ⚠️ لم يتم تسجيل الرصيد التراكمي للاستمارات المستلمة بالمكتب بعد!
                     </span>
                     <span className="text-[11px] text-amber-800">
-                      إجمالي العمليات المنفذة المحفوظة بالنظام حتى الآن: <strong>{formsStockStats.allNormalUsed} عادي</strong> و <strong>{formsStockStats.allUrgentUsed} عاجل</strong>. سجل رصيد الاستمارات المستلمة لخصم العمليات تلقائياً فورياً.
+                      إجمالي العمليات المنفذة المحفوظة بالنظام حتى الآن: <strong>{formsStockStats.allNormalUsed} عادي</strong> و <strong>{formsStockStats.allUrgentUsed} سريع</strong>. سجل رصيد الاستمارات المستلمة لخصم العمليات تلقائياً فورياً.
                     </span>
                   </div>
                 </div>
@@ -1977,7 +1979,7 @@ export default function AmanReport({
                       ? "bg-red-50 text-red-800 border-red-200" 
                       : "bg-amber-50 text-amber-900 border-amber-200"
                   }`}>
-                    استمارات عاجل متبقية: <strong className="font-mono text-sm font-black">{formsStockStats.urgentRemaining}</strong>
+                    استمارات سريع متبقية: <strong className="font-mono text-sm font-black">{formsStockStats.urgentRemaining}</strong>
                     <span className="text-[10px] text-slate-500 font-normal mr-1">
                       (مستلم: {formsStockStats.urgentReceived} - إجمالي المنفذ بالنظام: {formsStockStats.allUrgentUsed})
                     </span>
@@ -1985,7 +1987,7 @@ export default function AmanReport({
 
                   {/* This Report Used Count */}
                   <span className="px-2.5 py-1 rounded-lg font-bold border bg-blue-50 text-blue-900 border-blue-200 text-[11px]">
-                    المنفذ بهذا الكشف ({headerDateDisplay}): <strong className="font-mono">{formsStockStats.reportNormalUsed}</strong> عادي | <strong className="font-mono">{formsStockStats.reportUrgentUsed}</strong> عاجل
+                    المنفذ بهذا الكشف ({headerDateDisplay}): <strong className="font-mono">{formsStockStats.reportNormalUsed}</strong> عادي | <strong className="font-mono">{formsStockStats.reportUrgentUsed}</strong> سريع
                   </span>
                 </div>
 
@@ -1993,7 +1995,7 @@ export default function AmanReport({
                   type="button"
                   onClick={() => setIsStockModalOpen(true)}
                   className="px-3 py-1 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-bold text-xs flex items-center gap-1 shadow-xs transition-colors cursor-pointer shrink-0"
-                  title="تسجيل استلام استمارات عادية أو عاجلة جديدة واردة اليوم"
+                  title="تسجيل استلام استمارات عادية أو سريعة جديدة واردة اليوم"
                 >
                   <Plus className="w-3.5 h-3.5 text-amber-400" />
                   <span>إضافة استمارات واردة 📦</span>
@@ -2126,7 +2128,9 @@ export default function AmanReport({
 
                         const rowName = row ? row.arabicName : "";
                         const rowBirthDate = row ? formatCleanBirthDate(row.birthDate) : "";
-                        const rowNotes = row ? row.notes : "";
+                        const hasRowContent = rowName.trim().length > 0 || Boolean(row?.passportSerial) || Boolean(row?.notes?.trim()) || Boolean(row?.serviceType);
+                        const rowNoteInfo = hasRowContent ? resolveAmanDetails(row || {}, invoices, services, governmentFines) : null;
+                        const isUrgentRow = rowNoteInfo?.serviceType === "سريع" || (rowNoteInfo?.serviceType as any) === "عاجل" || (rowNoteInfo?.serviceType as any) === "مستعجل";
 
                         return (
                           <tr 
@@ -2157,7 +2161,9 @@ export default function AmanReport({
                                     {/* Screen input: sequence number indicator + typing input */}
                                     {!hasPrefixedNumberInInput && (
                                       <span 
-                                        className="shrink-0 font-bold font-mono text-slate-800 ml-1 select-none print:hidden"
+                                        className={`shrink-0 font-bold font-mono ml-1 select-none print:hidden ${
+                                          isUrgentRow && !isEnglishDetected ? "text-emerald-800" : "text-slate-800"
+                                        }`}
                                         style={{ fontFamily: "'Cairo', sans-serif", fontSize: calculatedFontSize }}
                                       >
                                         {absoluteNumber}-
@@ -2172,7 +2178,9 @@ export default function AmanReport({
                                       className={`w-full flex-1 h-full border-0 px-1 text-right font-bold transition-colors print:hidden ${
                                         isEnglishDetected
                                           ? "bg-amber-100 text-amber-950 ring-2 ring-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-600"
-                                          : "bg-transparent text-black focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-blue-50/70"
+                                          : isUrgentRow
+                                            ? "bg-transparent text-emerald-800 focus:outline-none focus:ring-1 focus:ring-emerald-600 focus:bg-emerald-50/60"
+                                            : "bg-transparent text-black focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-blue-50/70"
                                       } rounded-xs`}
                                       style={{ 
                                         fontFamily: "'Cairo', sans-serif", 
@@ -2181,7 +2189,7 @@ export default function AmanReport({
                                         lineHeight: 1.1 
                                       }}
                                     />
-                                    {/* Print text: crisp, unclipped text with exact calculated font size prefixed with number */}
+                                    {/* Print text: crisp, unclipped text with exact calculated font size prefixed with number (always black in print) */}
                                     <span
                                       className="hidden print:inline-block w-full text-right font-bold text-black px-1"
                                       style={{ 
@@ -2189,7 +2197,8 @@ export default function AmanReport({
                                         fontSize: calculatedFontSize, 
                                         fontWeight: "bold", 
                                         lineHeight: 1.1,
-                                        whiteSpace: "nowrap"
+                                        whiteSpace: "nowrap",
+                                        color: "#000000"
                                       }}
                                     >
                                       {printDisplayName}
@@ -2223,7 +2232,11 @@ export default function AmanReport({
                                 placeholder="مواليد..."
                                 onChange={(e) => handleCellChange(globalIndex, "birthDate", e.target.value)}
                                 onBlur={() => handleCellBlur(globalIndex)}
-                                className="w-full h-full bg-transparent border-0 px-1 text-center font-bold text-black focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-blue-50/70 rounded-xs transition-colors print:hidden"
+                                className={`w-full h-full bg-transparent border-0 px-1 text-center font-bold rounded-xs transition-colors print:hidden ${
+                                  isUrgentRow
+                                    ? "text-emerald-800 focus:outline-none focus:ring-1 focus:ring-emerald-600 focus:bg-emerald-50/60"
+                                    : "text-black focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-blue-50/70"
+                                }`}
                                 style={{ 
                                   fontFamily: "'Cairo', sans-serif", 
                                   fontSize: "20px", 
@@ -2231,7 +2244,7 @@ export default function AmanReport({
                                   lineHeight: 1.1 
                                 }}
                               />
-                              {/* Print text */}
+                              {/* Print text (always black in print) */}
                               <span
                                 className="hidden print:inline-block w-full text-center font-bold text-black px-1"
                                 style={{ 
@@ -2239,7 +2252,8 @@ export default function AmanReport({
                                   fontSize: "20px", 
                                   fontWeight: "bold", 
                                   lineHeight: 1.1,
-                                  whiteSpace: "nowrap"
+                                  whiteSpace: "nowrap",
+                                  color: "#000000"
                                 }}
                               >
                                 {rowBirthDate}
@@ -2259,7 +2273,7 @@ export default function AmanReport({
                                 const hasContent = rowName.trim().length > 0 || Boolean(row?.passportSerial);
                                 if (!hasContent) return null;
 
-                                const noteInfo = resolveAmanDetails(row, invoices, services, governmentFines);
+                                const noteInfo = rowNoteInfo || resolveAmanDetails(row, invoices, services, governmentFines);
                                 const serialVal = row?.passportSerial || "";
 
                                 return (
@@ -2419,7 +2433,7 @@ export default function AmanReport({
                               <span className="font-extrabold text-slate-950">📌 تفصيلة الكشف:</span>
                               <span>عادي: {stats?.normalCount || 0} ({(stats?.normalTotal || 0).toLocaleString()}ج)</span>
                               <span className="text-black/50 font-normal">|</span>
-                              <span>عاجل: {stats?.urgentCount || 0} ({(stats?.urgentTotal || 0).toLocaleString()}ج)</span>
+                              <span>سريع: {stats?.urgentCount || 0} ({(stats?.urgentTotal || 0).toLocaleString()}ج)</span>
                               
                               {fines.map((fg) => (
                                 <React.Fragment key={fg.name}>
@@ -2437,7 +2451,7 @@ export default function AmanReport({
                             {/* سطر مخزون الاستمارات المتبقي تحت سطر تفصيلة الكشف */}
                             <div className="flex items-center gap-1.5 flex-nowrap whitespace-nowrap text-[8px] font-bold text-slate-800 pt-0.5 border-t border-black/30 mt-0.5">
                               <span className="font-extrabold text-black">📦 المخزون المتبقي:</span>
-                              <span>استمارات عاجل: {formsStockStats.urgentRemaining}</span>
+                              <span>استمارات سريع: {formsStockStats.urgentRemaining}</span>
                               <span className="text-black/50 font-normal">|</span>
                               <span>عادي: {formsStockStats.normalRemaining}</span>
                             </div>
@@ -2460,12 +2474,12 @@ export default function AmanReport({
                             lineHeight: 1.2 
                           }}
                         >
-                          {/* السطر الأول: عادي وعاجل ونصف الغرامات */}
+                          {/* السطر الأول: عادي وسريع ونصف الغرامات */}
                           <div className="flex items-center gap-1.5 flex-nowrap whitespace-nowrap">
                             <span className="font-extrabold text-slate-950">📌 تفصيلة الكشف:</span>
                             <span>عادي: {stats?.normalCount || 0} ({(stats?.normalTotal || 0).toLocaleString()}ج)</span>
                             <span className="text-black/50 font-normal">|</span>
-                            <span>عاجل: {stats?.urgentCount || 0} ({(stats?.urgentTotal || 0).toLocaleString()}ج)</span>
+                            <span>سريع: {stats?.urgentCount || 0} ({(stats?.urgentTotal || 0).toLocaleString()}ج)</span>
                             {line1Fines.map((fg) => (
                               <React.Fragment key={fg.name}>
                                 <span className="text-black/50 font-normal">|</span>
@@ -2491,7 +2505,7 @@ export default function AmanReport({
                           {/* سطر مخزون الاستمارات المتبقي تحت سطر تفصيلة الكشف */}
                           <div className="flex items-center gap-1.5 flex-nowrap whitespace-nowrap text-[7.5px] font-bold text-slate-800 pt-0.5 border-t border-black/30 mt-0.5">
                             <span className="font-extrabold text-black">📦 المخزون المتبقي:</span>
-                            <span>استمارات عاجل: {formsStockStats.urgentRemaining}</span>
+                            <span>استمارات سريع: {formsStockStats.urgentRemaining}</span>
                             <span className="text-black/50 font-normal">|</span>
                             <span>عادي: {formsStockStats.normalRemaining}</span>
                           </div>
@@ -2889,7 +2903,7 @@ export default function AmanReport({
                 </div>
 
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
-                  <span className="text-[11px] font-bold text-amber-800 block">استمارات العاجل المستلمة حالياً:</span>
+                  <span className="text-[11px] font-bold text-amber-800 block">استمارات السريع المستلمة حالياً:</span>
                   <div className="flex items-baseline justify-between mt-1">
                     <span className="text-xl font-black font-mono text-amber-950">
                       {formsStockStats.urgentReceived}
@@ -2928,7 +2942,7 @@ export default function AmanReport({
 
                   <div className="space-y-1">
                     <label className="text-[11px] font-bold text-slate-700 block">
-                      عدد استمارات العاجل الواردة:
+                      عدد استمارات السريع الواردة:
                     </label>
                     <input
                       type="number"

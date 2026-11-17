@@ -5,6 +5,7 @@ import { calculateWorkingDaysDeliveryDate, getArabicDayName, recalculateCustomer
 import { generateWhatsAppWelcomeMessage, generateWhatsAppReadyMessage, generateWhatsAppPartialReadyMessage, getWhatsAppUrl } from "../lib/whatsapp";
 import { Search, Edit3, Trash2, Printer, Send, CheckCircle, PackageOpen, X, MapPin, Calendar, Info, RefreshCw, AlertCircle, Save, AlertTriangle, CheckSquare, Square, Clock, MessageSquare, Check, Sparkles } from "lucide-react";
 import ThermalReceipt from "./ThermalReceipt";
+import { getCustomerTheme, getArabicOrdinalLabel, getServiceItemTheme } from "../lib/customerVisualThemes";
 
 interface InvoiceQueryProps {
   invoices: Invoice[];
@@ -1082,9 +1083,34 @@ export default function InvoiceQuery({
             </div>
 
             <div className="p-6 space-y-6 overflow-y-auto flex-1">
-              {editCustomers.map((cust, cIdx) => (
-                <div key={cIdx} className="border border-slate-200 rounded-xl p-4 space-y-4">
-                  <h5 className="font-bold text-xs text-slate-800 border-b border-slate-100 pb-1.5">بيانات العميل رقم {cIdx + 1}</h5>
+              {editCustomers.map((cust, cIdx) => {
+                const theme = getCustomerTheme(cIdx);
+                const customerOrdinal = getArabicOrdinalLabel(cIdx);
+                return (
+                <React.Fragment key={cIdx}>
+                  {cIdx > 0 && (
+                    <div className="flex items-center gap-2 py-1 select-none">
+                      <div className={`flex-1 border-t-2 border-dashed ${theme.dividerLine}`} />
+                      <span className={`px-3 py-0.5 rounded-full text-[11px] font-extrabold font-cairo ${theme.dividerBadge}`}>
+                        ⬇️ العميل {customerOrdinal} (لون {theme.colorName})
+                      </span>
+                      <div className={`flex-1 border-t-2 border-dashed ${theme.dividerLine}`} />
+                    </div>
+                  )}
+                  <div className={`rounded-2xl p-4 space-y-4 bg-white ${theme.cardBorder}`}>
+                    <div className={`-mx-4 -mt-4 px-4 py-3 mb-2 rounded-t-xl flex items-center justify-between gap-2 ${theme.headerBg}`}>
+                      <div className="flex items-center gap-2">
+                        <span className={`w-6 h-6 rounded-lg text-xs font-black font-mono flex items-center justify-center ${theme.badgeBg}`}>
+                          {cIdx + 1}
+                        </span>
+                        <h5 className={`font-extrabold text-xs ${theme.titleText}`}>
+                          بيانات العميل {customerOrdinal} {cust.arabicName?.trim() ? `— ${cust.arabicName.trim()}` : ""}
+                        </h5>
+                      </div>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${theme.pillBg}`}>
+                        {cust.services.length} {cust.services.length === 1 ? "خدمة" : "خدمات"}
+                      </span>
+                    </div>
                   
                   <div className="grid md:grid-cols-2 gap-4">
                     <div className="space-y-1">
@@ -1160,9 +1186,11 @@ export default function InvoiceQuery({
                   </div>
 
                   {/* Edit selected services */}
-                  <div className="space-y-2">
+                  <div className={`space-y-3 p-3 rounded-xl border-2 ${theme.servicesBoxBg}`}>
                     <div className="flex justify-between items-center">
-                      <span className="text-[11px] font-bold text-slate-600">تعديل الخدمات للعميل:</span>
+                      <span className={`text-[11px] font-extrabold ${theme.titleText}`}>
+                        الخدمات للعميل {customerOrdinal} ({cust.services.length}):
+                      </span>
                       <button
                         type="button"
                         onClick={() => {
@@ -1175,16 +1203,38 @@ export default function InvoiceQuery({
                           });
                           setEditCustomers(updated);
                         }}
-                        className="text-[11px] font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1 cursor-pointer font-cairo"
+                        className={`text-[11px] font-bold px-2.5 py-1 rounded-lg flex items-center gap-1 cursor-pointer font-cairo ${theme.addServiceBtn}`}
                       >
-                        + إضافة خدمة إضافية
+                        + إضافة خدمة للعميل {customerOrdinal}
                       </button>
                     </div>
                     {cust.services.map((s, sIdx) => {
                       const isPass = s.serviceId.trim().startsWith("#");
+                      const sTheme = getServiceItemTheme(sIdx);
                       return (
-                        <div key={sIdx} className="space-y-1.5 bg-slate-50 p-2.5 rounded-lg border border-slate-150">
-                          <div className="flex gap-2 items-center">
+                        <React.Fragment key={sIdx}>
+                          {sIdx > 0 && (
+                            <div className="flex items-center gap-2">
+                              <div className="flex-1 border-t border-dashed border-slate-300" />
+                              <span className="text-[10px] font-bold bg-white border border-slate-300 text-slate-700 px-2.5 py-0.5 rounded-full font-cairo">
+                                ➕ خدمة ({sIdx + 1}) لنفس العميل {customerOrdinal}
+                              </span>
+                              <div className="flex-1 border-t border-dashed border-slate-300" />
+                            </div>
+                          )}
+                          <div className={`space-y-1.5 p-2.5 rounded-xl overflow-hidden ${sTheme.wrapper}`}>
+                            <div className={`-mx-2.5 -mt-2.5 px-3 py-1.5 mb-2 flex items-center justify-between text-[11px] ${sTheme.headerBg}`}>
+                              <div className="flex items-center gap-1.5">
+                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${sTheme.badge}`}>
+                                  خدمة {sIdx + 1}
+                                </span>
+                                <span className={`font-bold ${sTheme.title}`}>
+                                  {s.serviceId || "خدمة"}
+                                </span>
+                              </div>
+                              <span className="text-[10px] text-slate-600 font-bold">العميل {customerOrdinal}</span>
+                            </div>
+                            <div className="flex gap-2 items-center">
                             <select
                               value={s.serviceId}
                               onChange={(e) => {
@@ -1391,13 +1441,16 @@ export default function InvoiceQuery({
                               />
                             </div>
                           </div>
-                        </div>
+                          </div>
+                        </React.Fragment>
                       );
                     })}
                   </div>
 
                 </div>
-              ))}
+                </React.Fragment>
+                );
+              })}
             </div>
 
             <div className="px-6 py-4 bg-slate-50 flex justify-end gap-3 border-t border-slate-100">

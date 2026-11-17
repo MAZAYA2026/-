@@ -248,7 +248,7 @@ function doPost(e) {
                   var sId = String(aCust.services[asIdx].serviceId || "");
                   if (sId.indexOf("#") === 0 && sId.indexOf("##") !== 0) {
                     isAman = true;
-                    var sType = (sId.indexOf("مستعجل") !== -1 || sId.indexOf("عاجل") !== -1 || sId.indexOf("فورى") !== -1) ? "عاجل" : "عادي";
+                    var sType = (sId.indexOf("مستعجل") !== -1 || sId.indexOf("عاجل") !== -1 || sId.indexOf("سريع") !== -1 || sId.indexOf("فورى") !== -1) ? "سريع" : "عادي";
                     var fName = String(aCust.services[asIdx].fineName || "").trim();
                     var fAmt = Number(aCust.services[asIdx].fineAmount) || 0;
                     var finePart = (fName || fAmt > 0) ? (" - " + (fName ? (fName.indexOf("غ") === 0 ? fName : "غ " + fName.replace(/^غرامة\\s*/, '')) : "غ حكومية")) : "";

@@ -4,7 +4,6 @@ import fs from "fs";
 import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
-import { google } from "googleapis";
 
 // Load environment variables
 dotenv.config();
@@ -863,7 +862,7 @@ function syncInvoiceToAmanReport(invoice: any, db: any) {
     });
     if (amanSrv) {
       const srvName = String(amanSrv.serviceId || "");
-      const isUrgent = srvName.includes("مستعجل") || srvName.includes("عاجل") || srvName.includes("فورى");
+      const isUrgent = srvName.includes("مستعجل") || srvName.includes("عاجل") || srvName.includes("سريع") || srvName.includes("فورى");
       const fineName = (amanSrv.fineName || "").trim();
       const fineAmt = Number(amanSrv.fineAmount) || 0;
       const hasFine = !!(fineName || fineAmt > 0);
@@ -874,7 +873,7 @@ function syncInvoiceToAmanReport(invoice: any, db: any) {
         const cleanName = fineName || "غرامة حكومية";
         finePart = cleanName.startsWith("غرامة") ? cleanName : `غرامة ${cleanName}`;
       }
-      const noteText = finePart ? `${isUrgent ? "مستعجل" : "عادي"} - ${finePart}` : (isUrgent ? "مستعجل" : "عادي");
+      const noteText = finePart ? `${isUrgent ? "سريع" : "عادي"} - ${finePart}` : (isUrgent ? "سريع" : "عادي");
 
       // Extract and format birthDate cleanly (YYYY/MM/DD)
       let bDate = formatCleanBirthDate(cust.birthDate);
@@ -895,7 +894,7 @@ function syncInvoiceToAmanReport(invoice: any, db: any) {
         invoiceId: invoice.invoiceId,
         customerIndex: cIdx,
         date: invoice.date || "",
-        serviceType: isUrgent ? "مستعجل" : "عادي",
+        serviceType: isUrgent ? "سريع" : "عادي",
         hasFine,
         fineName: fineName,
         fineAmount: fineAmt,
@@ -1328,31 +1327,53 @@ app.delete("/api/db/dictionary", (req, res) => {
   res.json({ status: "success", dictionary: db.dictionary });
 });
 
-// Helper to get Google OAuth2 client from request authorization header
-function getGoogleAuthClient(req: any) {
+// Helper to get Google OAuth2 Bearer token from request authorization header
+function getGoogleAuthClient(req: any): { accessToken: string } | null {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     return null;
   }
   const token = authHeader.split(" ")[1];
-  const oauth2Client = new google.auth.OAuth2();
-  oauth2Client.setCredentials({ access_token: token });
-  return oauth2Client;
+  if (!token) return null;
+  return { accessToken: token };
+}
+
+async function googleApiFetch(url: string, accessToken: string, options: RequestInit = {}) {
+  const res = await fetch(url, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+    },
+  });
+  const text = await res.text();
+  let json: any = {};
+  try {
+    json = text ? JSON.parse(text) : {};
+  } catch {
+    json = { raw: text };
+  }
+  if (!res.ok) {
+    const errMsg = json?.error?.message || text || `HTTP ${res.status}`;
+    throw new Error(errMsg);
+  }
+  return json;
 }
 
 // Ensure Google Spreadsheet has the correct sheets/tabs and returns its details
-async function ensureSpreadsheetExists(authClient: any, spreadsheetId?: string) {
-  const sheets = google.sheets({ version: "v4", auth: authClient });
-  const drive = google.drive({ version: "v3", auth: authClient });
-
+async function ensureSpreadsheetExists(authClient: { accessToken: string }, spreadsheetId?: string) {
   let targetId = spreadsheetId;
   let targetUrl = "";
 
   if (targetId) {
     try {
       // Check if file exists in drive
-      const file = await drive.files.get({ fileId: targetId });
-      if (file.data) {
+      const file = await googleApiFetch(
+        `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(targetId)}`,
+        authClient.accessToken
+      );
+      if (file && file.id) {
         targetUrl = `https://docs.google.com/spreadsheets/d/${targetId}/edit`;
       }
     } catch (err) {
@@ -1368,37 +1389,45 @@ async function ensureSpreadsheetExists(authClient: any, spreadsheetId?: string) 
         title: "مكتب مزايا للجوازات - قاعدة البيانات الآمنة 📊",
       },
     };
-    const response = await sheets.spreadsheets.create({
-      requestBody: resource,
-      fields: "spreadsheetId,spreadsheetUrl",
-    });
-    targetId = response.data.spreadsheetId || "";
-    targetUrl = response.data.spreadsheetUrl || "";
+    const created = await googleApiFetch(
+      `https://sheets.googleapis.com/v4/spreadsheets?fields=spreadsheetId,spreadsheetUrl`,
+      authClient.accessToken,
+      {
+        method: "POST",
+        body: JSON.stringify(resource),
+      }
+    );
+    targetId = created.spreadsheetId || "";
+    targetUrl = created.spreadsheetUrl || "";
     console.log("Created new Google Sheet:", targetId);
 
     // Batch update to rename/add sheets
     try {
-      await sheets.spreadsheets.batchUpdate({
-        spreadsheetId: targetId,
-        requestBody: {
-          requests: [
-            {
-              updateSheetProperties: {
-                properties: {
-                  sheetId: 0,
-                  title: "Settings"
-                },
-                fields: "title"
-              }
-            },
-            { addSheet: { properties: { title: "Services" } } },
-            { addSheet: { properties: { title: "Invoices" } } },
-            { addSheet: { properties: { title: "Employees" } } },
-            { addSheet: { properties: { title: "CollectionClosings" } } },
-            { addSheet: { properties: { title: "Dictionary" } } }
-          ]
+      await googleApiFetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(targetId)}:batchUpdate`,
+        authClient.accessToken,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            requests: [
+              {
+                updateSheetProperties: {
+                  properties: {
+                    sheetId: 0,
+                    title: "Settings"
+                  },
+                  fields: "title"
+                }
+              },
+              { addSheet: { properties: { title: "Services" } } },
+              { addSheet: { properties: { title: "Invoices" } } },
+              { addSheet: { properties: { title: "Employees" } } },
+              { addSheet: { properties: { title: "CollectionClosings" } } },
+              { addSheet: { properties: { title: "Dictionary" } } }
+            ]
+          })
         }
-      });
+      );
       console.log("Configured tabs in new Google Sheet.");
     } catch (batchErr) {
       console.error("Error creating tabs:", batchErr);
@@ -1409,8 +1438,7 @@ async function ensureSpreadsheetExists(authClient: any, spreadsheetId?: string) 
 }
 
 // Push local data to Google Sheets
-async function pushDataToSheets(authClient: any, spreadsheetId: string, db: any) {
-  const sheets = google.sheets({ version: "v4", auth: authClient });
+async function pushDataToSheets(authClient: { accessToken: string }, spreadsheetId: string, db: any) {
 
   // 1. Settings tab
   const settingsRows = [["Key", "Value"]];
@@ -1510,10 +1538,14 @@ async function pushDataToSheets(authClient: any, spreadsheetId: string, db: any)
 
   for (const r of rangesToClear) {
     try {
-      await sheets.spreadsheets.values.clear({
-        spreadsheetId,
-        range: r,
-      });
+      await googleApiFetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(r)}:clear`,
+        authClient.accessToken,
+        {
+          method: "POST",
+          body: "{}",
+        }
+      );
     } catch (clearErr) {
       console.log(`Failed to clear range ${r}, might not exist yet:`, clearErr);
     }
@@ -1529,32 +1561,39 @@ async function pushDataToSheets(authClient: any, spreadsheetId: string, db: any)
     { range: "Dictionary!A1", values: dictionaryRows }
   ];
 
-  await sheets.spreadsheets.values.batchUpdate({
-    spreadsheetId,
-    requestBody: {
-      valueInputOption: "RAW",
-      data: dataToUpdate
+  await googleApiFetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values:batchUpdate`,
+    authClient.accessToken,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        valueInputOption: "RAW",
+        data: dataToUpdate
+      }),
     }
-  });
+  );
 }
 
 // Pull data from Google Sheets
-async function pullDataFromSheets(authClient: any, spreadsheetId: string) {
-  const sheets = google.sheets({ version: "v4", auth: authClient });
+async function pullDataFromSheets(authClient: { accessToken: string }, spreadsheetId: string) {
+  const ranges = [
+    "Settings!A1:B100",
+    "Services!A1:H1000",
+    "Invoices!A1:M50000",
+    "Employees!A1:I100",
+    "CollectionClosings!A1:F5000",
+    "Dictionary!A1:B10000"
+  ];
+  const params = new URLSearchParams();
+  for (const r of ranges) {
+    params.append("ranges", r);
+  }
+  const responseData = await googleApiFetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values:batchGet?${params.toString()}`,
+    authClient.accessToken
+  );
 
-  const response = await sheets.spreadsheets.values.batchGet({
-    spreadsheetId,
-    ranges: [
-      "Settings!A1:B100",
-      "Services!A1:H1000",
-      "Invoices!A1:M50000",
-      "Employees!A1:I100",
-      "CollectionClosings!A1:F5000",
-      "Dictionary!A1:B10000"
-    ]
-  });
-
-  const valueRanges = response.data.valueRanges || [];
+  const valueRanges = responseData.valueRanges || [];
   const db: any = {
     settings: {},
     services: [],
@@ -2310,7 +2349,7 @@ app.post("/api/sheets/webhook/pull-aman", async (req, res) => {
           });
           if (amanSrv) {
             const srvName = String(amanSrv.serviceId || "");
-            const isUrgent = srvName.includes("مستعجل") || srvName.includes("عاجل") || srvName.includes("فورى");
+            const isUrgent = srvName.includes("مستعجل") || srvName.includes("عاجل") || srvName.includes("سريع") || srvName.includes("فورى");
             const hasFine = !!(amanSrv.fineName || (amanSrv.fineAmount && amanSrv.fineAmount > 0));
             extracted.push({
               id: `inv-${inv.invoiceId}-c-${cIdx}`,
@@ -2320,7 +2359,7 @@ app.post("/api/sheets/webhook/pull-aman", async (req, res) => {
               invoiceId: inv.invoiceId,
               customerIndex: cIdx,
               date: inv.date || "",
-              serviceType: isUrgent ? "مستعجل" : "عادي",
+              serviceType: isUrgent ? "سريع" : "عادي",
               hasFine,
               fineName: amanSrv.fineName || "",
               fineAmount: amanSrv.fineAmount || 0,
@@ -2388,7 +2427,7 @@ app.post("/api/sheets/webhook/pull-aman", async (req, res) => {
             });
             if (amanSrv) {
               const srvName = String(amanSrv.serviceId || "");
-              row.serviceType = (srvName.includes("مستعجل") || srvName.includes("عاجل") || srvName.includes("فورى")) ? "عاجل" : "عادي";
+              row.serviceType = (srvName.includes("مستعجل") || srvName.includes("عاجل") || srvName.includes("سريع") || srvName.includes("فورى")) ? "سريع" : "عادي";
               row.hasFine = !!(amanSrv.fineName || (amanSrv.fineAmount && amanSrv.fineAmount > 0));
               row.fineName = amanSrv.fineName || "";
               row.fineAmount = amanSrv.fineAmount || 0;

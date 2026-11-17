@@ -19,7 +19,10 @@ import {
   FileSpreadsheet,
   CheckSquare,
   Square,
-  AlertCircle
+  AlertCircle,
+  Zap,
+  ClipboardPaste,
+  Table2
 } from "lucide-react";
 import { PotentialCustomer, DictionaryItem, AppSettings } from "../types";
 import { 
@@ -30,6 +33,14 @@ import {
   exportPotentialCustomersToExcel 
 } from "../lib/api";
 import DocumentScannerModal from "./DocumentScannerModal";
+import FastPotentialCustomerModal, { FastEntryTab } from "./FastPotentialCustomerModal";
+import {
+  normalizeDigits,
+  extractBirthDateFromNationalId,
+  inferDocAndProfessionFromBirthDate,
+  translateNameWithDictionary,
+  QUICK_PROFESSIONS,
+} from "../lib/fastCustomerParser";
 
 interface PotentialCustomersPanelProps {
   potentialCustomers: PotentialCustomer[];
@@ -56,6 +67,8 @@ export default function PotentialCustomersPanel({
 
   // Modals state
   const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [isFastModalOpen, setIsFastModalOpen] = useState(false);
+  const [fastModalTab, setFastModalTab] = useState<FastEntryTab>("paste");
   const [isManualModalOpen, setIsManualModalOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<PotentialCustomer | null>(null);
 
@@ -163,6 +176,25 @@ export default function PotentialCustomersPanel({
       }
     } catch (err: any) {
       alert("خطأ أثناء الحفظ: " + err.message);
+    }
+  };
+
+  // Save batch from Fast Non-AI Modal
+  const handleSaveFastBatch = async (
+    customersBatch: Partial<PotentialCustomer>[],
+    useFirstImmediately?: boolean
+  ) => {
+    const updated = await savePotentialCustomers(customersBatch);
+    onCustomersUpdated(updated);
+    showNotice(`تم حفظ (${customersBatch.length}) عميل محتمل بسرعة فائقة بدون ذكاء اصطناعي! ⚡`);
+
+    if (useFirstImmediately && customersBatch.length > 0 && updated.length > 0) {
+      const firstNid = customersBatch[0].nationalId;
+      const target =
+        (firstNid && updated.find((c) => c.nationalId === firstNid)) || updated[0];
+      if (target) {
+        onUseCustomerInInvoice(target);
+      }
     }
   };
 
@@ -314,15 +346,31 @@ export default function PotentialCustomersPanel({
         </div>
 
         {/* Action Buttons */}
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => setIsScannerOpen(true)}
-            className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-md hover:shadow-indigo-500/20 transition-all cursor-pointer"
-            title="فتح الكاميرا ومسح البطاقة الشخصية أو شهادة الميلاد بالذكاء الاصطناعي"
+            onClick={() => {
+              setFastModalTab("paste");
+              setIsFastModalOpen(true);
+            }}
+            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-md hover:shadow-emerald-500/20 transition-all cursor-pointer"
+            title="إضافة سريعة بدون ذكاء اصطناعي: لصق رسالة واتساب، جدول عائلي متعدد، أو استيراد ملف إكسيل"
           >
-            <Camera className="w-4 h-4 text-emerald-300" />
-            <span>📸 تصوير / مسح مستند ذكي</span>
+            <Zap className="w-4 h-4 text-amber-300" />
+            <span>⚡ إدخال سريع بدون ذكاء اصطناعي (لصق / جدول / إكسيل)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setFastModalTab("grid");
+              setIsFastModalOpen(true);
+            }}
+            className="px-3 py-2.5 bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/30 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+            title="إدخال عدة أفراد من الأسرة في جدول واحد بسرعة"
+          >
+            <Table2 className="w-4 h-4" />
+            <span>جدول متعدد</span>
           </button>
 
           <button
@@ -332,6 +380,16 @@ export default function PotentialCustomersPanel({
           >
             <Plus className="w-4 h-4" />
             <span>إضافة يدوية</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsScannerOpen(true)}
+            className="px-3.5 py-2.5 bg-indigo-600/80 hover:bg-indigo-500 text-white border border-indigo-400/30 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+            title="فتح الكاميرا ومسح البطاقة الشخصية أو شهادة الميلاد بالذكاء الاصطناعي"
+          >
+            <Camera className="w-4 h-4 text-indigo-200" />
+            <span>📸 مسح ذكي (كاميرا)</span>
           </button>
 
           <button
@@ -537,7 +595,7 @@ export default function PotentialCustomersPanel({
                     <Users className="w-10 h-10 mx-auto text-slate-300 mb-2" />
                     <p className="font-bold text-sm text-slate-600">لا يوجد عملاء محتملون يطابقون البحث</p>
                     <p className="text-xs text-slate-400 mt-1">
-                      يمكنك مسح وجه وظهور بطاقات العملاء أو شهادات الميلاد بالضغط على "مسح مستند ذكي"
+                      اضغط "⚡ إدخال سريع بدون ذكاء اصطناعي" للصق رسالة واتساب أو إدخال جدول عائلي فوراً، أو استخدم المسح بالكاميرا
                     </p>
                   </td>
                 </tr>
@@ -676,6 +734,17 @@ export default function PotentialCustomersPanel({
         allowDirectUse={true}
       />
 
+      {/* Fast Non-AI Potential Customer Modal (Paste / Family Grid / CSV) */}
+      <FastPotentialCustomerModal
+        isOpen={isFastModalOpen}
+        onClose={() => setIsFastModalOpen(false)}
+        initialTab={fastModalTab}
+        dictionary={dictionary}
+        applicantCapacities={settings?.applicantCapacities}
+        onSaveBatch={handleSaveFastBatch}
+        allowDirectUse={true}
+      />
+
       {/* Manual Add Customer Modal */}
       {isManualModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs font-cairo">
@@ -695,14 +764,22 @@ export default function PotentialCustomersPanel({
                     type="text"
                     required
                     value={manualForm.arabicName}
-                    onChange={(e) => setManualForm({ ...manualForm, arabicName: e.target.value })}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const autoEn = translateNameWithDictionary(val, dictionary);
+                      setManualForm({
+                        ...manualForm,
+                        arabicName: val,
+                        englishName: autoEn || manualForm.englishName,
+                      });
+                    }}
                     placeholder="الاسم الرباعي..."
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-900"
                   />
                 </div>
 
                 <div className="space-y-1">
-                  <label className="font-bold text-slate-700 block">الاسم بالإنجليزي</label>
+                  <label className="font-bold text-slate-700 block">الاسم بالإنجليزي (ترجمة فورية من القاموس)</label>
                   <input
                     type="text"
                     value={manualForm.englishName}
@@ -721,14 +798,37 @@ export default function PotentialCustomersPanel({
                     required
                     maxLength={14}
                     value={manualForm.nationalId}
-                    onChange={(e) => setManualForm({ ...manualForm, nationalId: e.target.value.replace(/\D/g, "") })}
+                    onChange={(e) => {
+                      const cleanNid = normalizeDigits(e.target.value).replace(/\D/g, "").slice(0, 14);
+                      let nextBirth = manualForm.birthDate;
+                      let nextDoc = manualForm.documentType;
+                      let nextProf = manualForm.profession;
+                      if (cleanNid.length === 14) {
+                        const derivedBirth = extractBirthDateFromNationalId(cleanNid);
+                        if (derivedBirth) {
+                          nextBirth = derivedBirth;
+                          const inferred = inferDocAndProfessionFromBirthDate(derivedBirth);
+                          nextDoc = inferred.documentType;
+                          if (!nextProf.trim() && inferred.suggestedProfession) {
+                            nextProf = inferred.suggestedProfession;
+                          }
+                        }
+                      }
+                      setManualForm({
+                        ...manualForm,
+                        nationalId: cleanNid,
+                        birthDate: nextBirth,
+                        documentType: nextDoc,
+                        profession: nextProf,
+                      });
+                    }}
                     placeholder="29508121601234"
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono font-bold"
                   />
                 </div>
 
                 <div className="space-y-1">
-                  <label className="font-bold text-slate-700 block">تاريخ الميلاد</label>
+                  <label className="font-bold text-slate-700 block">تاريخ الميلاد (يُحسب تلقائياً)</label>
                   <input
                     type="date"
                     value={manualForm.birthDate}
@@ -737,8 +837,26 @@ export default function PotentialCustomersPanel({
                   />
                 </div>
 
-                <div className="space-y-1">
-                  <label className="font-bold text-slate-700 block">المهنة</label>
+                <div className="space-y-1 sm:col-span-2">
+                  <div className="flex items-center justify-between flex-wrap gap-1">
+                    <label className="font-bold text-slate-700 block">المهنة</label>
+                    <div className="flex flex-wrap items-center gap-1">
+                      {QUICK_PROFESSIONS.slice(0, 6).map((chip) => (
+                        <button
+                          key={chip}
+                          type="button"
+                          onClick={() => setManualForm({ ...manualForm, profession: chip })}
+                          className={`text-[10px] px-2 py-0.5 rounded-md font-bold cursor-pointer transition-colors ${
+                            manualForm.profession === chip
+                              ? "bg-emerald-600 text-white"
+                              : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                          }`}
+                        >
+                          {chip}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   <input
                     type="text"
                     value={manualForm.profession}
@@ -754,7 +872,7 @@ export default function PotentialCustomersPanel({
                     type="tel"
                     maxLength={11}
                     value={manualForm.phone}
-                    onChange={(e) => setManualForm({ ...manualForm, phone: e.target.value.replace(/\D/g, "") })}
+                    onChange={(e) => setManualForm({ ...manualForm, phone: normalizeDigits(e.target.value).replace(/\D/g, "") })}
                     placeholder="01XXXXXXXXX"
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono font-bold"
                   />

@@ -8,6 +8,7 @@ import { playLanguageWarningSound } from "../lib/audio";
 import { Plus, Trash2, FileText, UserPlus, Sparkles, Printer, Send, Check, AlertCircle, Info, Calendar, BookOpen, ShieldAlert, CalendarCheck, AlertTriangle, Volume2, Users, Camera, CheckSquare, Square, Search, X, RefreshCw } from "lucide-react";
 import ThermalReceipt from "./ThermalReceipt";
 import DocumentScannerModal from "./DocumentScannerModal";
+import { getCustomerTheme, getArabicOrdinalLabel, getServiceItemTheme } from "../lib/customerVisualThemes";
 
 interface InvoiceCreatorProps {
   services: Service[];
@@ -979,35 +980,106 @@ export default function InvoiceCreator({
           </div>
         </div>
 
+        {/* Quick Color-Coded Navigator Bar when invoice has multiple customers */}
+        {customers.length > 1 && (
+          <div className="bg-white border border-slate-200 rounded-2xl p-3 shadow-xs flex flex-wrap items-center gap-2 font-cairo">
+            <span className="text-xs font-bold text-slate-600 ml-1 flex items-center gap-1.5">
+              <Users className="w-4 h-4 text-slate-500" />
+              <span>عملاء الفاتورة ({customers.length}):</span>
+            </span>
+            {customers.map((c, idx) => {
+              const t = getCustomerTheme(idx);
+              const cTotal = c.services.reduce((sum, s) => sum + (s.price || 0), 0);
+              return (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => {
+                    document.getElementById(`invoice-customer-card-${idx}`)?.scrollIntoView({
+                      behavior: "smooth",
+                      block: "start",
+                    });
+                  }}
+                  className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${t.navChipActive}`}
+                >
+                  <span className={`w-5 h-5 rounded-full text-[11px] font-mono font-black flex items-center justify-center ${t.badgeBg}`}>
+                    {idx + 1}
+                  </span>
+                  <span>{c.arabicName?.trim() || `العميل ${getArabicOrdinalLabel(idx)}`}</span>
+                  <span className="text-[10px] opacity-80 font-mono">
+                    ({c.services.length} خدمة • {cTotal.toFixed(0)} ج.م)
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {/* Customers list section */}
         {customers.map((customer, cIdx) => {
           const isPass = isPassportRelated(customer);
+          const theme = getCustomerTheme(cIdx);
+          const customerTotal = customer.services.reduce((sum, s) => sum + (s.price || 0), 0);
+          const customerOrdinal = getArabicOrdinalLabel(cIdx);
 
           return (
-            <div key={cIdx} className="bg-white border border-slate-200 rounded-2xl shadow-xs overflow-hidden relative">
-              
-              {/* Customer Index Header */}
-              <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
-                <div className="flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-full bg-slate-200 text-slate-700 text-xs font-bold font-mono flex items-center justify-center">
-                    {cIdx + 1}
+            <React.Fragment key={cIdx}>
+              {/* Clear inter-customer visual separator */}
+              {cIdx > 0 && (
+                <div className="flex items-center gap-3 py-1 select-none">
+                  <div className={`flex-1 border-t-2 border-dashed ${theme.dividerLine}`} />
+                  <span className={`px-4 py-1 rounded-full text-xs font-extrabold font-cairo shadow-xs flex items-center gap-1.5 ${theme.dividerBadge}`}>
+                    <span>⬇️</span>
+                    <span>العميل {customerOrdinal} بنفس الفاتورة (لون {theme.colorName})</span>
                   </span>
-                  <h3 className="font-bold text-sm text-slate-800 font-cairo">بيانات العميل</h3>
+                  <div className={`flex-1 border-t-2 border-dashed ${theme.dividerLine}`} />
                 </div>
-                {customers.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => removeCustomer(cIdx)}
-                    className="p-1.5 text-rose-500 hover:bg-rose-50 hover:text-rose-700 rounded-lg transition-colors text-xs font-bold font-cairo flex items-center gap-1"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                    حذف هذا العميل
-                  </button>
-                )}
-              </div>
+              )}
 
-              {/* Customer input fields */}
-              <div className="p-6 space-y-6">
+              <div
+                id={`invoice-customer-card-${cIdx}`}
+                className={`bg-white rounded-2xl shadow-md overflow-hidden relative transition-all ${theme.cardBorder}`}
+              >
+                {/* Customer Index Header */}
+                <div className={`px-6 py-4 flex flex-wrap justify-between items-center gap-3 ${theme.headerBg}`}>
+                  <div className="flex items-center gap-3">
+                    <span className={`w-8 h-8 rounded-xl text-sm font-black font-mono flex items-center justify-center shadow-xs ${theme.badgeBg}`}>
+                      {cIdx + 1}
+                    </span>
+                    <div>
+                      <h3 className={`font-extrabold text-sm font-cairo flex flex-wrap items-center gap-2 ${theme.titleText}`}>
+                        <span>بيانات العميل {customerOrdinal}</span>
+                        {customer.arabicName?.trim() && (
+                          <span className="text-xs font-bold bg-white/90 px-2.5 py-0.5 rounded-lg border border-slate-200 text-slate-800">
+                            {customer.arabicName.trim()}
+                          </span>
+                        )}
+                      </h3>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={`text-[11px] font-bold px-2.5 py-1 rounded-lg font-cairo ${theme.pillBg}`}>
+                      {customer.services.length} {customer.services.length === 1 ? "خدمة" : "خدمات"}
+                    </span>
+                    <span className="text-[11px] font-mono font-extrabold px-2.5 py-1 rounded-lg bg-white border border-slate-300 text-slate-900 shadow-2xs">
+                      إجمالي العميل: {customerTotal.toFixed(0)} ج.م
+                    </span>
+                    {customers.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removeCustomer(cIdx)}
+                        className="px-2.5 py-1.5 bg-white/90 border border-rose-200 text-rose-600 hover:bg-rose-50 hover:text-rose-700 rounded-xl transition-colors text-xs font-bold font-cairo flex items-center gap-1 cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>حذف العميل {customerOrdinal}</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Customer input fields */}
+                <div className="p-6 space-y-6">
                 
                 {/* Row 1: Arabic Name & Phone */}
                 <div className="grid md:grid-cols-2 gap-4">
@@ -1444,38 +1516,83 @@ export default function InvoiceCreator({
                 )}
 
                 {/* Customer services list inside */}
-                <div className="space-y-3 pt-4 border-t border-slate-100">
-                  <div className="flex justify-between items-center">
-                    <h4 className="text-xs font-bold text-slate-700 font-cairo">الخدمات المطلوبة لهذا العميل:</h4>
+                <div className={`space-y-4 p-4 rounded-2xl border-2 ${theme.servicesBoxBg}`}>
+                  <div className="flex flex-wrap justify-between items-center gap-2 pb-2 border-b border-slate-200/80">
+                    <div className="flex items-center gap-2">
+                      <span className={`w-6 h-6 rounded-lg text-xs font-black font-mono flex items-center justify-center ${theme.badgeBg}`}>
+                        {cIdx + 1}
+                      </span>
+                      <h4 className={`text-xs font-extrabold font-cairo ${theme.titleText}`}>
+                        الخدمات المطلوبة للعميل {customerOrdinal}
+                        {customer.arabicName?.trim() ? ` (${customer.arabicName.trim()})` : ""}:
+                      </h4>
+                      <span className="text-[11px] font-bold bg-white border border-slate-200 text-slate-700 px-2 py-0.5 rounded-md font-mono">
+                        {customer.services.length} {customer.services.length === 1 ? "خدمة" : "خدمات"}
+                      </span>
+                    </div>
+
                     <button
                       type="button"
                       onClick={() => addServiceToCustomer(cIdx)}
-                      className="text-xs text-blue-600 hover:text-blue-700 font-bold font-cairo flex items-center gap-1"
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-bold font-cairo flex items-center gap-1.5 cursor-pointer transition-all ${theme.addServiceBtn}`}
                     >
                       <Plus className="w-4 h-4" />
-                      أضف خدمة أخرى للعميل
+                      <span>أضف خدمة أخرى للعميل {customerOrdinal}</span>
                     </button>
                   </div>
 
                   {customer.services.map((srv, sIdx) => {
                     const selectedServiceObj = services.find(s => s.id === srv.serviceId || s.name === srv.serviceId);
+                    const sTheme = getServiceItemTheme(sIdx);
 
                     return (
-                      <div key={sIdx} className="space-y-3 p-4 bg-slate-50 rounded-xl border border-slate-150 relative">
-                        
-                        {/* Remove Service Button */}
-                        {customer.services.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => removeServiceFromCustomer(cIdx, sIdx)}
-                            className="absolute top-2.5 left-2.5 p-1 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors"
-                            title="إلغاء الخدمة"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                      <React.Fragment key={sIdx}>
+                        {/* Connector divider when adding 2nd+ service for the SAME customer */}
+                        {sIdx > 0 && (
+                          <div className="flex items-center gap-2 px-1">
+                            <div className="flex-1 border-t border-dashed border-slate-300" />
+                            <span className="text-[11px] font-bold bg-white border border-slate-300 text-slate-700 px-3 py-0.5 rounded-full shadow-2xs font-cairo">
+                              ➕ خدمة رقم ({sIdx + 1}) لنفس العميل ({customer.arabicName?.trim() || `العميل ${customerOrdinal}`})
+                            </span>
+                            <div className="flex-1 border-t border-dashed border-slate-300" />
+                          </div>
                         )}
 
-                        <div className="grid md:grid-cols-4 gap-4">
+                        <div className={`rounded-2xl overflow-hidden relative transition-all ${sTheme.wrapper}`}>
+                          {/* Service Sub-card Header Strip */}
+                          <div className={`px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 ${sTheme.headerBg}`}>
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className={`px-2 py-0.5 rounded-lg text-[11px] font-black font-cairo shrink-0 ${sTheme.badge}`}>
+                                خدمة {sIdx + 1}
+                              </span>
+                              <span className={`text-xs font-extrabold truncate font-cairo ${sTheme.title}`}>
+                                {selectedServiceObj ? selectedServiceObj.name : "يرجى اختيار الخدمة من القائمة"}
+                              </span>
+                              <span className="text-[10px] font-bold bg-white/80 text-slate-600 px-2 py-0.5 rounded-md border border-slate-200 hidden sm:inline-block shrink-0">
+                                العميل {customerOrdinal}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className="text-xs font-mono font-black bg-white px-2.5 py-0.5 rounded-lg border border-slate-300 text-slate-900">
+                                {srv.price.toFixed(0)} ج.م
+                              </span>
+                              {customer.services.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => removeServiceFromCustomer(cIdx, sIdx)}
+                                  className="px-2 py-1 bg-white border border-rose-200 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                                  title="إلغاء هذه الخدمة"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                  <span>حذف</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="p-4 space-y-3">
+                            <div className="grid md:grid-cols-4 gap-4">
                           
                           {/* Service Dropdown */}
                           <div className="md:col-span-2 space-y-1">
@@ -1665,7 +1782,9 @@ export default function InvoiceCreator({
                           </div>
                         )}
 
-                      </div>
+                          </div>
+                        </div>
+                      </React.Fragment>
                     );
                   })}
 
@@ -1678,7 +1797,7 @@ export default function InvoiceCreator({
                       <div className="bg-emerald-50/90 border border-emerald-300 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2 text-xs font-cairo">
                         <div className="flex items-center gap-2 text-emerald-950 font-bold">
                           <CalendarCheck className="w-4.5 h-4.5 text-emerald-600" />
-                          <span>الميعاد النهائي الفعلي لتسليم كافة خدمات ({customer.arabicName?.trim() || `العميل ${cIdx + 1}`}):</span>
+                          <span>الميعاد النهائي الفعلي لتسليم كافة خدمات ({customer.arabicName?.trim() || `العميل ${customerOrdinal}`}):</span>
                         </div>
                         <div className="font-mono font-black text-emerald-900 bg-white px-3 py-1 rounded-lg border border-emerald-300 shadow-2xs text-xs flex items-center gap-1.5">
                           <span>{finalDayName ? `${finalDayName} ` : ""}{finalDelivery}</span>
@@ -1687,11 +1806,31 @@ export default function InvoiceCreator({
                       </div>
                     ) : null;
                   })()}
+
+                  {/* Bottom action strip inside Customer card: per-customer subtotal + quick add another service for SAME customer */}
+                  <div className="pt-2 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-xs font-bold text-slate-700 font-cairo flex items-center gap-2">
+                      <span>إجمالي حساب العميل {customerOrdinal}:</span>
+                      <span className="font-mono font-black text-slate-900 bg-white px-2.5 py-1 rounded-lg border border-slate-300">
+                        {customerTotal.toFixed(2)} ج.م
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => addServiceToCustomer(cIdx)}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-bold font-cairo flex items-center gap-1.5 cursor-pointer transition-all ${theme.addServiceBtn}`}
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>إضافة خدمة تالية لنفس العميل ({customer.arabicName?.trim() || customerOrdinal})</span>
+                    </button>
+                  </div>
                 </div>
 
               </div>
 
             </div>
+            </React.Fragment>
           );
         })}
 

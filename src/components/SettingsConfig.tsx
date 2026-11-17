@@ -792,7 +792,7 @@ export default function SettingsConfig({
           </div>
 
           <p className="text-xs text-slate-500">
-            تُستخدم هذه القيم في نهاية تفصيلة كشف أمان لحساب إجمالي المبالغ بضرب عدد الجوازات العادية والعاجلة في قيمتها، بالإضافة لضرب كل غرامة مسجلة في قيمتها من بند الغرامات.
+            تُستخدم هذه القيم في نهاية تفصيلة كشف أمان لحساب إجمالي المبالغ بضرب عدد الجوازات العادية والسريعة في قيمتها، بالإضافة لضرب كل غرامة مسجلة في قيمتها من بند الغرامات.
           </p>
 
           <div className="grid md:grid-cols-2 gap-4">
@@ -812,7 +812,7 @@ export default function SettingsConfig({
 
             <div className="space-y-1">
               <label className="text-xs font-bold text-slate-700 block">
-                قيمة الجواز العاجل / المستعجل لكشف أمان (ج.م):
+                قيمة الجواز السريع لكشف أمان (ج.م):
               </label>
               <input 
                 type="number" 
@@ -831,7 +831,7 @@ export default function SettingsConfig({
           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
             <h3 className="font-bold text-sm text-slate-800 flex items-center gap-2">
               <Package className="w-4.5 h-4.5 text-amber-600" />
-              <span>مخزون استمارات الجوازات (العادي والعاجل) وإضافة استمارات جديدة:</span>
+              <span>مخزون استمارات الجوازات (العادي والسريع) وإضافة استمارات جديدة:</span>
             </h3>
             <span className="text-[10px] bg-amber-50 text-amber-800 border border-amber-200 font-bold px-2.5 py-0.5 rounded-full">
               مخزون يومي
@@ -839,7 +839,7 @@ export default function SettingsConfig({
           </div>
 
           <p className="text-xs text-slate-500">
-            سجل إجمالي الاستمارات المخزنة لديك، وأضف ما يتم استلامه يومياً من استمارات عادية وعاجلة. يتم خصم الاستمارات تلقائياً بحسب فواتير الجوازات التي تبدأ بـ (#) والمسجلة بكشف أمان لبيان الرصيد المتبقي بدقة.
+            سجل إجمالي الاستمارات المخزنة لديك، وأضف ما يتم استلامه يومياً من استمارات عادية وسريعة. يتم خصم الاستمارات تلقائياً بحسب فواتير الجوازات التي تبدأ بـ (#) والمسجلة بكشف أمان لبيان الرصيد المتبقي بدقة.
           </p>
 
           {/* Current Total Received Stats & Live Deductions */}
@@ -869,7 +869,7 @@ export default function SettingsConfig({
             <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3.5 space-y-2">
               <div className="flex items-center justify-between border-b border-amber-100 pb-2">
                 <div>
-                  <span className="text-xs font-extrabold text-amber-950 block">استمارات العاجل (مخزون ورصيد):</span>
+                  <span className="text-xs font-extrabold text-amber-950 block">استمارات السريع (مخزون ورصيد):</span>
                   <span className="text-[11px] text-amber-700">المستلم التراكمي: {passportFormsStock.urgentTotalReceived || 0}</span>
                 </div>
                 <span className="text-[10px] bg-amber-100/80 text-amber-900 border border-amber-300 font-bold px-2 py-0.5 rounded-md">
@@ -908,7 +908,7 @@ export default function SettingsConfig({
               </div>
 
               <div className="space-y-1">
-                <label className="text-[11px] font-bold text-slate-700 block">عدد استمارات العاجل:</label>
+                <label className="text-[11px] font-bold text-slate-700 block">عدد استمارات السريع:</label>
                 <input
                   type="number"
                   min="0"
@@ -1019,7 +1019,7 @@ export default function SettingsConfig({
                     <div className="flex items-center gap-3">
                       <span className="font-mono text-slate-500 font-bold">{log.date}</span>
                       <span className="text-emerald-800 font-bold">عادي: +{log.normalAdded}</span>
-                      <span className="text-amber-800 font-bold">عاجل: +{log.urgentAdded}</span>
+                      <span className="text-amber-800 font-bold">سريع: +{log.urgentAdded}</span>
                       {log.notes && <span className="text-slate-500 text-[11px]">({log.notes})</span>}
                     </div>
                   </div>

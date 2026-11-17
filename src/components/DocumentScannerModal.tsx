@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from "react";
-import { Camera, Upload, RefreshCw, CheckCircle2, AlertCircle, X, Sparkles, User, FileText, ArrowRight, ShieldCheck, HelpCircle, Video } from "lucide-react";
+import { Camera, Upload, RefreshCw, CheckCircle2, AlertCircle, X, Sparkles, User, FileText, ArrowRight, ShieldCheck, HelpCircle, Video, Zap } from "lucide-react";
 import { scanDocumentWithAI } from "../lib/api";
 import { PotentialCustomer, DictionaryItem, DEFAULT_APPLICANT_CAPACITIES } from "../types";
 import { breakdownArabicName } from "../lib/dictionary";
+import { extractBirthDateFromNationalId, normalizeDigits } from "../lib/fastCustomerParser";
 
 // Client-side image optimizer: downscales large smartphone photos (e.g. 10MB) to crisp 1600px
 // Client-side image optimizer: downscales large smartphone photos to lightweight 1100px (~120KB)
@@ -315,6 +316,33 @@ export default function DocumentScannerModal({
     }
   };
 
+  // Capture photo locally and skip AI OCR completely for instant manual entry
+  const handleCaptureWithoutAI = async () => {
+    const photo = await capturePhoto();
+    stopCamera();
+    if (photo) {
+      if (flow === "birth_certificate") {
+        setBirthImage(photo);
+      } else if (idStep === "front") {
+        setFrontImage(photo);
+      } else if (idStep === "back") {
+        setBackImage(photo);
+      }
+    }
+    setIsScanning(false);
+    setScanMessage("");
+    setIdStep("verify");
+  };
+
+  // Skip AI right away from upload/scanning state
+  const handleSkipToFastEntry = () => {
+    stopCamera();
+    setIsScanning(false);
+    setScanMessage("");
+    setErrorNotice(null);
+    setIdStep("verify");
+  };
+
   // Reset scanner for fresh start
   const handleReset = () => {
     stopCamera();
@@ -516,6 +544,14 @@ export default function DocumentScannerModal({
                       <p className="text-sm font-bold text-slate-900">{scanMessage}</p>
                       <p className="text-xs text-slate-500">جاري معالجة وتدقيق الأحرف عبر نموذج Gemini Vision...</p>
                     </div>
+                    <button
+                      type="button"
+                      onClick={handleSkipToFastEntry}
+                      className="mt-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer transition-all"
+                    >
+                      <Zap className="w-4 h-4 text-amber-300" />
+                      <span>⚡ تأخر الذكاء الاصطناعي؟ تخطي والكتابة الفورية الآن</span>
+                    </button>
                   </div>
                 ) : useCamera ? (
                   <div className="w-full flex flex-col items-center space-y-3">
@@ -529,14 +565,24 @@ export default function DocumentScannerModal({
                       </div>
                     </div>
                     
-                    <div className="flex items-center gap-3">
+                    <div className="flex flex-wrap items-center justify-center gap-2">
                       <button
                         type="button"
                         onClick={handleCaptureClick}
-                        className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white rounded-xl text-sm font-black flex items-center gap-2 shadow-md cursor-pointer transition-all"
+                        className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white rounded-xl text-xs sm:text-sm font-black flex items-center gap-2 shadow-md cursor-pointer transition-all"
                       >
-                        <Camera className="w-5 h-5 text-emerald-300" />
-                        <span>📸 التقاط الصورة الآن</span>
+                        <Camera className="w-4 h-4 text-emerald-300" />
+                        <span>📸 التقاط وقراءة ذكية</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleCaptureWithoutAI}
+                        className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer transition-all"
+                        title="التقاط الصورة والكتابة فوراً بدون انتظار الذكاء الاصطناعي"
+                      >
+                        <Zap className="w-4 h-4 text-amber-300" />
+                        <span>⚡ التقاط + كتابة فورية (بدون AI)</span>
                       </button>
 
                       <button
@@ -603,18 +649,26 @@ export default function DocumentScannerModal({
                       />
                     </div>
 
-                    {/* Quick bypass if user wants to skip back of card */}
-                    {flow === "id_card" && idStep === "back" && (
-                      <div className="pt-2">
+                    {/* Fast bypass without AI or skipping back of card */}
+                    <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
+                      {flow === "id_card" && idStep === "back" && (
                         <button
                           type="button"
                           onClick={() => setIdStep("verify")}
-                          className="text-xs text-indigo-600 hover:underline font-bold"
+                          className="text-xs text-indigo-600 hover:underline font-bold cursor-pointer"
                         >
                           تخطي تصوير الظهر وكتابة المهنة يدوياً &larr;
                         </button>
-                      </div>
-                    )}
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleSkipToFastEntry}
+                        className="px-3.5 py-1.5 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 text-emerald-800 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer transition-colors"
+                      >
+                        <Zap className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>تخطي الذكاء الاصطناعي والكتابة الفورية</span>
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -684,8 +738,12 @@ export default function DocumentScannerModal({
                     maxLength={14}
                     value={nationalId}
                     onChange={(e) => {
-                      const val = e.target.value.replace(/\D/g, "");
+                      const val = normalizeDigits(e.target.value).replace(/\D/g, "").slice(0, 14);
                       setNationalId(val);
+                      if (val.length === 14) {
+                        const bd = extractBirthDateFromNationalId(val);
+                        if (bd) setBirthDate(bd);
+                      }
                     }}
                     placeholder="29508121601234"
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-900 tracking-wider focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
