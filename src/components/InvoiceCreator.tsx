@@ -1096,7 +1096,7 @@ export default function InvoiceCreator({
                       className={`w-full bg-slate-50 border rounded-xl px-4 py-3 text-sm focus:outline-hidden focus:ring-2 transition-all ${
                         errors[`c-${cIdx}-arabicName`] 
                           ? "border-rose-400 focus:ring-rose-200 text-rose-900 bg-rose-50/20" 
-                          : "border-slate-200 focus:border-blue-500 focus:ring-blue-100"
+                          : "border-slate-200 focus:border-red-500 focus:ring-red-100"
                       }`}
                       required
                     />
@@ -1129,7 +1129,7 @@ export default function InvoiceCreator({
                       className={`w-full bg-slate-50 border rounded-xl px-4 py-3 text-sm focus:outline-hidden focus:ring-2 transition-all ${
                         errors[`c-${cIdx}-phone`] 
                           ? "border-rose-400 focus:ring-rose-200 text-rose-900 bg-rose-50/20" 
-                          : "border-slate-200 focus:border-blue-500 focus:ring-blue-100"
+                          : "border-slate-200 focus:border-red-500 focus:ring-red-100"
                       }`}
                       required
                     />
@@ -1193,7 +1193,7 @@ export default function InvoiceCreator({
                               setCustomers(updated);
                             }}
                             placeholder="YYYY/MM/DD (أو من الرقم القومي)"
-                            className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-3 py-2.5 text-xs font-mono font-bold focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                            className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-3 py-2.5 text-xs font-mono font-bold focus:outline-hidden focus:border-red-500 focus:ring-2 focus:ring-red-200"
                           />
                         </div>
                       </div>
@@ -1261,7 +1261,7 @@ export default function InvoiceCreator({
                               setErrors(errs);
                             }
                           }}
-                          className={`w-full bg-slate-50 border rounded-xl px-3 py-2.5 text-xs font-bold font-cairo focus:outline-hidden focus:ring-2 focus:ring-blue-500 cursor-pointer shadow-xs transition-all ${
+                          className={`w-full bg-slate-50 border rounded-xl px-3 py-2.5 text-xs font-bold font-cairo focus:outline-hidden focus:border-red-500 focus:ring-2 focus:ring-red-200 cursor-pointer shadow-xs transition-all ${
                             errors[`c-${cIdx}-applicantCapacity`]
                               ? "border-rose-400 bg-rose-50/40 text-rose-900 ring-2 ring-rose-200"
                               : !customer.applicantCapacity
@@ -1600,7 +1600,7 @@ export default function InvoiceCreator({
                             <select
                               value={srv.serviceId}
                               onChange={(e) => handleServiceChange(cIdx, sIdx, e.target.value)}
-                              className={`w-full bg-white border rounded-lg px-3 py-2 text-xs focus:outline-hidden ${
+                              className={`w-full bg-white border rounded-lg px-3 py-2 text-xs focus:outline-hidden focus:border-red-500 focus:ring-2 focus:ring-red-200 transition-all ${
                                 errors[`c-${cIdx}-s-${sIdx}-id`] ? "border-rose-400 text-rose-900 bg-rose-50/20" : "border-slate-200"
                               }`}
                               required
@@ -1622,7 +1622,7 @@ export default function InvoiceCreator({
                               min="1"
                               value={srv.quantity}
                               onChange={(e) => handleQtyChange(cIdx, sIdx, parseInt(e.target.value) || 1)}
-                              className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-hidden font-mono"
+                              className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-hidden focus:border-red-500 focus:ring-2 focus:ring-red-200 font-mono transition-all"
                               required
                             />
                           </div>

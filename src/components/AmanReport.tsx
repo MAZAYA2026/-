@@ -2162,7 +2162,7 @@ export default function AmanReport({
                                     {!hasPrefixedNumberInInput && (
                                       <span 
                                         className={`shrink-0 font-bold font-mono ml-1 select-none print:hidden ${
-                                          isUrgentRow && !isEnglishDetected ? "text-emerald-800" : "text-slate-800"
+                                          isUrgentRow && !isEnglishDetected ? "text-red-600" : "text-slate-800"
                                         }`}
                                         style={{ fontFamily: "'Cairo', sans-serif", fontSize: calculatedFontSize }}
                                       >
@@ -2179,7 +2179,7 @@ export default function AmanReport({
                                         isEnglishDetected
                                           ? "bg-amber-100 text-amber-950 ring-2 ring-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-600"
                                           : isUrgentRow
-                                            ? "bg-transparent text-emerald-800 focus:outline-none focus:ring-1 focus:ring-emerald-600 focus:bg-emerald-50/60"
+                                            ? "bg-transparent text-red-600 focus:outline-none focus:ring-1 focus:ring-red-600 focus:bg-red-50/60"
                                             : "bg-transparent text-black focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-blue-50/70"
                                       } rounded-xs`}
                                       style={{ 
@@ -2234,7 +2234,7 @@ export default function AmanReport({
                                 onBlur={() => handleCellBlur(globalIndex)}
                                 className={`w-full h-full bg-transparent border-0 px-1 text-center font-bold rounded-xs transition-colors print:hidden ${
                                   isUrgentRow
-                                    ? "text-emerald-800 focus:outline-none focus:ring-1 focus:ring-emerald-600 focus:bg-emerald-50/60"
+                                    ? "text-red-600 focus:outline-none focus:ring-1 focus:ring-red-600 focus:bg-red-50/60"
                                     : "text-black focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-blue-50/70"
                                 }`}
                                 style={{ 
