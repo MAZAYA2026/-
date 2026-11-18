@@ -379,8 +379,8 @@ export default function AmanReport({
 
   // Quick Stock Management Modal state in Aman Report
   const [isStockModalOpen, setIsStockModalOpen] = useState(false);
-  const [stockAddNormalInput, setStockAddNormalInput] = useState<number | "">("");
-  const [stockAddUrgentInput, setStockAddUrgentInput] = useState<number | "">("");
+  const [stockAddNormalInput, setStockAddNormalInput] = useState<string>("");
+  const [stockAddUrgentInput, setStockAddUrgentInput] = useState<string>("");
   const [stockAddNotesInput, setStockAddNotesInput] = useState("");
   const [stockModalFeedback, setStockModalFeedback] = useState("");
   const [stockModalLoading, setStockModalLoading] = useState(false);
@@ -1468,11 +1468,11 @@ export default function AmanReport({
     };
   }, [settings?.passportFormsStock, overallStats.normalCount, overallStats.urgentCount, invoices, services, tableRows, governmentFines]);
 
-  // Handler to add or save forms stock directly from Aman Report
+  // Handler to add or adjust (including negative correction) forms stock directly from Aman Report
   const handleSaveStockFromAman = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    const addN = Number(stockAddNormalInput) || 0;
-    const addU = Number(stockAddUrgentInput) || 0;
+    const addN = parseInt(stockAddNormalInput, 10) || 0;
+    const addU = parseInt(stockAddUrgentInput, 10) || 0;
     if (addN === 0 && addU === 0) return;
 
     setStockModalLoading(true);
@@ -1483,17 +1483,30 @@ export default function AmanReport({
         urgentTotalReceived: 0,
         logs: [],
       };
+      const prevNormal = Number(currentStock.normalTotalReceived) || 0;
+      const prevUrgent = Number(currentStock.urgentTotalReceived) || 0;
+      const nextNormal = Math.max(0, prevNormal + addN);
+      const nextUrgent = Math.max(0, prevUrgent + addU);
+      const deltaN = nextNormal - prevNormal;
+      const deltaU = nextUrgent - prevUrgent;
+
+      if (deltaN === 0 && deltaU === 0) {
+        setStockModalFeedback("المخزون المستلم يساوي صفر بالفعل ولا يمكن إنقاصه أكثر.");
+        setStockModalLoading(false);
+        return;
+      }
+
       const today = new Date().toISOString().split("T")[0];
       const newLog = {
         id: `stock-log-${Date.now()}`,
         date: today,
-        normalAdded: addN,
-        urgentAdded: addU,
-        notes: stockAddNotesInput.trim() || undefined,
+        normalAdded: deltaN,
+        urgentAdded: deltaU,
+        notes: stockAddNotesInput.trim() || (deltaN < 0 || deltaU < 0 ? "تصحيح وخصم كمية" : undefined),
       };
       const updatedStock = {
-        normalTotalReceived: (currentStock.normalTotalReceived || 0) + addN,
-        urgentTotalReceived: (currentStock.urgentTotalReceived || 0) + addU,
+        normalTotalReceived: nextNormal,
+        urgentTotalReceived: nextUrgent,
         logs: [newLog, ...(currentStock.logs || [])],
       };
 
@@ -1510,14 +1523,18 @@ export default function AmanReport({
       if (onSettingsUpdated) {
         onSettingsUpdated(result);
       }
-      setStockModalFeedback("تم تسجيل استلام الاستمارات بنجاح وتحديث رصيد المخزون! 📦✅");
+      setStockModalFeedback(
+        deltaN < 0 || deltaU < 0
+          ? "تم تصحيح وتعديل عدد الاستمارات المستلمة في المخزون بنجاح! 📦✅"
+          : "تم تسجيل استلام الاستمارات بنجاح وتحديث رصيد المخزون! 📦✅"
+      );
       setStockAddNormalInput("");
       setStockAddUrgentInput("");
       setStockAddNotesInput("");
       setTimeout(() => {
         setStockModalFeedback("");
         setIsStockModalOpen(false);
-      }, 2500);
+      }, 2200);
     } catch (err: any) {
       alert("حدث خطأ أثناء حفظ رصيد الاستمارات: " + err.message);
     } finally {
@@ -2922,52 +2939,96 @@ export default function AmanReport({
                 </div>
               )}
 
-              {/* Add form */}
+              {/* Add / Adjust form */}
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-3">
-                <h4 className="text-xs font-bold text-slate-800">إضافة كمية استمارات جديدة مستلمة:</h4>
+                <div>
+                  <h4 className="text-xs font-bold text-slate-800">إضافة أو تعديل (خصم) كمية الاستمارات المستلمة:</h4>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    أدخل رقماً موجباً للإضافة أو <strong className="text-rose-700">رقماً سالباً (مثل -5)</strong> لخصم وتصحيح خطأ سابق.
+                  </p>
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-1">
                     <label className="text-[11px] font-bold text-slate-700 block">
-                      عدد استمارات العادي الواردة:
+                      عدد استمارات العادي (+ أو -):
                     </label>
                     <input
-                      type="number"
-                      min="0"
+                      type="text"
+                      inputMode="numeric"
+                      dir="ltr"
                       value={stockAddNormalInput}
-                      onChange={(e) => setStockAddNormalInput(e.target.value === "" ? "" : Math.max(0, parseInt(e.target.value) || 0))}
-                      placeholder="0"
-                      className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono font-bold text-emerald-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (/^-?\d*$/.test(val)) setStockAddNormalInput(val);
+                      }}
+                      placeholder="0 أو -5"
+                      className={`w-full bg-white border rounded-xl px-3 py-2 text-xs font-mono font-bold text-left focus:outline-none focus:ring-2 ${
+                        stockAddNormalInput.startsWith("-")
+                          ? "border-rose-300 text-rose-700 focus:ring-rose-500"
+                          : "border-slate-300 text-emerald-900 focus:ring-emerald-500"
+                      }`}
                     />
                   </div>
 
                   <div className="space-y-1">
                     <label className="text-[11px] font-bold text-slate-700 block">
-                      عدد استمارات السريع الواردة:
+                      عدد استمارات السريع (+ أو -):
                     </label>
                     <input
-                      type="number"
-                      min="0"
+                      type="text"
+                      inputMode="numeric"
+                      dir="ltr"
                       value={stockAddUrgentInput}
-                      onChange={(e) => setStockAddUrgentInput(e.target.value === "" ? "" : Math.max(0, parseInt(e.target.value) || 0))}
-                      placeholder="0"
-                      className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono font-bold text-amber-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (/^-?\d*$/.test(val)) setStockAddUrgentInput(val);
+                      }}
+                      placeholder="0 أو -5"
+                      className={`w-full bg-white border rounded-xl px-3 py-2 text-xs font-mono font-bold text-left focus:outline-none focus:ring-2 ${
+                        stockAddUrgentInput.startsWith("-")
+                          ? "border-rose-300 text-rose-700 focus:ring-rose-500"
+                          : "border-slate-300 text-amber-900 focus:ring-amber-500"
+                      }`}
                     />
                   </div>
                 </div>
 
                 <div className="space-y-1">
                   <label className="text-[11px] font-bold text-slate-700 block">
-                    ملاحظات الدفعة (اختياري):
+                    ملاحظات الدفعة / سبب التصحيح (اختياري):
                   </label>
                   <input
                     type="text"
                     value={stockAddNotesInput}
                     onChange={(e) => setStockAddNotesInput(e.target.value)}
-                    placeholder="مثال: دفعة جديدة من قسم الجوازات..."
+                    placeholder="مثال: دفعة جديدة أو تصحيح عدد خطأ..."
                     className="w-full bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 font-cairo"
                   />
                 </div>
               </div>
+
+              {/* Recent stock logs */}
+              {settings?.passportFormsStock?.logs && settings.passportFormsStock.logs.length > 0 && (
+                <div className="space-y-1.5">
+                  <span className="text-[11px] font-bold text-slate-600 block">آخر حركات المخزون المسجلة:</span>
+                  <div className="max-h-28 overflow-y-auto space-y-1 pr-1">
+                    {settings.passportFormsStock.logs.slice(0, 6).map((log) => (
+                      <div key={log.id} className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 flex items-center justify-between text-[11px]">
+                        <div className="flex items-center gap-2.5 flex-wrap">
+                          <span className="font-mono text-slate-500 font-bold">{log.date}</span>
+                          <span className={`font-bold ${log.normalAdded < 0 ? "text-rose-700" : "text-emerald-800"}`}>
+                            عادي: {log.normalAdded > 0 ? `+${log.normalAdded}` : log.normalAdded}
+                          </span>
+                          <span className={`font-bold ${log.urgentAdded < 0 ? "text-rose-700" : "text-amber-800"}`}>
+                            سريع: {log.urgentAdded > 0 ? `+${log.urgentAdded}` : log.urgentAdded}
+                          </span>
+                          {log.notes && <span className="text-slate-500">({log.notes})</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
                 <button
@@ -2979,11 +3040,14 @@ export default function AmanReport({
                 </button>
                 <button
                   type="submit"
-                  disabled={stockModalLoading || (!stockAddNormalInput && !stockAddUrgentInput)}
+                  disabled={
+                    stockModalLoading ||
+                    ((parseInt(stockAddNormalInput, 10) || 0) === 0 && (parseInt(stockAddUrgentInput, 10) || 0) === 0)
+                  }
                   className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs disabled:opacity-50"
                 >
                   <Save className="w-4 h-4" />
-                  <span>{stockModalLoading ? "جاري الحفظ..." : "حفظ وتأكيد الإضافة للمخزون 💾"}</span>
+                  <span>{stockModalLoading ? "جاري الحفظ..." : "حفظ وتأكيد التحديث بالمخزون 💾"}</span>
                 </button>
               </div>
             </form>

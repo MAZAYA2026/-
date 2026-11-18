@@ -120,11 +120,17 @@ export default function SettingsConfig({
       logs: [],
     };
   });
-  const [stockAddNormal, setStockAddNormal] = useState<number | "">("");
-  const [stockAddUrgent, setStockAddUrgent] = useState<number | "">("");
+  const [stockAddNormal, setStockAddNormal] = useState<string>("");
+  const [stockAddUrgent, setStockAddUrgent] = useState<string>("");
   const [stockAddNotes, setStockAddNotes] = useState<string>("");
   const [stockFeedback, setStockFeedback] = useState<string>("");
   const [stockSaveLoading, setStockSaveLoading] = useState(false);
+
+  useEffect(() => {
+    if (settings.passportFormsStock) {
+      setPassportFormsStock(settings.passportFormsStock);
+    }
+  }, [settings.passportFormsStock]);
 
   // Passport forms stock calculation: deducts all executed passport operations (#) across invoices
   const formsStockUsedStats = useMemo(() => {
@@ -140,7 +146,7 @@ export default function SettingsConfig({
             const matched = (services || []).find((srv) => srv.id === srvId || srv.name === srvId);
             const fullName = matched?.name || srvId;
             if (fullName.startsWith("#") && !fullName.startsWith("##")) {
-              const isUrgent = fullName.includes("مستعجل") || fullName.includes("عاجل") || fullName.includes("فورى");
+              const isUrgent = fullName.includes("مستعجل") || fullName.includes("عاجل") || fullName.includes("سريع") || fullName.includes("فورى");
               const qty = Number(s.quantity) || 1;
               if (isUrgent) {
                 allUrgentUsed += qty;
@@ -893,45 +899,66 @@ export default function SettingsConfig({
             </div>
           </div>
 
-          {/* Add Daily Forms Form */}
+          {/* Add / Adjust Daily Forms Form */}
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
-            <h4 className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-              <Plus className="w-4 h-4 text-emerald-600" />
-              <span>إضافة استمارات جديدة مستلمة اليوم:</span>
-            </h4>
+            <div>
+              <h4 className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                <Plus className="w-4 h-4 text-emerald-600" />
+                <span>إضافة أو تعديل (خصم بالسالب) استمارات مستلمة:</span>
+              </h4>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                أدخل رقماً موجباً للإضافة أو <strong className="text-rose-700">رقماً سالباً (مثل -5)</strong> لخصم وتصحيح كمية تم إدخالها بالخطأ.
+              </p>
+            </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="space-y-1">
-                <label className="text-[11px] font-bold text-slate-700 block">عدد استمارات العادي:</label>
+                <label className="text-[11px] font-bold text-slate-700 block">عدد استمارات العادي (+ أو -):</label>
                 <input
-                  type="number"
-                  min="0"
+                  type="text"
+                  inputMode="numeric"
+                  dir="ltr"
                   value={stockAddNormal}
-                  onChange={(e) => setStockAddNormal(e.target.value === "" ? "" : Math.max(0, parseInt(e.target.value) || 0))}
-                  placeholder="0"
-                  className="w-full bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-mono font-bold text-emerald-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (/^-?\d*$/.test(val)) setStockAddNormal(val);
+                  }}
+                  placeholder="0 أو -5"
+                  className={`w-full bg-white border rounded-xl px-3 py-1.5 text-xs font-mono font-bold text-left focus:outline-none focus:ring-1 ${
+                    stockAddNormal.startsWith("-")
+                      ? "border-rose-300 text-rose-700 focus:ring-rose-500"
+                      : "border-slate-300 text-emerald-900 focus:ring-emerald-500"
+                  }`}
                 />
               </div>
 
               <div className="space-y-1">
-                <label className="text-[11px] font-bold text-slate-700 block">عدد استمارات السريع:</label>
+                <label className="text-[11px] font-bold text-slate-700 block">عدد استمارات السريع (+ أو -):</label>
                 <input
-                  type="number"
-                  min="0"
+                  type="text"
+                  inputMode="numeric"
+                  dir="ltr"
                   value={stockAddUrgent}
-                  onChange={(e) => setStockAddUrgent(e.target.value === "" ? "" : Math.max(0, parseInt(e.target.value) || 0))}
-                  placeholder="0"
-                  className="w-full bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-mono font-bold text-amber-900 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (/^-?\d*$/.test(val)) setStockAddUrgent(val);
+                  }}
+                  placeholder="0 أو -5"
+                  className={`w-full bg-white border rounded-xl px-3 py-1.5 text-xs font-mono font-bold text-left focus:outline-none focus:ring-1 ${
+                    stockAddUrgent.startsWith("-")
+                      ? "border-rose-300 text-rose-700 focus:ring-rose-500"
+                      : "border-slate-300 text-amber-900 focus:ring-amber-500"
+                  }`}
                 />
               </div>
 
               <div className="space-y-1">
-                <label className="text-[11px] font-bold text-slate-700 block">ملاحظات الاستلام (اختياري):</label>
+                <label className="text-[11px] font-bold text-slate-700 block">ملاحظات الاستلام / سبب التصحيح (اختياري):</label>
                 <input
                   type="text"
                   value={stockAddNotes}
                   onChange={(e) => setStockAddNotes(e.target.value)}
-                  placeholder="دفعة صباحية من الجوازات..."
+                  placeholder="دفعة صباحية أو تصحيح خطأ..."
                   className="w-full bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500 font-cairo"
                 />
               </div>
@@ -947,11 +974,27 @@ export default function SettingsConfig({
 
               <button
                 type="button"
-                disabled={stockSaveLoading || (!stockAddNormal && !stockAddUrgent)}
+                disabled={
+                  stockSaveLoading ||
+                  ((parseInt(stockAddNormal, 10) || 0) === 0 && (parseInt(stockAddUrgent, 10) || 0) === 0)
+                }
                 onClick={async () => {
-                  const addN = Number(stockAddNormal) || 0;
-                  const addU = Number(stockAddUrgent) || 0;
+                  const addN = parseInt(stockAddNormal, 10) || 0;
+                  const addU = parseInt(stockAddUrgent, 10) || 0;
                   if (addN === 0 && addU === 0) return;
+
+                  const prevNormal = Number(passportFormsStock.normalTotalReceived) || 0;
+                  const prevUrgent = Number(passportFormsStock.urgentTotalReceived) || 0;
+                  const nextNormal = Math.max(0, prevNormal + addN);
+                  const nextUrgent = Math.max(0, prevUrgent + addU);
+                  const deltaN = nextNormal - prevNormal;
+                  const deltaU = nextUrgent - prevUrgent;
+
+                  if (deltaN === 0 && deltaU === 0) {
+                    setStockFeedback("المخزون المستلم يساوي صفر بالفعل ولا يمكن إنقاصه أكثر.");
+                    setTimeout(() => setStockFeedback(""), 4000);
+                    return;
+                  }
 
                   setStockSaveLoading(true);
                   try {
@@ -959,13 +1002,13 @@ export default function SettingsConfig({
                     const newLog = {
                       id: `stock-log-${Date.now()}`,
                       date: today,
-                      normalAdded: addN,
-                      urgentAdded: addU,
-                      notes: stockAddNotes.trim() || undefined,
+                      normalAdded: deltaN,
+                      urgentAdded: deltaU,
+                      notes: stockAddNotes.trim() || (deltaN < 0 || deltaU < 0 ? "تصحيح وخصم كمية" : undefined),
                     };
                     const updatedStock = {
-                      normalTotalReceived: (passportFormsStock.normalTotalReceived || 0) + addN,
-                      urgentTotalReceived: (passportFormsStock.urgentTotalReceived || 0) + addU,
+                      normalTotalReceived: nextNormal,
+                      urgentTotalReceived: nextUrgent,
                       logs: [newLog, ...(passportFormsStock.logs || [])],
                     };
                     setPassportFormsStock(updatedStock);
@@ -999,7 +1042,11 @@ export default function SettingsConfig({
 
                     const result = await updateSettingsOnServer(payload);
                     onSettingsUpdated(result);
-                    setStockFeedback("تمت إضافة الاستمارات وتحديث رصيد المخزون بنجاح! 📦✅");
+                    setStockFeedback(
+                      deltaN < 0 || deltaU < 0
+                        ? "تم تصحيح وتعديل عدد الاستمارات المستلمة في المخزون بنجاح! 📦✅"
+                        : "تمت إضافة الاستمارات وتحديث رصيد المخزون بنجاح! 📦✅"
+                    );
                     setTimeout(() => setStockFeedback(""), 4000);
                   } catch (err: any) {
                     alert("حدث خطأ أثناء حفظ رصيد الاستمارات: " + err.message);
@@ -1010,7 +1057,7 @@ export default function SettingsConfig({
                 className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs disabled:opacity-50"
               >
                 <Plus className="w-4 h-4" />
-                <span>{stockSaveLoading ? "جاري الحفظ..." : "إضافة وتأكيد الاستلام ➕"}</span>
+                <span>{stockSaveLoading ? "جاري الحفظ..." : "حفظ وتأكيد التحديث بالمخزون 💾"}</span>
               </button>
             </div>
           </div>
@@ -1018,14 +1065,18 @@ export default function SettingsConfig({
           {/* Logs of Received Forms */}
           {passportFormsStock.logs && passportFormsStock.logs.length > 0 && (
             <div className="space-y-2 pt-1">
-              <span className="text-xs font-bold text-slate-700 block">سجل الاستلامات السابقة:</span>
+              <span className="text-xs font-bold text-slate-700 block">سجل الاستلامات والتعديلات السابقة:</span>
               <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
                 {passportFormsStock.logs.map((log) => (
                   <div key={log.id} className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 flex items-center justify-between text-xs">
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 flex-wrap">
                       <span className="font-mono text-slate-500 font-bold">{log.date}</span>
-                      <span className="text-emerald-800 font-bold">عادي: +{log.normalAdded}</span>
-                      <span className="text-amber-800 font-bold">سريع: +{log.urgentAdded}</span>
+                      <span className={`font-bold ${log.normalAdded < 0 ? "text-rose-700" : "text-emerald-800"}`}>
+                        عادي: {log.normalAdded > 0 ? `+${log.normalAdded}` : log.normalAdded}
+                      </span>
+                      <span className={`font-bold ${log.urgentAdded < 0 ? "text-rose-700" : "text-amber-800"}`}>
+                        سريع: {log.urgentAdded > 0 ? `+${log.urgentAdded}` : log.urgentAdded}
+                      </span>
                       {log.notes && <span className="text-slate-500 text-[11px]">({log.notes})</span>}
                     </div>
                   </div>
