@@ -3382,6 +3382,563 @@ app.post("/api/sheets/webhook/sync-potential-customers", async (req, res) => {
   }
 });
 
+// ==========================================
+// Mojeeb WhatsApp Business API Proxy Route
+// POST https://api.mojeeb.app/v1/whatsapp/messages
+// Keeps MOJEEB_API_KEY strictly server-side in process.env
+// ==========================================
+const MOJEEB_MESSAGES_URL = "https://api.mojeeb.app/v1/whatsapp/messages";
+const MOJEEB_TEMPLATES_URL = "https://api.mojeeb.app/v1/whatsapp/templates";
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const E164_REGEX = /^\+[1-9]\d{6,14}$/;
+const META_TEMPLATE_LANG_REGEX = /^[a-zA-Z]{2,3}(_[a-zA-Z0-9]{2,8})?$/;
+
+function normalizePhoneToE164Server(rawPhone: string): string {
+  const western = String(rawPhone || "")
+    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0))
+    .trim();
+
+  if (!western) return "";
+
+  const hadPlus = western.startsWith("+");
+  let digits = western.replace(/\D/g, "");
+  if (!digits) return "";
+
+  if (digits.startsWith("00")) {
+    return `+${digits.slice(2)}`;
+  }
+  if (hadPlus) {
+    return `+${digits}`;
+  }
+  if (digits.startsWith("0") && digits.length === 11) {
+    return `+2${digits}`;
+  }
+  if (digits.length === 10 && digits.startsWith("1")) {
+    return `+20${digits}`;
+  }
+  if (digits.startsWith("20") && digits.length === 12) {
+    return `+${digits}`;
+  }
+  return `+${digits}`;
+}
+
+function isSafePublicHttpsUrl(rawUrl: string): boolean {
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== "https:") return false;
+    const host = parsed.hostname.toLowerCase();
+    if (
+      host === "localhost" ||
+      host === "127.0.0.1" ||
+      host === "::1" ||
+      host === "0.0.0.0" ||
+      host === "169.254.169.254" ||
+      host.startsWith("10.") ||
+      host.startsWith("192.168.") ||
+      /^172\.(1[6-9]|2\d|3[0-1])\./.test(host) ||
+      host.endsWith(".local")
+    ) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function mapMojeebErrorByCode(code: string, details: any, retryAfter?: string | null): string {
+  switch (code) {
+    case "invalid_request_body":
+      return `بيانات الطلب غير مكتملة أو تجاوزت الحد المسموح${details?.param ? ` (الحقل: ${details.param})` : ""}.`;
+    case "invalid_phone_number":
+      return "رقم هاتف العميل المستلم (to) غير صالح بصيغة E.164 الدولية (مثال: +2010xxxxxxxx).";
+    case "recipient_required":
+      return "يجب تحديد رقم هاتف المستلم (to) أو اسم المستخدم في واتساب (recipient_username).";
+    case "recipient_conflict":
+      return "لا يمكن إرسال رقم الهاتف واسم المستخدم معاً — أرسل أحدهما فقط.";
+    case "recipient_not_found":
+      return "لم يراسل أي عميل بهذا الاسم (recipient_username) أرقام واتساب الوكيل على هذا الحساب من قبل.";
+    case "invalid_from_phone":
+      return "رقم واتساب الأعمال المُرسِل (from) غير صالح بصيغة E.164 الدولية (مثال: +2010xxxxxxxx).";
+    case "from_phone_not_found_for_agent": {
+      const phones = Array.isArray(details?.available_phones) && details.available_phones.length > 0
+        ? ` الأرقام المتاحة على الوكيل: ${details.available_phones.join(" , ")}`
+        : "";
+      return `رقم الإرسال (from) لا يطابق أي اتصال واتساب نشط على هذا الوكيل.${phones}`;
+    }
+    case "media_url_invalid":
+      return "رابط الملف (media_url) غير صالح أو غير قابل للقراءة من قِبل موقع مجيب.";
+    case "auth_template_needs_phone":
+      return "قوالب المصادقة (OTP) لا يمكن إرسالها باسم المستخدم في واتساب — يجب الإرسال برقم الهاتف (to) فقط.";
+    case "template_not_found": {
+      const templates = Array.isArray(details?.available_templates) && details.available_templates.length > 0
+        ? ` القوالب المتاحة على هذا الرقم: ${details.available_templates.join(" , ")}`
+        : "";
+      return `لا يوجد على هذا الاتصال قالب بهذا الاسم (template.name).${templates}`;
+    }
+    case "template_not_found_for_language": {
+      const langs = Array.isArray(details?.available_languages) && details.available_languages.length > 0
+        ? ` اللغات المتاحة لهذا القالب: ${details.available_languages.join(" , ")}`
+        : "";
+      return `القالب غير موجود برمز اللغة المحدد (template.language).${langs}`;
+    }
+    case "template_header_media_url_invalid":
+      return "رابط وسائط رأس القالب (header_media_url) غير صالح، أو ليس رابط HTTPS كاملاً، أو ملف مرفوع منتهي الصلاحية/لا يطابق صيغة الرأس.";
+    case "agent_not_authorized":
+      return "مفتاح API غير مصرّح له باستخدام هذا الوكيل (agent_id). راجع صلاحيات المفتاح في مجيب.";
+    case "insufficient_scope":
+      return "مفتاح API لا يمتلك صلاحية الإرسال المطلوبة (whatsapp:send).";
+    case "rate_limit_exceeded":
+      return `تم تجاوز حد الإرسال المسموح لمفتاح API.${retryAfter ? ` يرجى المحاولة بعد ${retryAfter} ثانية.` : ""}`;
+    case "video_send_rate_limited":
+      return `تم بلوغ الحد الأقصى لإرسال الفيديوهات (10 فيديوهات/دقيقة).${retryAfter ? ` أعد المحاولة بعد ${retryAfter} ثانية.` : ""}`;
+    default:
+      return details?.message || "تعذر إرسال رسالة الواتساب عبر موقع مجيب (Mojeeb API).";
+  }
+}
+
+app.post("/api/whatsapp/mojeeb/send", async (req, res) => {
+  const apiKey = (process.env.MOJEEB_API_KEY || "").trim();
+  if (!apiKey) {
+    return res.status(503).json({
+      code: "mojeeb_api_key_missing",
+      error: "مفتاح ربط موقع مجيب (MOJEEB_API_KEY) غير مضاف بعد في إعدادات الأسرار (Secrets) على الخادم. يرجى إضافته لتفعيل الإرسال عبر Mojeeb API.",
+    });
+  }
+
+  const db = readDB();
+  const {
+    to,
+    recipientUsername,
+    body,
+    mediaUrl,
+    idempotencyKey,
+    correlationId,
+    agentId: overrideAgentId,
+    from: overrideFrom,
+  } = req.body || {};
+
+  const resolvedAgentId = String(
+    overrideAgentId || db.settings?.mojeebAgentId || process.env.MOJEEB_AGENT_ID || ""
+  ).trim();
+  const resolvedFromRaw = String(
+    overrideFrom || db.settings?.mojeebFromPhone || process.env.MOJEEB_FROM_PHONE || ""
+  ).trim();
+  const resolvedFrom = normalizePhoneToE164Server(resolvedFromRaw);
+
+  if (!resolvedAgentId || !UUID_REGEX.test(resolvedAgentId)) {
+    return res.status(400).json({
+      code: "invalid_request_body",
+      error: "يرجى إدخال معرّف الوكيل (Agent ID - UUID) بشكل صحيح في إعدادات النظام (قسم ربط مجيب API).",
+    });
+  }
+
+  if (!resolvedFrom || !E164_REGEX.test(resolvedFrom)) {
+    return res.status(400).json({
+      code: "invalid_from_phone",
+      error: "يرجى إدخال رقم واتساب الأعمال المُرسِل (From) بصيغة E.164 الدولية (مثل +2010xxxxxxxx) في إعدادات النظام.",
+    });
+  }
+
+  const rawTo = typeof to === "string" ? to.trim() : "";
+  const rawUsername = typeof recipientUsername === "string" ? recipientUsername.trim() : "";
+
+  if (!rawTo && !rawUsername) {
+    return res.status(422).json({
+      code: "recipient_required",
+      error: "يجب توفير رقم هاتف العميل أو اسم مستخدم واتساب للإرسال.",
+    });
+  }
+
+  if (rawTo && rawUsername) {
+    return res.status(422).json({
+      code: "recipient_conflict",
+      error: "لا يمكن إرسال رقم الهاتف واسم المستخدم معاً — يرجى إرسال أحدهما فقط.",
+    });
+  }
+
+  let normalizedTo = "";
+  if (rawTo) {
+    normalizedTo = normalizePhoneToE164Server(rawTo);
+    if (!E164_REGEX.test(normalizedTo)) {
+      return res.status(422).json({
+        code: "invalid_phone_number",
+        error: `رقم هاتف العميل (${rawTo}) غير صالح بصيغة E.164 الدولية.`,
+      });
+    }
+    if (normalizedTo === resolvedFrom) {
+      return res.status(422).json({
+        code: "invalid_phone_number",
+        error: "لا يمكن الإرسال من رقم واتساب الأعمال إلى نفس الرقم (ميتا ترفض الإرسال للرقم نفسه).",
+      });
+    }
+  }
+
+  const messageBody = typeof body === "string" ? body.trim() : "";
+  const cleanMediaUrl = typeof mediaUrl === "string" ? mediaUrl.trim() : "";
+
+  if (!messageBody && !cleanMediaUrl) {
+    return res.status(422).json({
+      code: "invalid_request_body",
+      error: "يجب كتابة نص الرسالة أو إرفاق رابط ملف صالح (media_url).",
+    });
+  }
+
+  if (cleanMediaUrl && !isSafePublicHttpsUrl(cleanMediaUrl)) {
+    return res.status(422).json({
+      code: "media_url_invalid",
+      error: "يجب أن يكون رابط الملف (media_url) رابط HTTPS عاماً وصالحاً.",
+    });
+  }
+
+  const mojeebPayload: Record<string, any> = {
+    agent_id: resolvedAgentId,
+    from: resolvedFrom,
+  };
+
+  if (normalizedTo) {
+    mojeebPayload.to = normalizedTo;
+  } else {
+    mojeebPayload.recipient_username = rawUsername;
+  }
+
+  if (messageBody) {
+    mojeebPayload.text = { body: messageBody };
+  }
+  if (cleanMediaUrl) {
+    mojeebPayload.media_url = cleanMediaUrl;
+  }
+
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${apiKey}`,
+    "Content-Type": "application/json",
+  };
+
+  if (typeof idempotencyKey === "string" && idempotencyKey.trim().length > 0 && idempotencyKey.trim().length <= 128) {
+    headers["Idempotency-Key"] = idempotencyKey.trim();
+  }
+  if (typeof correlationId === "string" && /^[a-zA-Z0-9._-]{1,64}$/.test(correlationId.trim())) {
+    headers["X-Correlation-ID"] = correlationId.trim();
+  }
+
+  try {
+    const upstreamResponse = await fetchWithTimeout(
+      MOJEEB_MESSAGES_URL,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify(mojeebPayload),
+      },
+      15000
+    );
+
+    const retryAfter = upstreamResponse.headers.get("retry-after");
+    const responseCorrelationId = upstreamResponse.headers.get("x-correlation-id") || undefined;
+    const rawText = await upstreamResponse.text();
+    let parsed: any = null;
+    try {
+      parsed = rawText ? JSON.parse(rawText) : null;
+    } catch {
+      parsed = null;
+    }
+
+    if (upstreamResponse.status === 202 || upstreamResponse.ok) {
+      return res.status(upstreamResponse.status).json({
+        status: parsed?.status || "queued",
+        data: parsed || { id: "", status: "queued" },
+        correlationId: responseCorrelationId,
+        message: `تم إرسال الرسالة إلى طابور التسليم عبر مجيب API بنجاح ✅${parsed?.id ? ` (رقم الرسالة: ${parsed.id})` : ""}`,
+      });
+    }
+
+    const errObj = parsed?.error || parsed || {};
+    const errCode = typeof errObj.code === "string" ? errObj.code : `http_${upstreamResponse.status}`;
+    const friendlyError = mapMojeebErrorByCode(errCode, errObj, retryAfter);
+
+    return res.status(upstreamResponse.status >= 400 && upstreamResponse.status < 600 ? upstreamResponse.status : 502).json({
+      code: errCode,
+      error: friendlyError,
+      retryAfter: retryAfter || undefined,
+      availablePhones: Array.isArray(errObj.available_phones) ? errObj.available_phones : undefined,
+      correlationId: responseCorrelationId,
+    });
+  } catch (err: any) {
+    return res.status(502).json({
+      code: "mojeeb_network_error",
+      error: "تعذر الاتصال بخادم موقع مجيب (api.mojeeb.app) حالياً: " + (err?.message || "خطأ في الاتصال"),
+    });
+  }
+});
+
+// ==========================================
+// Mojeeb WhatsApp Approved Template Proxy Route
+// POST https://api.mojeeb.app/v1/whatsapp/templates
+// Sends pre-approved templates anytime (including first contact / outside Meta's 24h window)
+// ==========================================
+app.post("/api/whatsapp/mojeeb/template", async (req, res) => {
+  const apiKey = (process.env.MOJEEB_API_KEY || "").trim();
+  if (!apiKey) {
+    return res.status(503).json({
+      code: "mojeeb_api_key_missing",
+      error: "مفتاح ربط موقع مجيب (MOJEEB_API_KEY) غير مضاف بعد في إعدادات الأسرار (Secrets) على الخادم. يرجى إضافته لتفعيل إرسال القوالب عبر Mojeeb API.",
+    });
+  }
+
+  const db = readDB();
+  const {
+    to,
+    recipientUsername,
+    template,
+    idempotencyKey,
+    correlationId,
+    agentId: overrideAgentId,
+    from: overrideFrom,
+  } = req.body || {};
+
+  const resolvedAgentId = String(
+    overrideAgentId || db.settings?.mojeebAgentId || process.env.MOJEEB_AGENT_ID || ""
+  ).trim();
+  const resolvedFromRaw = String(
+    overrideFrom || db.settings?.mojeebFromPhone || process.env.MOJEEB_FROM_PHONE || ""
+  ).trim();
+  const resolvedFrom = normalizePhoneToE164Server(resolvedFromRaw);
+
+  if (!resolvedAgentId || !UUID_REGEX.test(resolvedAgentId)) {
+    return res.status(400).json({
+      code: "invalid_request_body",
+      error: "يرجى إدخال معرّف الوكيل (Agent ID - UUID) بشكل صحيح في إعدادات النظام (قسم ربط مجيب API).",
+    });
+  }
+
+  if (!resolvedFrom || !E164_REGEX.test(resolvedFrom)) {
+    return res.status(400).json({
+      code: "invalid_from_phone",
+      error: "يرجى إدخال رقم واتساب الأعمال المُرسِل (From) بصيغة E.164 الدولية (مثل +2010xxxxxxxx) في إعدادات النظام.",
+    });
+  }
+
+  const rawTo = typeof to === "string" ? to.trim() : "";
+  const rawUsername = typeof recipientUsername === "string" ? recipientUsername.trim() : "";
+
+  if (!rawTo && !rawUsername) {
+    return res.status(422).json({
+      code: "recipient_required",
+      error: "يجب توفير رقم هاتف العميل أو اسم مستخدم واتساب لإرسال القالب.",
+    });
+  }
+
+  if (rawTo && rawUsername) {
+    return res.status(422).json({
+      code: "recipient_conflict",
+      error: "لا يمكن إرسال رقم الهاتف واسم المستخدم معاً — يرجى إرسال أحدهما فقط.",
+    });
+  }
+
+  let normalizedTo = "";
+  if (rawTo) {
+    normalizedTo = normalizePhoneToE164Server(rawTo);
+    if (!E164_REGEX.test(normalizedTo)) {
+      return res.status(422).json({
+        code: "invalid_phone_number",
+        error: `رقم هاتف العميل (${rawTo}) غير صالح بصيغة E.164 الدولية.`,
+      });
+    }
+    if (normalizedTo === resolvedFrom) {
+      return res.status(422).json({
+        code: "invalid_phone_number",
+        error: "لا يمكن الإرسال من رقم واتساب الأعمال إلى نفس الرقم (ميتا ترفض الإرسال للرقم نفسه).",
+      });
+    }
+  }
+
+  if (!template || typeof template !== "object" || Array.isArray(template)) {
+    return res.status(422).json({
+      code: "invalid_request_body",
+      error: "بيانات القالب (template) مطلوبة لإرسال قالب واتساب.",
+    });
+  }
+
+  const templateName = typeof template.name === "string" ? template.name.trim() : "";
+  const templateLanguage = typeof template.language === "string" ? template.language.trim() : "";
+
+  if (!templateName || templateName.length > 512) {
+    return res.status(422).json({
+      code: "invalid_request_body",
+      error: "يرجى تحديد اسم القالب المعتمد لدى ميتا (template.name).",
+    });
+  }
+
+  if (!templateLanguage || !META_TEMPLATE_LANG_REGEX.test(templateLanguage)) {
+    return res.status(422).json({
+      code: "invalid_request_body",
+      error: "يرجى تحديد رمز لغة القالب الصحيح لدى ميتا (مثل ar أو ar_EG أو en أو en_US باستخدام شرطة سفلية _ عند وجود رمز دولة).",
+    });
+  }
+
+  const templateObj: Record<string, any> = {
+    name: templateName,
+    language: templateLanguage,
+  };
+
+  // Optional body parameters (flat key -> string value map; supports both positional "1" and named "customer_name")
+  if (template.parameters && typeof template.parameters === "object" && !Array.isArray(template.parameters)) {
+    const cleanParams: Record<string, string> = {};
+    for (const [k, v] of Object.entries(template.parameters)) {
+      const cleanKey = String(k || "").trim();
+      if (!cleanKey) continue;
+      cleanParams[cleanKey] = v === undefined || v === null ? "" : String(v);
+    }
+    if (Object.keys(cleanParams).length > 0) {
+      templateObj.parameters = cleanParams;
+    }
+  }
+
+  // Optional text header parameters (max 1 variable per Meta template rules)
+  if (template.header_parameters && typeof template.header_parameters === "object" && !Array.isArray(template.header_parameters)) {
+    const cleanHeaderParams: Record<string, string> = {};
+    const entries = Object.entries(template.header_parameters).filter(([k]) => String(k || "").trim().length > 0);
+    if (entries.length > 1) {
+      return res.status(422).json({
+        code: "invalid_request_body",
+        error: "رأس القالب النصي (header_parameters) يسمح بمتغيّر واحد كحد أقصى حسب قواعد ميتا.",
+      });
+    }
+    for (const [k, v] of entries) {
+      cleanHeaderParams[String(k).trim()] = v === undefined || v === null ? "" : String(v);
+    }
+    if (Object.keys(cleanHeaderParams).length > 0) {
+      templateObj.header_parameters = cleanHeaderParams;
+    }
+  }
+
+  // Optional header media URL (IMAGE / VIDEO / DOCUMENT) — strictly public HTTPS URL
+  if (typeof template.header_media_url === "string" && template.header_media_url.trim().length > 0) {
+    const cleanHeaderUrl = template.header_media_url.trim();
+    if (!isSafePublicHttpsUrl(cleanHeaderUrl)) {
+      return res.status(422).json({
+        code: "template_header_media_url_invalid",
+        error: "يجب أن يكون رابط وسائط رأس القالب (header_media_url) رابط https:// عاماً وكاملاً.",
+      });
+    }
+    templateObj.header_media_url = cleanHeaderUrl;
+  }
+
+  // Optional dynamic buttons[]
+  if (Array.isArray(template.buttons) && template.buttons.length > 0) {
+    const cleanButtons: Record<string, any>[] = [];
+    for (const btn of template.buttons) {
+      if (!btn || typeof btn !== "object") continue;
+      const idx = Number(btn.index);
+      if (!Number.isInteger(idx) || idx < 0 || idx > 20) {
+        return res.status(422).json({
+          code: "invalid_request_body",
+          error: "فهرس الزر (index) يجب أن يكون رقماً صحيحاً يبدأ من الصفر (0).",
+        });
+      }
+      const entry: Record<string, any> = { index: idx };
+      if (typeof btn.url_suffix === "string" && btn.url_suffix.trim().length > 0) {
+        entry.url_suffix = btn.url_suffix.trim();
+      } else if (typeof btn.otp_code === "string" && btn.otp_code.trim().length > 0) {
+        entry.otp_code = btn.otp_code.trim();
+      } else if (typeof btn.quick_reply_payload === "string" && btn.quick_reply_payload.trim().length > 0) {
+        entry.quick_reply_payload = btn.quick_reply_payload.trim();
+      } else if (typeof btn.coupon_code === "string" && btn.coupon_code.trim().length > 0) {
+        const code = btn.coupon_code.trim();
+        if (code.length > 15) {
+          return res.status(422).json({
+            code: "invalid_request_body",
+            error: "رمز قسيمة النسخ (coupon_code) يجب ألا يتجاوز 15 حرفاً حسب قواعد ميتا.",
+          });
+        }
+        entry.coupon_code = code;
+      } else if (btn.action && typeof btn.action === "object" && !Array.isArray(btn.action)) {
+        entry.action = btn.action;
+      } else {
+        continue;
+      }
+      cleanButtons.push(entry);
+    }
+    if (cleanButtons.length > 0) {
+      templateObj.buttons = cleanButtons;
+    }
+  }
+
+  const mojeebPayload: Record<string, any> = {
+    agent_id: resolvedAgentId,
+    from: resolvedFrom,
+    template: templateObj,
+  };
+
+  if (normalizedTo) {
+    mojeebPayload.to = normalizedTo;
+  } else {
+    mojeebPayload.recipient_username = rawUsername;
+  }
+
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${apiKey}`,
+    "Content-Type": "application/json",
+  };
+
+  if (typeof idempotencyKey === "string" && idempotencyKey.trim().length > 0 && idempotencyKey.trim().length <= 128) {
+    headers["Idempotency-Key"] = idempotencyKey.trim();
+  }
+  if (typeof correlationId === "string" && /^[a-zA-Z0-9._-]{1,64}$/.test(correlationId.trim())) {
+    headers["X-Correlation-ID"] = correlationId.trim();
+  }
+
+  try {
+    const upstreamResponse = await fetchWithTimeout(
+      MOJEEB_TEMPLATES_URL,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify(mojeebPayload),
+      },
+      15000
+    );
+
+    const retryAfter = upstreamResponse.headers.get("retry-after");
+    const responseCorrelationId = upstreamResponse.headers.get("x-correlation-id") || undefined;
+    const rawText = await upstreamResponse.text();
+    let parsed: any = null;
+    try {
+      parsed = rawText ? JSON.parse(rawText) : null;
+    } catch {
+      parsed = null;
+    }
+
+    if (upstreamResponse.status === 202 || upstreamResponse.ok) {
+      return res.status(upstreamResponse.status).json({
+        status: parsed?.status || "queued",
+        data: parsed || { id: "", status: "queued", type: "template" },
+        correlationId: responseCorrelationId,
+        message: `تم إدراج قالب واتساب "${templateName}" في طابور الإرسال عبر مجيب API بنجاح ✅${parsed?.id ? ` (رقم الرسالة: ${parsed.id})` : ""}`,
+      });
+    }
+
+    const errObj = parsed?.error || parsed || {};
+    const errCode = typeof errObj.code === "string" ? errObj.code : `http_${upstreamResponse.status}`;
+    const friendlyError = mapMojeebErrorByCode(errCode, errObj, retryAfter);
+
+    return res.status(upstreamResponse.status >= 400 && upstreamResponse.status < 600 ? upstreamResponse.status : 502).json({
+      code: errCode,
+      error: friendlyError,
+      retryAfter: retryAfter || undefined,
+      availablePhones: Array.isArray(errObj.available_phones) ? errObj.available_phones : undefined,
+      availableTemplates: Array.isArray(errObj.available_templates) ? errObj.available_templates : undefined,
+      availableLanguages: Array.isArray(errObj.available_languages) ? errObj.available_languages : undefined,
+      correlationId: responseCorrelationId,
+    });
+  } catch (err: any) {
+    return res.status(502).json({
+      code: "mojeeb_network_error",
+      error: "تعذر الاتصال بخادم موقع مجيب (api.mojeeb.app) حالياً: " + (err?.message || "خطأ في الاتصال"),
+    });
+  }
+});
+
 // Vite Middleware Integration for Dev / Static Asset Server for Production
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {

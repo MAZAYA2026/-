@@ -2,8 +2,8 @@ import React, { useState } from "react";
 import { Invoice, AppSettings } from "../types";
 import { updateInvoiceOnServer } from "../lib/api";
 import { getArabicDayName } from "../lib/businessDays";
-import { DEFAULT_READY_PASSPORT_MESSAGE, DEFAULT_READY_GENERAL_MESSAGE, WHATSAPP_DIVIDER } from "../lib/whatsapp";
-import { Bell, Send, CheckCircle, Clock, Calendar, Search, Filter, AlertTriangle, MessageSquare, RefreshCw } from "lucide-react";
+import { DEFAULT_READY_PASSPORT_MESSAGE, DEFAULT_READY_GENERAL_MESSAGE, WHATSAPP_DIVIDER, buildInvoiceTemplateVariables, dispatchWhatsAppViaMojeebSmart } from "../lib/whatsapp";
+import { Bell, Send, CheckCircle, Clock, Calendar, Search, Filter, AlertTriangle, MessageSquare, RefreshCw, X } from "lucide-react";
 
 interface NotificationsPanelProps {
   invoices: Invoice[];
@@ -15,6 +15,8 @@ export default function NotificationsPanel({ invoices, settings, onInvoiceUpdate
   // Filters: today, tomorrow, this_week, all
   const [timeFilter, setTimeFilter] = useState<"today" | "tomorrow" | "this_week" | "all">("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [sendingKey, setSendingKey] = useState<string | null>(null);
+  const [whatsappNotice, setWhatsappNotice] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   const getTodayDateString = () => new Date().toISOString().split("T")[0];
   const getTomorrowDateString = () => {
@@ -101,8 +103,19 @@ export default function NotificationsPanel({ invoices, settings, onInvoiceUpdate
   const notifications = getDueNotifications();
   const unsentCount = notifications.filter(n => !n.isSent).length;
 
-  // Handle WhatsApp Reminder click
-  const handleSendReminder = async (record: typeof notifications[0]) => {
+  // Handle WhatsApp Reminder click via Mojeeb API
+  const handleSendReminder = async (record: typeof notifications[0], rowKey: string) => {
+    if (sendingKey) return;
+
+    const rawPhone = (record.phone || "").trim();
+    if (!rawPhone) {
+      setWhatsappNotice({
+        type: "error",
+        text: `رقم هاتف العميل (${record.customerName}) غير متوفر لإرسال رسالة التذكير.`
+      });
+      return;
+    }
+
     const isPassport = record.servicesDue.some(s => s.trim().startsWith("#"));
     const template = isPassport
       ? (settings.readyPassportMessage?.trim() || DEFAULT_READY_PASSPORT_MESSAGE)
@@ -123,19 +136,55 @@ export default function NotificationsPanel({ invoices, settings, onInvoiceUpdate
       .replace(/{رقم_التواصل}/g, contact)
       .replace(/{فاصل}/g, WHATSAPP_DIVIDER);
 
-    const waUrl = `https://wa.me/${record.phone.startsWith('0') ? '2' : ''}${record.phone}?text=${encodeURIComponent(reminderText)}`;
-    window.open(waUrl, "_blank");
+    const vars = buildInvoiceTemplateVariables(record.invoice, [], settings, {
+      customerName: record.customerName,
+      servicesSummary: record.servicesDue.join("، "),
+      deliveryDate: record.deliveryDate,
+      fullMessage: reminderText,
+    });
 
-    // Update notification state to "Sent" on backend
+    setSendingKey(rowKey);
+    setWhatsappNotice(null);
     try {
-      const updatedInvoice = {
-        ...record.invoice,
-        notificationSent: true
-      };
-      const result = await updateInvoiceOnServer(record.invoice.invoiceId, updatedInvoice);
-      onInvoiceUpdated(result);
-    } catch (err) {
-      console.error("Failed to update notification sent state:", err);
+      const result = await dispatchWhatsAppViaMojeebSmart({
+        scenario: "reminder",
+        settings,
+        to: rawPhone,
+        freeTextBody: reminderText,
+        variables: vars,
+        idempotencyKey: `reminder-${record.invoice.invoiceId}-${record.deliveryDate}-${Math.floor(Date.now() / 10000)}`
+      });
+
+      if (!result.success) {
+        setWhatsappNotice({
+          type: "error",
+          text: result.error || "تعذر إرسال رسالة التذكير عبر واجهة مجيب (Mojeeb API)."
+        });
+        return;
+      }
+
+      const msgIdText = result.data?.id ? ` (مرجع: ${result.data.id})` : "";
+      const modeLabel = result.dispatchMode === "template"
+        ? `قالب معتمد "${result.templateName}"`
+        : "رسالة نصية حرة";
+      setWhatsappNotice({
+        type: "success",
+        text: `تم إدراج رسالة التذكير للعميل "${record.customerName}" (${modeLabel}) في طابور الإرسال عبر مجيب API بنجاح${msgIdText}.`
+      });
+
+      // Update notification state to "Sent" on backend only after Mojeeb accepted the message
+      try {
+        const updatedInvoice = {
+          ...record.invoice,
+          notificationSent: true
+        };
+        const updated = await updateInvoiceOnServer(record.invoice.invoiceId, updatedInvoice);
+        onInvoiceUpdated(updated);
+      } catch (err) {
+        console.error("Failed to update notification sent state:", err);
+      }
+    } finally {
+      setSendingKey(null);
     }
   };
 
@@ -146,9 +195,37 @@ export default function NotificationsPanel({ invoices, settings, onInvoiceUpdate
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-5">
         <div>
           <h2 className="text-xl font-extrabold text-slate-900">شاشة التذكير وإشعارات مواعيد التسليم</h2>
-          <p className="text-sm text-slate-500 mt-1">تنبيهات تلقائية لمواعيد مراجعة الجوازات وطباعة الإيصال الفوري</p>
+          <p className="text-sm text-slate-500 mt-1">تنبيهات تلقائية لمواعيد مراجعة الجوازات والإرسال المباشر عبر Mojeeb WhatsApp API</p>
         </div>
       </div>
+
+      {/* Mojeeb WhatsApp Dispatch Status Banner */}
+      {whatsappNotice && (
+        <div
+          className={`rounded-xl p-4 border flex items-start justify-between gap-3 shadow-xs ${
+            whatsappNotice.type === "success"
+              ? "bg-emerald-50 border-emerald-200 text-emerald-900"
+              : "bg-rose-50 border-rose-200 text-rose-900"
+          }`}
+        >
+          <div className="flex items-start gap-2.5 text-xs font-bold leading-relaxed">
+            {whatsappNotice.type === "success" ? (
+              <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+            ) : (
+              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+            )}
+            <span>{whatsappNotice.text}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setWhatsappNotice(null)}
+            className="p-1 rounded-lg hover:bg-black/5 text-current shrink-0 cursor-pointer"
+            aria-label="إغلاق التنبيه"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Notifications Indicator Badge Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -259,6 +336,8 @@ export default function NotificationsPanel({ invoices, settings, onInvoiceUpdate
           <div className="divide-y divide-slate-100">
             {notifications.map((record, idx) => {
               const isOverdue = record.deliveryDate < todayStr;
+              const rowKey = `${record.invoice.invoiceId}-${idx}`;
+              const isSendingRow = sendingKey === rowKey;
               
               return (
                 <div key={idx} className="p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 hover:bg-slate-50/50 transition-colors">
@@ -305,11 +384,23 @@ export default function NotificationsPanel({ invoices, settings, onInvoiceUpdate
                     </div>
 
                     <button
-                      onClick={() => handleSendReminder(record)}
-                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold font-cairo flex items-center justify-center gap-1.5 transition-colors shadow-xs"
+                      type="button"
+                      disabled={Boolean(sendingKey)}
+                      onClick={() => handleSendReminder(record, rowKey)}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-lg text-xs font-bold font-cairo flex items-center justify-center gap-1.5 transition-colors shadow-xs cursor-pointer"
+                      title="إرسال تذكير واتساب مباشرة عبر Mojeeb API"
                     >
-                      <Send className="w-3.5 h-3.5" />
-                      إرسال تذكير واتساب
+                      {isSendingRow ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          جاري الإرسال...
+                        </>
+                      ) : (
+                        <>
+                          <Send className="w-3.5 h-3.5" />
+                          إرسال تذكير واتساب (API)
+                        </>
+                      )}
                     </button>
                   </div>
 

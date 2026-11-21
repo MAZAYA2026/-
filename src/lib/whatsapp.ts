@@ -1,5 +1,6 @@
-import { Invoice, Service, AppSettings } from "../types";
+import { Invoice, Service, AppSettings, MojeebTemplateConfig, MojeebTemplateScenario } from "../types";
 import { getArabicDayName, recalculateCustomerServicesDeliveryDates } from "./businessDays";
+import { sendWhatsAppViaMojeeb, sendWhatsAppTemplateViaMojeeb, MojeebSendResponse, MojeebTemplateButtonInput } from "./api";
 
 export const WHATSAPP_DIVIDER = "────────────────────────────";
 export const WHATSAPP_SUB_DIVIDER = "┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈";
@@ -595,14 +596,277 @@ export function generateWhatsAppWelcomeMessage(
 }
 
 /**
+ * Converts Arabic/Persian digits to Western digits and normalizes phone numbers to E.164 (+2010...).
+ */
+export function normalizePhoneToE164(rawPhone: string): string {
+  const western = String(rawPhone || "")
+    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0))
+    .trim();
+
+  if (!western) return "";
+
+  const hadPlus = western.startsWith("+");
+  let digits = western.replace(/\D/g, "");
+  if (!digits) return "";
+
+  if (digits.startsWith("00")) {
+    digits = digits.slice(2);
+    return `+${digits}`;
+  }
+
+  if (hadPlus) {
+    return `+${digits}`;
+  }
+
+  // Egyptian local mobile format: 01xxxxxxxxx (11 digits) -> +201xxxxxxxxx
+  if (digits.startsWith("0") && digits.length === 11) {
+    return `+2${digits}`;
+  }
+
+  // Egyptian mobile without leading 0: 1xxxxxxxxx (10 digits) -> +201xxxxxxxxx
+  if (digits.length === 10 && digits.startsWith("1")) {
+    return `+20${digits}`;
+  }
+
+  // Already has Egypt country code 20 without +
+  if (digits.startsWith("20") && digits.length === 12) {
+    return `+${digits}`;
+  }
+
+  return `+${digits}`;
+}
+
+/**
  * Normalizes phone number to standard international WhatsApp link format.
  */
 export function getWhatsAppUrl(phone: string, text: string): string {
-  let cleanPhone = phone.replace(/\D/g, "");
-  if (cleanPhone.startsWith("0")) {
-    cleanPhone = "2" + cleanPhone;
-  } else if (!cleanPhone.startsWith("20") && cleanPhone.length === 10) {
-    cleanPhone = "20" + cleanPhone;
-  }
+  const e164 = normalizePhoneToE164(phone);
+  const cleanPhone = e164.replace(/^\+/, "");
   return `https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}`;
+}
+
+export const MOJEEB_TEMPLATE_PLACEHOLDERS: { token: string; label: string }[] = [
+  { token: "{اسم_العميل}", label: "اسم العميل" },
+  { token: "{رقم_الفاتورة}", label: "رقم الفاتورة" },
+  { token: "{الخدمات}", label: "الخدمات" },
+  { token: "{موعد_التسليم}", label: "موعد التسليم" },
+  { token: "{السعر}", label: "الإجمالي" },
+  { token: "{رقم_الارشيف}", label: "درج الأرشيف" },
+  { token: "{اسم_المكتب}", label: "اسم المكتب" },
+  { token: "{هاتف_التواصل}", label: "هاتف المكتب" },
+  { token: "{تاريخ_اليوم}", label: "تاريخ الفاتورة" },
+  { token: "{الموظف}", label: "الموظف" },
+  { token: "{ملاحظة_التنفيذ}", label: "ملاحظة التنفيذ" },
+];
+
+/**
+ * Meta WhatsApp Template parameter values cannot contain newlines, tabs, or >4 consecutive spaces.
+ * This normalizes resolved values safely into a clean single-line string.
+ */
+export function sanitizeMetaTemplateParamValue(value: string): string {
+  return String(value ?? "")
+    .replace(/\r?\n+/g, " - ")
+    .replace(/\t+/g, " ")
+    .replace(/ {2,}/g, " ")
+    .trim();
+}
+
+export function applyTemplateVariables(rawTemplate: string, variables: Record<string, string>): string {
+  let out = String(rawTemplate ?? "");
+  for (const [token, val] of Object.entries(variables)) {
+    out = out.split(token).join(val ?? "");
+  }
+  return out;
+}
+
+export function buildInvoiceTemplateVariables(
+  inv: Invoice,
+  services: Service[],
+  settings: AppSettings,
+  extra?: {
+    customerName?: string;
+    servicesSummary?: string;
+    deliveryDate?: string;
+    executionNote?: string;
+    fullMessage?: string;
+  }
+): Record<string, string> {
+  const header = (settings.headerText || "مكتب مزايا للجوازات").trim();
+  const subHeader = (settings.subHeaderText !== undefined ? settings.subHeaderText : "جوازات طنطا والمعاملات الحكومية").trim();
+  const contact = (settings.contactPhone || "").trim();
+  const customHolidays = settings.customHolidays || [];
+  const includeSaturday = settings.includeSaturdayAsWeekend !== false;
+  const invoiceBaseDate = inv.date || new Date().toISOString().split("T")[0];
+
+  const allDeliveryDates: string[] = [];
+  const allServicesSummary: string[] = [];
+
+  (inv.customers || []).forEach((cust) => {
+    const seqServices = recalculateCustomerServicesDeliveryDates(
+      cust.services || [],
+      invoiceBaseDate,
+      services,
+      customHolidays,
+      includeSaturday
+    );
+    seqServices.forEach((s) => {
+      const matched = services.find((srv) => srv.id === s.serviceId || srv.name === s.serviceId);
+      const srvName = matched?.name || s.serviceId;
+      allServicesSummary.push(s.quantity > 1 ? `${srvName} (×${s.quantity})` : srvName);
+      if (s.deliveryDate && !allDeliveryDates.includes(s.deliveryDate)) {
+        allDeliveryDates.push(s.deliveryDate);
+      }
+    });
+  });
+
+  const maxDeliveryDate = extra?.deliveryDate || (allDeliveryDates.length > 0 ? allDeliveryDates.sort().reverse()[0] : "");
+  const maxDayName = maxDeliveryDate ? getArabicDayName(maxDeliveryDate) : "";
+  const formattedDelivery = maxDeliveryDate
+    ? `${maxDayName ? maxDayName + " " : ""}${maxDeliveryDate}`
+    : "حسب جهة الإصدار";
+
+  const customerNames = extra?.customerName || (
+    inv.customers.length > 1
+      ? inv.customers.map((c) => c.arabicName).join(" و ")
+      : (inv.customers[0]?.arabicName || "عميلنا العزيز")
+  );
+
+  const invoiceDateClean = String(inv.date || new Date().toLocaleDateString("ar-EG"))
+    .replace(/\s*GMT[+-]\d+.*$/i, "")
+    .replace(/\s*\([^)]*\)$/i, "")
+    .trim();
+
+  const statusText =
+    inv.status === "NEW"
+      ? "جديدة"
+      : inv.status === "READY"
+        ? `جاهزة للتسليم (درج: ${inv.archiveDrawer || "N/A"})`
+        : "تم التسليم";
+
+  return {
+    "{اسم_المكتب}": header,
+    "{الترويسة_الفرعية}": subHeader,
+    "{اسم_العميل}": customerNames,
+    "{رقم_الفاتورة}": String(inv.invoiceId ?? ""),
+    "{تاريخ_اليوم}": invoiceDateClean,
+    "{الموظف}": inv.employeeName || "",
+    "{حالة_الفاتورة}": statusText,
+    "{الخدمات}": extra?.servicesSummary || allServicesSummary.join("، "),
+    "{موعد_التسليم}": formattedDelivery,
+    "{السعر}": `${Number(inv.totalAmount || 0).toFixed(2)} ج.م`,
+    "{رقم_الارشيف}": inv.archiveDrawer || "درج الحفظ المخصص",
+    "{هاتف_التواصل}": contact,
+    "{رقم_التواصل}": contact,
+    "{ملاحظة_التنفيذ}": extra?.executionNote || "",
+    "{الرسالة_الكاملة}": extra?.fullMessage || "",
+  };
+}
+
+export function resolveMojeebTemplatePayload(
+  config: MojeebTemplateConfig,
+  variables: Record<string, string>
+): {
+  name: string;
+  language: string;
+  parameters?: Record<string, string>;
+  header_parameters?: Record<string, string>;
+  header_media_url?: string;
+  buttons?: MojeebTemplateButtonInput[];
+} {
+  const parameters: Record<string, string> = {};
+  if (Array.isArray(config.parameters)) {
+    for (const p of config.parameters) {
+      const k = String(p.key || "").trim();
+      if (!k) continue;
+      parameters[k] = sanitizeMetaTemplateParamValue(applyTemplateVariables(p.value || "", variables));
+    }
+  }
+
+  let header_parameters: Record<string, string> | undefined;
+  const hKey = String(config.headerParameterKey || "").trim();
+  if (hKey) {
+    header_parameters = {
+      [hKey]: sanitizeMetaTemplateParamValue(applyTemplateVariables(config.headerParameterValue || "", variables)),
+    };
+  }
+
+  const resolvedHeaderMediaUrl = config.headerMediaUrl
+    ? applyTemplateVariables(config.headerMediaUrl, variables).trim()
+    : "";
+
+  const buttons: MojeebTemplateButtonInput[] = [];
+  if (Array.isArray(config.buttons)) {
+    for (const btn of config.buttons) {
+      const resolvedVal = sanitizeMetaTemplateParamValue(applyTemplateVariables(btn.value || "", variables));
+      if (!resolvedVal) continue;
+      const entry: MojeebTemplateButtonInput = { index: Number(btn.index) || 0 };
+      if (btn.type === "url_suffix") entry.url_suffix = resolvedVal;
+      else if (btn.type === "otp_code") entry.otp_code = resolvedVal;
+      else if (btn.type === "quick_reply_payload") entry.quick_reply_payload = resolvedVal;
+      else if (btn.type === "coupon_code") entry.coupon_code = resolvedVal;
+      buttons.push(entry);
+    }
+  }
+
+  return {
+    name: config.name.trim(),
+    language: config.language.trim(),
+    ...(Object.keys(parameters).length > 0 ? { parameters } : {}),
+    ...(header_parameters ? { header_parameters } : {}),
+    ...(resolvedHeaderMediaUrl ? { header_media_url: resolvedHeaderMediaUrl } : {}),
+    ...(buttons.length > 0 ? { buttons } : {}),
+  };
+}
+
+export interface SmartWhatsAppDispatchResult extends MojeebSendResponse {
+  dispatchMode: "template" | "text";
+  templateName?: string;
+}
+
+/**
+ * Automatically sends via Mojeeb Approved Template API (POST /v1/whatsapp/templates)
+ * when an approved template is enabled for the scenario (ideal for first-time contacts & outside Meta's 24h window).
+ * Otherwise falls back to Mojeeb Free-Form Message API (POST /v1/whatsapp/messages).
+ */
+export async function dispatchWhatsAppViaMojeebSmart(params: {
+  scenario: MojeebTemplateScenario;
+  settings: AppSettings;
+  to?: string;
+  recipientUsername?: string;
+  freeTextBody: string;
+  variables: Record<string, string>;
+  idempotencyKey?: string;
+}): Promise<SmartWhatsAppDispatchResult> {
+  const { scenario, settings, to, recipientUsername, freeTextBody, variables, idempotencyKey } = params;
+  const tplConfig = settings.mojeebTemplates?.[scenario];
+
+  if (tplConfig && tplConfig.enabled && tplConfig.name?.trim() && tplConfig.language?.trim()) {
+    const resolvedTemplate = resolveMojeebTemplatePayload(tplConfig, {
+      ...variables,
+      "{الرسالة_الكاملة}": freeTextBody,
+    });
+    const res = await sendWhatsAppTemplateViaMojeeb({
+      to,
+      recipientUsername,
+      template: resolvedTemplate,
+      idempotencyKey,
+    });
+    return {
+      ...res,
+      dispatchMode: "template",
+      templateName: resolvedTemplate.name,
+    };
+  }
+
+  const res = await sendWhatsAppViaMojeeb({
+    to,
+    recipientUsername,
+    body: freeTextBody,
+    idempotencyKey,
+  });
+  return {
+    ...res,
+    dispatchMode: "text",
+  };
 }

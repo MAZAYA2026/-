@@ -1,7 +1,7 @@
 import React, { useRef } from "react";
 import { Invoice, AppSettings, Service } from "../types";
 import { calculateWorkingDaysDeliveryDate, getArabicDayName, recalculateCustomerServicesDeliveryDates } from "../lib/businessDays";
-import { Printer, X, Send } from "lucide-react";
+import { Printer, X, Send, RefreshCw } from "lucide-react";
 
 interface ThermalReceiptProps {
   invoice: Invoice;
@@ -9,9 +9,10 @@ interface ThermalReceiptProps {
   services: Service[];
   onClose: () => void;
   onSendWhatsApp?: () => void;
+  sendingWhatsApp?: boolean;
 }
 
-export default function ThermalReceipt({ invoice, settings, services, onClose, onSendWhatsApp }: ThermalReceiptProps) {
+export default function ThermalReceipt({ invoice, settings, services, onClose, onSendWhatsApp, sendingWhatsApp = false }: ThermalReceiptProps) {
   const receiptRef = useRef<HTMLDivElement>(null);
 
   const handlePrint = () => {
@@ -410,12 +411,22 @@ export default function ThermalReceipt({ invoice, settings, services, onClose, o
             {onSendWhatsApp && (
               <button 
                 type="button"
+                disabled={sendingWhatsApp}
                 onClick={onSendWhatsApp} 
-                className="px-4 py-2 bg-emerald-600 text-white hover:bg-emerald-500 rounded-lg text-sm font-bold font-cairo flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
-                title="إرسال رسالة ترحيبية وتفاصيل الفاتورة عبر واتساب"
+                className="px-4 py-2 bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-60 disabled:cursor-not-allowed rounded-lg text-sm font-bold font-cairo flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                title="إرسال رسالة ترحيبية وتفاصيل الفاتورة عبر واتساب (Mojeeb API)"
               >
-                <Send className="w-4 h-4" />
-                رسالة واتساب
+                {sendingWhatsApp ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    جاري الإرسال...
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-4 h-4" />
+                    رسالة واتساب (API)
+                  </>
+                )}
               </button>
             )}
             <button 

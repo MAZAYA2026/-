@@ -786,3 +786,139 @@ export async function updateEmployeesOnServer(employees: Employee[]): Promise<Em
   }
   return response.json();
 }
+
+export interface MojeebSendPayload {
+  to?: string;
+  recipientUsername?: string;
+  body?: string;
+  mediaUrl?: string;
+  idempotencyKey?: string;
+  correlationId?: string;
+  agentId?: string;
+  from?: string;
+}
+
+export interface MojeebMessageData {
+  id: string;
+  status: string;
+  agent_id?: string;
+  to?: string | null;
+  recipient_username?: string;
+  type?: string;
+  created_at?: string;
+}
+
+export interface MojeebSendResponse {
+  success: boolean;
+  status?: string;
+  message?: string;
+  error?: string;
+  code?: string;
+  retryAfter?: string | number;
+  availablePhones?: string[];
+  availableTemplates?: string[];
+  availableLanguages?: string[];
+  httpStatus?: number;
+  data?: MojeebMessageData;
+  correlationId?: string;
+}
+
+export interface MojeebTemplateButtonInput {
+  index: number;
+  url_suffix?: string;
+  otp_code?: string;
+  quick_reply_payload?: string;
+  coupon_code?: string;
+  action?: Record<string, any>;
+}
+
+export interface MojeebTemplateSendPayload {
+  to?: string;
+  recipientUsername?: string;
+  template: {
+    name: string;
+    language: string;
+    parameters?: Record<string, string>;
+    header_parameters?: Record<string, string>;
+    header_media_url?: string;
+    buttons?: MojeebTemplateButtonInput[];
+  };
+  idempotencyKey?: string;
+  correlationId?: string;
+  agentId?: string;
+  from?: string;
+}
+
+export async function sendWhatsAppViaMojeeb(payload: MojeebSendPayload): Promise<MojeebSendResponse> {
+  try {
+    const response = await fetch("/api/whatsapp/mojeeb/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      return {
+        success: false,
+        error: data.error || "فشل إرسال رسالة الواتساب عبر موقع مجيب (Mojeeb API)",
+        code: data.code,
+        retryAfter: data.retryAfter,
+        availablePhones: data.availablePhones,
+        httpStatus: response.status,
+        correlationId: data.correlationId,
+      };
+    }
+    return {
+      success: true,
+      status: data.status,
+      message: data.message,
+      data: data.data,
+      correlationId: data.correlationId,
+      httpStatus: response.status,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.message || "تعذر الاتصال بخادم التطبيق لإرسال رسالة الواتساب عبر مجيب.",
+      code: "network_error",
+    };
+  }
+}
+
+export async function sendWhatsAppTemplateViaMojeeb(payload: MojeebTemplateSendPayload): Promise<MojeebSendResponse> {
+  try {
+    const response = await fetch("/api/whatsapp/mojeeb/template", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      return {
+        success: false,
+        error: data.error || "فشل إرسال قالب الواتساب عبر موقع مجيب (Mojeeb API)",
+        code: data.code,
+        retryAfter: data.retryAfter,
+        availablePhones: data.availablePhones,
+        availableTemplates: data.availableTemplates,
+        availableLanguages: data.availableLanguages,
+        httpStatus: response.status,
+        correlationId: data.correlationId,
+      };
+    }
+    return {
+      success: true,
+      status: data.status,
+      message: data.message,
+      data: data.data,
+      correlationId: data.correlationId,
+      httpStatus: response.status,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.message || "تعذر الاتصال بخادم التطبيق لإرسال قالب الواتساب عبر مجيب.",
+      code: "network_error",
+    };
+  }
+}

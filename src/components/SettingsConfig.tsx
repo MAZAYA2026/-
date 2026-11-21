@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { AppSettings, Employee, DictionaryItem, DEFAULT_APPLICANT_CAPACITIES, Invoice, Service } from "../types";
+import { AppSettings, Employee, DictionaryItem, DEFAULT_APPLICANT_CAPACITIES, Invoice, Service, MojeebTemplatesSettings, MojeebTemplateScenario, MojeebTemplateConfig } from "../types";
 import EmployeeManager from "./EmployeeManager";
 import { APPS_SCRIPT_CODE } from "../lib/appsScriptTemplate";
 import { 
@@ -9,7 +9,9 @@ import {
   pullDataFromGoogleWebhook,
   saveDictionaryWord,
   updateDictionaryWord,
-  deleteDictionaryWord
+  deleteDictionaryWord,
+  sendWhatsAppViaMojeeb,
+  sendWhatsAppTemplateViaMojeeb
 } from "../lib/api";
 import { 
   Save, 
@@ -47,7 +49,8 @@ import {
   UserCheck,
   ArrowUp,
   ArrowDown,
-  Package
+  Package,
+  Send
 } from "lucide-react";
 import { 
   DEFAULT_OFFICIAL_HOLIDAYS, 
@@ -60,7 +63,7 @@ import {
 } from "../lib/businessDays";
 
 import { GovernmentFine } from "../types";
-import { DEFAULT_READY_PASSPORT_MESSAGE, DEFAULT_READY_GENERAL_MESSAGE, DEFAULT_PARTIAL_READY_MESSAGE } from "../lib/whatsapp";
+import { DEFAULT_READY_PASSPORT_MESSAGE, DEFAULT_READY_GENERAL_MESSAGE, DEFAULT_PARTIAL_READY_MESSAGE, MOJEEB_TEMPLATE_PLACEHOLDERS, resolveMojeebTemplatePayload } from "../lib/whatsapp";
 
 interface SettingsConfigProps {
   settings: AppSettings;
@@ -103,6 +106,46 @@ export default function SettingsConfig({
   const [googleSheetWebhookUrl, setGoogleSheetWebhookUrl] = useState(settings.googleSheetWebhookUrl || settings.googleSheetUrl || "");
   const [footerText, setFooterText] = useState(settings.footerText || "يسعدنا دائماً خدمتكم وثقتكم بنا");
   const [autoSyncWebhook, setAutoSyncWebhook] = useState(settings.autoSyncWebhook || false);
+  const [mojeebAgentId, setMojeebAgentId] = useState(settings.mojeebAgentId || "");
+  const [mojeebFromPhone, setMojeebFromPhone] = useState(settings.mojeebFromPhone || "");
+  const [mojeebTemplates, setMojeebTemplates] = useState<MojeebTemplatesSettings>(settings.mojeebTemplates || {});
+  const [activeMojeebScenario, setActiveMojeebScenario] = useState<MojeebTemplateScenario>("welcome");
+  const [mojeebTestSendKind, setMojeebTestSendKind] = useState<"template" | "text">("template");
+  const [mojeebTestMode, setMojeebTestMode] = useState<"phone" | "username">("phone");
+  const [mojeebTestRecipient, setMojeebTestRecipient] = useState("");
+  const [mojeebTestBody, setMojeebTestBody] = useState("رسالة تجريبية من نظام مكتب مزايا عبر واجهة مجيب (Mojeeb API).");
+  const [mojeebTestLoading, setMojeebTestLoading] = useState(false);
+  const [mojeebTestFeedback, setMojeebTestFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  useEffect(() => {
+    setMojeebAgentId(settings.mojeebAgentId || "");
+    setMojeebFromPhone(settings.mojeebFromPhone || "");
+    setMojeebTemplates(settings.mojeebTemplates || {});
+  }, [settings.mojeebAgentId, settings.mojeebFromPhone, settings.mojeebTemplates]);
+
+  const getScenarioTemplate = (scenario: MojeebTemplateScenario): MojeebTemplateConfig => {
+    const existing = mojeebTemplates[scenario];
+    return {
+      enabled: existing?.enabled ?? false,
+      name: existing?.name || "",
+      language: existing?.language || "ar",
+      parameters: Array.isArray(existing?.parameters) ? existing.parameters : [],
+      headerParameterKey: existing?.headerParameterKey || "",
+      headerParameterValue: existing?.headerParameterValue || "",
+      headerMediaUrl: existing?.headerMediaUrl || "",
+      buttons: Array.isArray(existing?.buttons) ? existing.buttons : [],
+    };
+  };
+
+  const updateScenarioTemplate = (scenario: MojeebTemplateScenario, patch: Partial<MojeebTemplateConfig>) => {
+    setMojeebTemplates((prev) => ({
+      ...prev,
+      [scenario]: {
+        ...getScenarioTemplate(scenario),
+        ...patch,
+      },
+    }));
+  };
 
   // Aman Report Pricing config
   const [amanNormalPrice, setAmanNormalPrice] = useState<number>(() => {
@@ -219,6 +262,9 @@ export default function SettingsConfig({
         amanNormalPrice: Number(amanNormalPrice) || 0,
         amanUrgentPrice: Number(amanUrgentPrice) || 0,
         passportFormsStock: passportFormsStock,
+        mojeebAgentId: mojeebAgentId.trim(),
+        mojeebFromPhone: mojeebFromPhone.trim(),
+        mojeebTemplates,
       };
 
       const result = await updateSettingsOnServer(payload);
@@ -272,6 +318,9 @@ export default function SettingsConfig({
         amanNormalPrice: Number(amanNormalPrice) || 0,
         amanUrgentPrice: Number(amanUrgentPrice) || 0,
         passportFormsStock: passportFormsStock,
+        mojeebAgentId: mojeebAgentId.trim(),
+        mojeebFromPhone: mojeebFromPhone.trim(),
+        mojeebTemplates,
       };
 
       const result = await updateSettingsOnServer(payload);
@@ -691,6 +740,9 @@ export default function SettingsConfig({
         amanNormalPrice: Number(amanNormalPrice) || 0,
         amanUrgentPrice: Number(amanUrgentPrice) || 0,
         passportFormsStock: passportFormsStock,
+        mojeebAgentId: mojeebAgentId.trim(),
+        mojeebFromPhone: mojeebFromPhone.trim(),
+        mojeebTemplates,
       };
 
       const result = await updateSettingsOnServer(payload);
@@ -1038,6 +1090,9 @@ export default function SettingsConfig({
                       amanNormalPrice: Number(amanNormalPrice) || 0,
                       amanUrgentPrice: Number(amanUrgentPrice) || 0,
                       passportFormsStock: updatedStock,
+                      mojeebAgentId: mojeebAgentId.trim(),
+                      mojeebFromPhone: mojeebFromPhone.trim(),
+                      mojeebTemplates,
                     };
 
                     const result = await updateSettingsOnServer(payload);
@@ -1084,6 +1139,631 @@ export default function SettingsConfig({
               </div>
             </div>
           )}
+        </div>
+
+        {/* Mojeeb WhatsApp Business API Integration Card */}
+        <div className="bg-white border border-emerald-200 rounded-2xl p-6 shadow-xs space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-emerald-100 pb-3">
+            <h3 className="font-bold text-sm text-emerald-900 flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-emerald-600" />
+              إعدادات إرسال واتساب عبر Mojeeb API (حماية الرقم من الحظر)
+            </h3>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-1 rounded-lg font-mono">
+                POST /v1/whatsapp/templates
+              </span>
+              <span className="text-[10px] font-bold bg-slate-50 text-slate-700 border border-slate-200 px-2 py-1 rounded-lg font-mono">
+                POST /v1/whatsapp/messages
+              </span>
+            </div>
+          </div>
+
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 text-xs text-amber-950 space-y-1.5 leading-relaxed">
+            <div className="font-bold flex items-center gap-1.5">
+              <Lock className="w-4 h-4 text-amber-700 shrink-0" />
+              <span>حماية مفتاح API + قاعدة نافذة الـ 24 ساعة من ميتا:</span>
+            </div>
+            <p className="text-[11px] text-amber-900">
+              يُحفظ مفتاح <code className="font-mono font-bold bg-amber-100 px-1.5 py-0.5 rounded">MOJEEB_API_KEY</code> (بنطاق <code className="font-mono font-bold bg-amber-100 px-1.5 py-0.5 rounded">whatsapp:send</code>) في <strong>متغيرات البيئة / Secrets</strong> الخاصة بالخادم فقط ولا يُدخل في المتصفح أبداً.
+            </p>
+            <p className="text-[11px] text-amber-900">
+              <strong>الإرسال للعميل لأول مرة:</strong> فعّل <strong>قالب واتساب المعتمد</strong> أدناه (<code className="font-mono font-bold">/v1/whatsapp/templates</code>) ليصل العميل في أي وقت حتى لو لم يراسلك من قبل (خارج نافذة الـ 24 ساعة). عند عدم تفعيل قالب لنوع رسالة معين، يرسل النظام تلقائياً كرسالة نصية حرة (<code className="font-mono font-bold">/v1/whatsapp/messages</code>).
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-700 block">
+                معرّف الوكيل في مجيب (agent_id - UUID)
+              </label>
+              <input
+                type="text"
+                value={mojeebAgentId}
+                onChange={(e) => setMojeebAgentId(e.target.value)}
+                placeholder="12345678-1234-1234-1234-123456789012"
+                dir="ltr"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-mono focus:outline-hidden focus:border-emerald-500"
+              />
+              <p className="text-[10px] text-slate-500">
+                الوكيل المُصرَّح له باستخدام مفتاح API (أو عبر <code className="font-mono">MOJEEB_AGENT_ID</code>).
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-700 block">
+                رقم واتساب الأعمال المُرسِل (from - صيغة E.164)
+              </label>
+              <input
+                type="text"
+                value={mojeebFromPhone}
+                onChange={(e) => setMojeebFromPhone(e.target.value)}
+                placeholder="+201012345678"
+                dir="ltr"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-mono focus:outline-hidden focus:border-emerald-500"
+              />
+              <p className="text-[10px] text-slate-500">
+                يجب أن يطابق اتصال واتساب نشط على الوكيل بصيغة دولية مثل <code className="font-mono">+2010...</code> (أو عبر <code className="font-mono">MOJEEB_FROM_PHONE</code>).
+              </p>
+            </div>
+          </div>
+
+          {/* Approved WhatsApp Templates Configuration (First-Time / Proactive Messaging) */}
+          {(() => {
+            const scenarios: { key: MojeebTemplateScenario; label: string; badge?: string }[] = [
+              { key: "welcome", label: "الترحيب / أول مرة", badge: "أساسي" },
+              { key: "ready", label: "جاهز للتسليم" },
+              { key: "delivered", label: "تم التسليم" },
+              { key: "partialReady", label: "إشعار جزئي" },
+              { key: "reminder", label: "تذكير موعد" },
+            ];
+            const currentTpl = getScenarioTemplate(activeMojeebScenario);
+
+            return (
+              <div className="border border-emerald-200 bg-emerald-50/40 rounded-2xl p-4 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h4 className="text-xs font-extrabold text-emerald-950 flex items-center gap-1.5">
+                      <FileText className="w-4 h-4 text-emerald-600" />
+                      قوالب واتساب المعتمدة من ميتا (للإرسال للعميل لأول مرة وخارج نافذة الـ 24 ساعة)
+                    </h4>
+                    <p className="text-[11px] text-slate-600 mt-0.5">
+                      اختر نوع الإشعار واضبط اسم القالب ولغته ومتغيّراته كما اعتُمد في لوحة مجيب، ثم اضغط <strong>حفظ الإعدادات</strong> بالأسفل.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Scenario Selector Tabs */}
+                <div className="flex flex-wrap gap-1.5">
+                  {scenarios.map((sc) => {
+                    const cfg = mojeebTemplates[sc.key];
+                    const isConfigured = Boolean(cfg?.enabled && cfg?.name?.trim());
+                    const isActive = activeMojeebScenario === sc.key;
+                    return (
+                      <button
+                        key={sc.key}
+                        type="button"
+                        onClick={() => setActiveMojeebScenario(sc.key)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 border transition-colors cursor-pointer ${
+                          isActive
+                            ? "bg-emerald-700 text-white border-emerald-700 shadow-xs"
+                            : "bg-white text-slate-700 border-slate-200 hover:bg-emerald-50"
+                        }`}
+                      >
+                        <span>{sc.label}</span>
+                        {sc.badge && !isActive && (
+                          <span className="text-[9px] bg-amber-100 text-amber-800 px-1.5 py-0.2 rounded">
+                            {sc.badge}
+                          </span>
+                        )}
+                        {isConfigured && (
+                          <span
+                            className={`w-2 h-2 rounded-full ${isActive ? "bg-emerald-300" : "bg-emerald-500"}`}
+                            title="مفعّل بقالب معتمد"
+                          />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Enable Toggle + Template Name & Language */}
+                <div className="bg-white border border-emerald-100 rounded-xl p-4 space-y-4">
+                  <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={currentTpl.enabled}
+                      onChange={(e) => updateScenarioTemplate(activeMojeebScenario, { enabled: e.target.checked })}
+                      className="w-4 h-4 accent-emerald-600 rounded cursor-pointer"
+                    />
+                    <span className="text-xs font-extrabold text-slate-800">
+                      تفعيل الإرسال عبر القالب المعتمد لهذا النوع ({scenarios.find((s) => s.key === activeMojeebScenario)?.label})
+                    </span>
+                  </label>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold text-slate-700 block">
+                        اسم القالب المعتمد لدى ميتا (<code className="font-mono">template.name</code>)
+                      </label>
+                      <input
+                        type="text"
+                        value={currentTpl.name}
+                        onChange={(e) => updateScenarioTemplate(activeMojeebScenario, { name: e.target.value })}
+                        placeholder="مثال: arabic_signup_message أو order_confirmation"
+                        dir="ltr"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono focus:outline-hidden focus:border-emerald-500"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold text-slate-700 block">
+                        رمز لغة القالب (<code className="font-mono">template.language</code> — مثل ar أو ar_EG أو en_US)
+                      </label>
+                      <div className="flex gap-1.5">
+                        <input
+                          type="text"
+                          value={currentTpl.language}
+                          onChange={(e) => updateScenarioTemplate(activeMojeebScenario, { language: e.target.value })}
+                          placeholder="ar"
+                          dir="ltr"
+                          className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono focus:outline-hidden focus:border-emerald-500"
+                        />
+                        {["ar", "ar_EG", "en", "en_US"].map((code) => (
+                          <button
+                            key={code}
+                            type="button"
+                            onClick={() => updateScenarioTemplate(activeMojeebScenario, { language: code })}
+                            className={`px-2 py-1 rounded-lg text-[10px] font-mono font-bold border cursor-pointer ${
+                              currentTpl.language === code
+                                ? "bg-emerald-600 text-white border-emerald-600"
+                                : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100"
+                            }`}
+                          >
+                            {code}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Body Parameters Builder */}
+                  <div className="space-y-2 border-t border-slate-100 pt-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <span className="text-xs font-bold text-slate-800 block">
+                          متغيّرات نص القالب (<code className="font-mono">template.parameters</code> — اختياري):
+                        </span>
+                        <span className="text-[10px] text-slate-500">
+                          يعمل مع المتغيّرات المرقّمة (<code className="font-mono">1</code>, <code className="font-mono">2</code>...) أو المُسمّاة (<code className="font-mono">customer_name</code>). اتركه فارغاً إن لم يحوِ القالب متغيّرات.
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const list = currentTpl.parameters || [];
+                          const nextKey = String(list.length + 1);
+                          updateScenarioTemplate(activeMojeebScenario, {
+                            parameters: [...list, { key: nextKey, value: "" }],
+                          });
+                        }}
+                        className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        إضافة متغيّر
+                      </button>
+                    </div>
+
+                    {(currentTpl.parameters || []).length > 0 && (
+                      <div className="space-y-2">
+                        {(currentTpl.parameters || []).map((param, pIdx) => (
+                          <div key={pIdx} className="grid grid-cols-12 gap-2 items-center">
+                            <input
+                              type="text"
+                              value={param.key}
+                              onChange={(e) => {
+                                const updated = [...(currentTpl.parameters || [])];
+                                updated[pIdx] = { ...updated[pIdx], key: e.target.value };
+                                updateScenarioTemplate(activeMojeebScenario, { parameters: updated });
+                              }}
+                              placeholder="1 أو customer_name"
+                              dir="ltr"
+                              className="col-span-4 sm:col-span-3 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-mono focus:outline-hidden focus:border-emerald-500"
+                            />
+                            <input
+                              type="text"
+                              value={param.value}
+                              onChange={(e) => {
+                                const updated = [...(currentTpl.parameters || [])];
+                                updated[pIdx] = { ...updated[pIdx], value: e.target.value };
+                                updateScenarioTemplate(activeMojeebScenario, { parameters: updated });
+                              }}
+                              placeholder="القيمة أو متغيّر مثل {اسم_العميل}"
+                              className="col-span-7 sm:col-span-8 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-hidden focus:border-emerald-500"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const updated = (currentTpl.parameters || []).filter((_, i) => i !== pIdx);
+                                updateScenarioTemplate(activeMojeebScenario, { parameters: updated });
+                              }}
+                              className="col-span-1 p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg flex items-center justify-center cursor-pointer"
+                              title="حذف المتغيّر"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Quick Placeholder Chips */}
+                    <div className="space-y-1 pt-1">
+                      <span className="text-[10px] font-bold text-slate-500 block">
+                        اضغط على أي رمز لإضافته كمتغيّر جديد تلقائياً (أو انسخه في القيمة):
+                      </span>
+                      <div className="flex flex-wrap gap-1">
+                        {MOJEEB_TEMPLATE_PLACEHOLDERS.map((ph) => (
+                          <button
+                            key={ph.token}
+                            type="button"
+                            onClick={() => {
+                              const list = currentTpl.parameters || [];
+                              const emptyIdx = list.findIndex((p) => !p.value.trim());
+                              if (emptyIdx >= 0) {
+                                const updated = [...list];
+                                updated[emptyIdx] = { ...updated[emptyIdx], value: ph.token };
+                                updateScenarioTemplate(activeMojeebScenario, { parameters: updated });
+                              } else {
+                                updateScenarioTemplate(activeMojeebScenario, {
+                                  parameters: [...list, { key: String(list.length + 1), value: ph.token }],
+                                });
+                              }
+                            }}
+                            className="text-[10px] font-bold bg-slate-100 hover:bg-emerald-100 text-slate-700 hover:text-emerald-900 border border-slate-200 px-2 py-0.5 rounded-md cursor-pointer transition-colors"
+                            title={`إدراج ${ph.token}`}
+                          >
+                            {ph.label} <span className="font-mono opacity-75">{ph.token}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Optional Header Text Variable & Header Media URL */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 border-t border-slate-100 pt-3">
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold text-slate-700 block">
+                        متغيّر رأس النص (اسم المفتاح - اختياري)
+                      </label>
+                      <input
+                        type="text"
+                        value={currentTpl.headerParameterKey || ""}
+                        onChange={(e) => updateScenarioTemplate(activeMojeebScenario, { headerParameterKey: e.target.value })}
+                        placeholder="1 أو name (بحد أقصى متغيّر واحد)"
+                        dir="ltr"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-mono focus:outline-hidden focus:border-emerald-500"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold text-slate-700 block">
+                        قيمة متغيّر رأس النص (اختياري)
+                      </label>
+                      <input
+                        type="text"
+                        value={currentTpl.headerParameterValue || ""}
+                        onChange={(e) => updateScenarioTemplate(activeMojeebScenario, { headerParameterValue: e.target.value })}
+                        placeholder="مثال: {اسم_العميل}"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-hidden focus:border-emerald-500"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold text-slate-700 block">
+                        رابط وسائط الرأس (<code className="font-mono">header_media_url</code> - اختياري)
+                      </label>
+                      <input
+                        type="text"
+                        value={currentTpl.headerMediaUrl || ""}
+                        onChange={(e) => updateScenarioTemplate(activeMojeebScenario, { headerMediaUrl: e.target.value })}
+                        placeholder="https://... (اتركه فارغاً لاستخدام صورة العيّنة)"
+                        dir="ltr"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-mono focus:outline-hidden focus:border-emerald-500"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Optional Dynamic Buttons Builder */}
+                  <div className="space-y-2 border-t border-slate-100 pt-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <span className="text-[11px] font-bold text-slate-700 block">
+                          الأزرار الديناميكية (<code className="font-mono">template.buttons[]</code> — اختياري، للأزرار المتغيّرة فقط):
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const list = currentTpl.buttons || [];
+                          updateScenarioTemplate(activeMojeebScenario, {
+                            buttons: [...list, { index: list.length, type: "url_suffix", value: "" }],
+                          });
+                        }}
+                        className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                      >
+                        <Plus className="w-3 h-3" />
+                        إضافة زر
+                      </button>
+                    </div>
+
+                    {(currentTpl.buttons || []).map((btn, bIdx) => (
+                      <div key={bIdx} className="grid grid-cols-12 gap-2 items-center">
+                        <input
+                          type="number"
+                          min={0}
+                          value={btn.index}
+                          onChange={(e) => {
+                            const updated = [...(currentTpl.buttons || [])];
+                            updated[bIdx] = { ...updated[bIdx], index: Math.max(0, parseInt(e.target.value, 10) || 0) };
+                            updateScenarioTemplate(activeMojeebScenario, { buttons: updated });
+                          }}
+                          placeholder="index"
+                          dir="ltr"
+                          title="فهرس الزر (يبدأ من 0)"
+                          className="col-span-2 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono"
+                        />
+                        <select
+                          value={btn.type}
+                          onChange={(e) => {
+                            const updated = [...(currentTpl.buttons || [])];
+                            updated[bIdx] = { ...updated[bIdx], type: e.target.value as any };
+                            updateScenarioTemplate(activeMojeebScenario, { buttons: updated });
+                          }}
+                          className="col-span-4 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono"
+                        >
+                          <option value="url_suffix">url_suffix (رابط ديناميكي)</option>
+                          <option value="quick_reply_payload">quick_reply_payload (رد سريع)</option>
+                          <option value="coupon_code">coupon_code (كود خصم)</option>
+                          <option value="otp_code">otp_code (رمز تحقق OTP)</option>
+                        </select>
+                        <input
+                          type="text"
+                          value={btn.value}
+                          onChange={(e) => {
+                            const updated = [...(currentTpl.buttons || [])];
+                            updated[bIdx] = { ...updated[bIdx], value: e.target.value };
+                            updateScenarioTemplate(activeMojeebScenario, { buttons: updated });
+                          }}
+                          placeholder="القيمة أو {رقم_الفاتورة}"
+                          dir="ltr"
+                          className="col-span-5 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-mono"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const updated = (currentTpl.buttons || []).filter((_, i) => i !== bIdx);
+                            updateScenarioTemplate(activeMojeebScenario, { buttons: updated });
+                          }}
+                          className="col-span-1 p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg flex items-center justify-center cursor-pointer"
+                          title="حذف الزر"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Quick Test Send Box (Template OR Free Text) */}
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                <Send className="w-4 h-4 text-emerald-600" />
+                اختبار الإرسال عبر Mojeeb API:
+              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-1 bg-white border border-slate-200 p-0.5 rounded-lg text-[11px] font-bold">
+                  <button
+                    type="button"
+                    onClick={() => setMojeebTestSendKind("template")}
+                    className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
+                      mojeebTestSendKind === "template" ? "bg-emerald-700 text-white" : "text-slate-600 hover:bg-slate-100"
+                    }`}
+                  >
+                    قالب معتمد (أول مرة)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMojeebTestSendKind("text")}
+                    className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
+                      mojeebTestSendKind === "text" ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-100"
+                    }`}
+                  >
+                    رسالة حرة (24 ساعة)
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-1 bg-white border border-slate-200 p-0.5 rounded-lg text-[11px] font-bold">
+                  <button
+                    type="button"
+                    onClick={() => setMojeebTestMode("phone")}
+                    className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
+                      mojeebTestMode === "phone" ? "bg-emerald-600 text-white" : "text-slate-600 hover:bg-slate-100"
+                    }`}
+                  >
+                    برقم الهاتف (to)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMojeebTestMode("username")}
+                    className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
+                      mojeebTestMode === "username" ? "bg-emerald-600 text-white" : "text-slate-600 hover:bg-slate-100"
+                    }`}
+                  >
+                    باسم المستخدم (@username)
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="space-y-1">
+                <label className="text-[11px] font-bold text-slate-600 block">
+                  {mojeebTestMode === "phone" ? "رقم المستلم (مثال: 010... أو +2010...)" : "اسم المستخدم في واتساب (مثال: sara.k)"}
+                </label>
+                <input
+                  type="text"
+                  value={mojeebTestRecipient}
+                  onChange={(e) => setMojeebTestRecipient(e.target.value)}
+                  placeholder={mojeebTestMode === "phone" ? "+201012345678" : "@sara.k"}
+                  dir="ltr"
+                  className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono focus:outline-hidden focus:border-emerald-500"
+                />
+              </div>
+
+              <div className="md:col-span-2 space-y-1">
+                <label className="text-[11px] font-bold text-slate-600 block">
+                  {mojeebTestSendKind === "template"
+                    ? `سيتم اختبار القالب المحدد أعلاه (${getScenarioTemplate(activeMojeebScenario).name || "أدخل اسم القالب أعلاه"} / ${getScenarioTemplate(activeMojeebScenario).language || "ar"}) ببيانات تجريبية`
+                    : "نص الرسالة الحرة التجريبية"}
+                </label>
+                <div className="flex gap-2">
+                  {mojeebTestSendKind === "text" ? (
+                    <input
+                      type="text"
+                      value={mojeebTestBody}
+                      onChange={(e) => setMojeebTestBody(e.target.value)}
+                      className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-hidden focus:border-emerald-500"
+                    />
+                  ) : (
+                    <div className="flex-1 bg-white border border-emerald-200 rounded-lg px-3 py-2 text-xs text-slate-700 flex items-center justify-between font-mono">
+                      <span className="truncate">
+                        {getScenarioTemplate(activeMojeebScenario).name
+                          ? `${getScenarioTemplate(activeMojeebScenario).name} (${getScenarioTemplate(activeMojeebScenario).language || "ar"})`
+                          : "لم يُكتب اسم القالب بعد في القسم أعلاه"}
+                      </span>
+                      <span className="text-[10px] bg-emerald-50 text-emerald-800 px-1.5 py-0.5 rounded font-cairo font-bold shrink-0">
+                        {(getScenarioTemplate(activeMojeebScenario).parameters || []).length} متغيّر
+                      </span>
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    disabled={mojeebTestLoading}
+                    onClick={async () => {
+                      const target = mojeebTestRecipient.trim();
+                      if (!target) {
+                        setMojeebTestFeedback({
+                          type: "error",
+                          text: mojeebTestMode === "phone"
+                            ? "أدخل رقم هاتف المستلم للتجربة."
+                            : "أدخل اسم المستخدم في واتساب للتجربة."
+                        });
+                        return;
+                      }
+
+                      setMojeebTestLoading(true);
+                      setMojeebTestFeedback(null);
+                      try {
+                        let res;
+                        if (mojeebTestSendKind === "template") {
+                          const tplCfg = getScenarioTemplate(activeMojeebScenario);
+                          if (!tplCfg.name.trim() || !tplCfg.language.trim()) {
+                            setMojeebTestFeedback({
+                              type: "error",
+                              text: "يرجى إدخال اسم القالب المعتمد ورمز اللغة في القسم أعلاه قبل إرسال التجربة."
+                            });
+                            return;
+                          }
+                          const sampleVars: Record<string, string> = {
+                            "{اسم_المكتب}": headerText.trim() || "مكتب مزايا للجوازات",
+                            "{الترويسة_الفرعية}": subHeaderText.trim() || "جوازات طنطا والمعاملات الحكومية",
+                            "{اسم_العميل}": "أحمد محمد (تجربة)",
+                            "{رقم_الفاتورة}": "1001",
+                            "{تاريخ_اليوم}": new Date().toISOString().split("T")[0],
+                            "{الموظف}": activeEmployee.name || "الموظف",
+                            "{حالة_الفاتورة}": "جديدة",
+                            "{الخدمات}": "استخراج جواز سفر عادي",
+                            "{موعد_التسليم}": new Date().toISOString().split("T")[0],
+                            "{السعر}": "1500.00 ج.م",
+                            "{رقم_الارشيف}": "A-12",
+                            "{هاتف_التواصل}": contactPhone.trim() || "01000000000",
+                            "{رقم_التواصل}": contactPhone.trim() || "01000000000",
+                            "{ملاحظة_التنفيذ}": "رسالة اختبار",
+                            "{الرسالة_الكاملة}": mojeebTestBody.trim(),
+                          };
+                          const resolvedTemplate = resolveMojeebTemplatePayload(tplCfg, sampleVars);
+                          res = await sendWhatsAppTemplateViaMojeeb({
+                            agentId: mojeebAgentId.trim() || undefined,
+                            from: mojeebFromPhone.trim() || undefined,
+                            ...(mojeebTestMode === "phone" ? { to: target } : { recipientUsername: target }),
+                            template: resolvedTemplate,
+                            idempotencyKey: `settings-tpl-test-${Date.now()}`
+                          });
+                        } else {
+                          res = await sendWhatsAppViaMojeeb({
+                            agentId: mojeebAgentId.trim() || undefined,
+                            from: mojeebFromPhone.trim() || undefined,
+                            ...(mojeebTestMode === "phone" ? { to: target } : { recipientUsername: target }),
+                            body: mojeebTestBody.trim(),
+                            idempotencyKey: `settings-test-${Date.now()}`
+                          });
+                        }
+
+                        if (!res.success) {
+                          setMojeebTestFeedback({
+                            type: "error",
+                            text: res.error || "فشل الاختبار عبر واجهة مجيب."
+                          });
+                        } else {
+                          const msgId = res.data?.id ? ` | معرّف الرسالة: ${res.data.id}` : "";
+                          const status = res.data?.status ? ` | الحالة: ${res.data.status}` : "";
+                          const type = res.data?.type ? ` | النوع: ${res.data.type}` : "";
+                          setMojeebTestFeedback({
+                            type: "success",
+                            text: `نجح الإرسال! تم إدراج الرسالة في طابور مجيب (HTTP 202)${type}${status}${msgId}.`
+                          });
+                        }
+                      } finally {
+                        setMojeebTestLoading(false);
+                      }
+                    }}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 shadow-xs"
+                  >
+                    {mojeebTestLoading ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        جاري الإرسال...
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-3.5 h-3.5" />
+                        {mojeebTestSendKind === "template" ? "إرسال تجربة القالب" : "إرسال تجربة"}
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {mojeebTestFeedback && (
+              <div
+                className={`rounded-lg p-3 border text-xs font-bold flex items-start gap-2 ${
+                  mojeebTestFeedback.type === "success"
+                    ? "bg-emerald-50 border-emerald-200 text-emerald-900"
+                    : "bg-rose-50 border-rose-200 text-rose-900"
+                }`}
+              >
+                {mojeebTestFeedback.type === "success" ? (
+                  <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                )}
+                <span className="leading-relaxed">{mojeebTestFeedback.text}</span>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* WhatsApp Notification Message Templates Card */}

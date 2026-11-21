@@ -110,6 +110,38 @@ export interface HolidayItem {
   shifted?: boolean; // تم ترحيلها بقرار حكومي
 }
 
+export type MojeebTemplateScenario = "welcome" | "ready" | "delivered" | "partialReady" | "reminder";
+
+export interface MojeebTemplateParamMapping {
+  key: string;
+  value: string;
+}
+
+export interface MojeebTemplateButtonConfig {
+  index: number;
+  type: "url_suffix" | "quick_reply_payload" | "coupon_code" | "otp_code";
+  value: string;
+}
+
+export interface MojeebTemplateConfig {
+  enabled: boolean;
+  name: string;
+  language: string;
+  parameters?: MojeebTemplateParamMapping[];
+  headerParameterKey?: string;
+  headerParameterValue?: string;
+  headerMediaUrl?: string;
+  buttons?: MojeebTemplateButtonConfig[];
+}
+
+export interface MojeebTemplatesSettings {
+  welcome?: MojeebTemplateConfig;
+  ready?: MojeebTemplateConfig;
+  delivered?: MojeebTemplateConfig;
+  partialReady?: MojeebTemplateConfig;
+  reminder?: MojeebTemplateConfig;
+}
+
 export interface AppSettings {
   headerText: string; // نص مقدمة الفاتورة
   subHeaderText?: string; // السطر الفرعي أسفل ترويسة الفاتورة المطبوعة (مثل: جوازات طنطا والمعاملات الحكومية)
@@ -142,6 +174,9 @@ export interface AppSettings {
       notes?: string;
     }[];
   };
+  mojeebAgentId?: string; // معرّف الوكيل (UUID) على موقع مجيب
+  mojeebFromPhone?: string; // رقم واتساب الأعمال المُرسِل بصيغة E.164 (مثل +2010...)
+  mojeebTemplates?: MojeebTemplatesSettings; // قوالب واتساب المعتمدة على مجيب للإرسال لأول مرة وخارج نافذة الـ 24 ساعة
 }
 
 export interface AmanPostponedItem {

@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { Invoice, InvoiceStatus, AppSettings, Service, Employee, CustomerInput, GovernmentFine, DEFAULT_APPLICANT_CAPACITIES } from "../types";
+import { Invoice, InvoiceStatus, AppSettings, Service, Employee, CustomerInput, GovernmentFine, DEFAULT_APPLICANT_CAPACITIES, MojeebTemplateScenario } from "../types";
 import { updateInvoiceOnServer, deleteInvoiceOnServer, importInvoicesFromGoogleSheet } from "../lib/api";
 import { calculateWorkingDaysDeliveryDate, getArabicDayName, recalculateCustomerServicesDeliveryDates } from "../lib/businessDays";
-import { generateWhatsAppWelcomeMessage, generateWhatsAppReadyMessage, generateWhatsAppPartialReadyMessage, getWhatsAppUrl } from "../lib/whatsapp";
+import { generateWhatsAppWelcomeMessage, generateWhatsAppReadyMessage, generateWhatsAppPartialReadyMessage, buildInvoiceTemplateVariables, dispatchWhatsAppViaMojeebSmart } from "../lib/whatsapp";
 import { Search, Edit3, Trash2, Printer, Send, CheckCircle, PackageOpen, X, MapPin, Calendar, Info, RefreshCw, AlertCircle, Save, AlertTriangle, CheckSquare, Square, Clock, MessageSquare, Check, Sparkles } from "lucide-react";
 import ThermalReceipt from "./ThermalReceipt";
 import { getCustomerTheme, getArabicOrdinalLabel, getServiceItemTheme } from "../lib/customerVisualThemes";
@@ -65,6 +65,8 @@ export default function InvoiceQuery({
   // Loading from Google Sheets state
   const [isLoadingSheets, setIsLoadingSheets] = useState(false);
   const [sheetNotice, setSheetNotice] = useState<string | null>(null);
+  const [sendingWhatsAppKey, setSendingWhatsAppKey] = useState<string | null>(null);
+  const [whatsappNotice, setWhatsappNotice] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   // Track that initial fetch from Google Sheets happens only once upon mount
   const hasFetchedOnMountRef = useRef(false);
@@ -237,11 +239,63 @@ export default function InvoiceQuery({
 
   const lastWhatsAppDispatchTime = useRef<number>(0);
 
-  // WhatsApp triggers (deduplicated, single-dispatch, and debounced)
-  const handleSendWhatsAppWelcome = (inv: Invoice) => {
+  const dispatchMojeebWhatsApp = async (
+    scenario: MojeebTemplateScenario,
+    dispatchKey: string,
+    rawPhone: string,
+    message: string,
+    variables: Record<string, string>,
+    idempotencyKey: string,
+    successSummary: string
+  ) => {
+    if (sendingWhatsAppKey) return;
+
+    const trimmedPhone = (rawPhone || "").trim();
+    if (!trimmedPhone) {
+      setWhatsappNotice({
+        type: "error",
+        text: "رقم هاتف العميل غير متوفر في هذه الفاتورة لإرسال رسالة الواتساب."
+      });
+      return;
+    }
+
+    setSendingWhatsAppKey(dispatchKey);
+    setWhatsappNotice(null);
+    try {
+      const result = await dispatchWhatsAppViaMojeebSmart({
+        scenario,
+        settings,
+        to: trimmedPhone,
+        freeTextBody: message,
+        variables,
+        idempotencyKey
+      });
+
+      if (!result.success) {
+        setWhatsappNotice({
+          type: "error",
+          text: result.error || "تعذر إرسال رسالة الواتساب عبر مجيب API."
+        });
+        return;
+      }
+
+      const msgIdText = result.data?.id ? ` (مرجع: ${result.data.id})` : "";
+      const modeLabel = result.dispatchMode === "template"
+        ? `قالب معتمد "${result.templateName}"`
+        : "رسالة نصية حرة";
+      setWhatsappNotice({
+        type: "success",
+        text: `${successSummary} (${modeLabel}) عبر مجيب API بنجاح${msgIdText}.`
+      });
+    } finally {
+      setSendingWhatsAppKey(null);
+    }
+  };
+
+  // WhatsApp triggers via Mojeeb API (supports approved templates for first-time / outside 24h window)
+  const handleSendWhatsAppWelcome = async (inv: Invoice) => {
     if (!inv) return;
 
-    // Prevent double clicking or dual simultaneous dispatch
     const now = Date.now();
     if (now - lastWhatsAppDispatchTime.current < 2000) {
       return;
@@ -249,33 +303,39 @@ export default function InvoiceQuery({
     lastWhatsAppDispatchTime.current = now;
 
     const formattedMessage = generateWhatsAppWelcomeMessage(inv, services, settings);
-
     const targetCustomer = inv.customers.find(c => c.phone && c.phone.trim().length > 0) || inv.customers[0];
     const rawPhone = targetCustomer?.phone ? targetCustomer.phone.trim() : "";
-    if (rawPhone) {
-      const waUrl = getWhatsAppUrl(rawPhone, formattedMessage);
-      window.open(waUrl, "_blank");
-    } else {
-      alert("رقم هاتف العميل غير متوفر في هذه الفاتورة.");
-    }
+    const vars = buildInvoiceTemplateVariables(inv, services, settings, { fullMessage: formattedMessage });
+
+    await dispatchMojeebWhatsApp(
+      "welcome",
+      `inv-${inv.invoiceId}`,
+      rawPhone,
+      formattedMessage,
+      vars,
+      `welcome-${inv.invoiceId}-${Math.floor(Date.now() / 10000)}`,
+      `تم إدراج رسالة الترحيب للفاتورة #${inv.invoiceId} في طابور الإرسال`
+    );
   };
 
-  const handleSendWhatsAppReady = (inv: Invoice) => {
+  const handleSendWhatsAppReady = async (inv: Invoice) => {
     const { message: msg } = generateWhatsAppReadyMessage(inv, services, settings);
-
     const targetCustomer = inv.customers.find(c => c.phone && c.phone.trim().length > 0) || inv.customers[0];
     const rawPhone = targetCustomer?.phone ? targetCustomer.phone.trim() : "";
-    if (rawPhone) {
-      let cleanPhone = rawPhone.replace(/\D/g, "");
-      if (cleanPhone.startsWith("0")) cleanPhone = "2" + cleanPhone;
-      const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`;
-      window.open(waUrl, "_blank");
-    } else {
-      alert("رقم هاتف العميل غير متوفر في هذه الفاتورة.");
-    }
+    const vars = buildInvoiceTemplateVariables(inv, services, settings, { fullMessage: msg });
+
+    await dispatchMojeebWhatsApp(
+      "ready",
+      `inv-${inv.invoiceId}`,
+      rawPhone,
+      msg,
+      vars,
+      `ready-${inv.invoiceId}-${Math.floor(Date.now() / 10000)}`,
+      `تم إدراج إشعار جاهزية الفاتورة #${inv.invoiceId} في طابور الإرسال`
+    );
   };
 
-  const handleSendWhatsAppDelivered = (inv: Invoice) => {
+  const handleSendWhatsAppDelivered = async (inv: Invoice) => {
     const deliveryTemplate = settings.deliveryMessage || "تم تسليم أوراقك بنجاح يا {اسم_العميل} الفاتورة {رقم_الفاتورة}.";
     const customerNames = inv.customers.length > 1
       ? inv.customers.map(c => c.arabicName).join(" و ")
@@ -287,27 +347,44 @@ export default function InvoiceQuery({
 
     const targetCustomer = inv.customers.find(c => c.phone && c.phone.trim().length > 0) || inv.customers[0];
     const rawPhone = targetCustomer?.phone ? targetCustomer.phone.trim() : "";
-    if (rawPhone) {
-      let cleanPhone = rawPhone.replace(/\D/g, "");
-      if (cleanPhone.startsWith("0")) cleanPhone = "2" + cleanPhone;
-      const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`;
-      window.open(waUrl, "_blank");
-    } else {
-      alert("رقم هاتف العميل غير متوفر.");
-    }
+    const vars = buildInvoiceTemplateVariables(inv, services, settings, {
+      customerName: customerNames,
+      fullMessage: msg
+    });
+
+    await dispatchMojeebWhatsApp(
+      "delivered",
+      `inv-${inv.invoiceId}`,
+      rawPhone,
+      msg,
+      vars,
+      `delivered-${inv.invoiceId}-${Math.floor(Date.now() / 10000)}`,
+      `تم إدراج إشعار تسليم الفاتورة #${inv.invoiceId} في طابور الإرسال`
+    );
   };
 
-  // WhatsApp Partial Execution Notification
-  const handleSendWhatsAppPartial = (inv: Invoice, custIdx: number, sIdx: number) => {
+  // WhatsApp Partial Execution Notification via Mojeeb API
+  const handleSendWhatsAppPartial = async (inv: Invoice, custIdx: number, sIdx: number) => {
     const { message: msg, targetPhone: rawPhone } = generateWhatsAppPartialReadyMessage(inv, custIdx, sIdx, services, settings);
-    if (rawPhone) {
-      let cleanPhone = rawPhone.replace(/\D/g, "");
-      if (cleanPhone.startsWith("0")) cleanPhone = "2" + cleanPhone;
-      const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`;
-      window.open(waUrl, "_blank");
-    } else {
-      alert("رقم هاتف العميل غير متوفر في هذه الفاتورة.");
-    }
+    const cust = inv.customers[custIdx];
+    const srv = cust?.services[sIdx];
+    const matched = srv ? services.find(s => s.id === srv.serviceId || s.name === srv.serviceId) : undefined;
+    const vars = buildInvoiceTemplateVariables(inv, services, settings, {
+      customerName: cust?.arabicName,
+      servicesSummary: matched?.name || srv?.serviceId,
+      executionNote: srv?.executionNote || "",
+      fullMessage: msg,
+    });
+
+    await dispatchMojeebWhatsApp(
+      "partialReady",
+      `partial-${inv.invoiceId}-${custIdx}-${sIdx}`,
+      rawPhone,
+      msg,
+      vars,
+      `partial-${inv.invoiceId}-${custIdx}-${sIdx}-${Math.floor(Date.now() / 10000)}`,
+      `تم إدراج الإشعار الجزئي للفاتورة #${inv.invoiceId} في طابور الإرسال`
+    );
   };
 
   // Toggle individual service completion with timestamp and instantaneous optimistic UI update (0ms response)
@@ -489,6 +566,34 @@ export default function InvoiceQuery({
           </button>
         </div>
       </div>
+
+      {/* Mojeeb WhatsApp Dispatch Status Banner */}
+      {whatsappNotice && (
+        <div
+          className={`rounded-xl p-4 border flex items-start justify-between gap-3 shadow-xs font-cairo ${
+            whatsappNotice.type === "success"
+              ? "bg-emerald-50 border-emerald-200 text-emerald-900"
+              : "bg-rose-50 border-rose-200 text-rose-900"
+          }`}
+        >
+          <div className="flex items-start gap-2.5 text-xs font-bold leading-relaxed">
+            {whatsappNotice.type === "success" ? (
+              <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+            ) : (
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+            )}
+            <span>{whatsappNotice.text}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setWhatsappNotice(null)}
+            className="p-1 rounded-lg hover:bg-black/5 text-current shrink-0 cursor-pointer"
+            aria-label="إغلاق التنبيه"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Search Panel Filter Cards */}
       <div className="bg-white border border-slate-200 rounded-2xl shadow-xs p-6 space-y-4">
@@ -798,12 +903,22 @@ export default function InvoiceQuery({
                                       {isCompleted && (
                                         <button
                                           type="button"
+                                          disabled={Boolean(sendingWhatsAppKey)}
                                           onClick={() => handleSendWhatsAppPartial(inv, cIdx, sIdx)}
-                                          className="text-[10px] font-bold text-emerald-800 hover:text-emerald-950 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 px-2 py-0.5 rounded-md flex items-center gap-1 transition-colors shadow-2xs cursor-pointer font-cairo"
-                                          title="إرسال إشعار واتساب للعميل بانتهاء هذه الخدمة وجاري استكمال باقي المعاملات"
+                                          className="text-[10px] font-bold text-emerald-800 hover:text-emerald-950 bg-emerald-100 hover:bg-emerald-200 disabled:opacity-60 disabled:cursor-not-allowed border border-emerald-300 px-2 py-0.5 rounded-md flex items-center gap-1 transition-colors shadow-2xs cursor-pointer font-cairo"
+                                          title="إرسال إشعار واتساب عبر Mojeeb API بانتهاء هذه الخدمة وجاري استكمال باقي المعاملات"
                                         >
-                                          <MessageSquare className="w-2.5 h-2.5 text-emerald-700" />
-                                          <span>إشعار جزئي واتساب 📲</span>
+                                          {sendingWhatsAppKey === `partial-${inv.invoiceId}-${cIdx}-${sIdx}` ? (
+                                            <>
+                                              <RefreshCw className="w-2.5 h-2.5 text-emerald-700 animate-spin" />
+                                              <span>جاري الإرسال...</span>
+                                            </>
+                                          ) : (
+                                            <>
+                                              <MessageSquare className="w-2.5 h-2.5 text-emerald-700" />
+                                              <span>إشعار جزئي (API)</span>
+                                            </>
+                                          )}
                                         </button>
                                       )}
                                     </div>
@@ -909,22 +1024,33 @@ export default function InvoiceQuery({
                     </button>
                   )}
 
-                  {/* Resend buttons for WhatsApp messages */}
+                  {/* Resend buttons for WhatsApp messages via Mojeeb API */}
                   <button
+                    type="button"
+                    disabled={Boolean(sendingWhatsAppKey)}
                     onClick={() => {
                       if (inv.status === InvoiceStatus.NEW) handleSendWhatsAppWelcome(inv);
                       else if (inv.status === InvoiceStatus.READY) handleSendWhatsAppReady(inv);
                       else handleSendWhatsAppDelivered(inv);
                     }}
-                    className="border border-slate-200 text-slate-600 hover:bg-slate-100 font-bold font-cairo text-[11px] px-2.5 py-1.5 rounded-lg flex items-center gap-1"
+                    className="border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-60 disabled:cursor-not-allowed font-bold font-cairo text-[11px] px-2.5 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer transition-colors"
                     title={
                       inv.status === InvoiceStatus.NEW 
-                        ? "إعادة إرسال رسالة الترحيب بالفاتورة" 
-                        : (inv.status === InvoiceStatus.READY ? "إعادة إرسال إشعار جاهزية الأوراق" : "إعادة إرسال إشعار تسليم الأوراق")
+                        ? "إعادة إرسال رسالة الترحيب بالفاتورة عبر Mojeeb API" 
+                        : (inv.status === InvoiceStatus.READY ? "إعادة إرسال إشعار جاهزية الأوراق عبر Mojeeb API" : "إعادة إرسال إشعار تسليم الأوراق عبر Mojeeb API")
                     }
                   >
-                    <Send className="w-3.5 h-3.5" />
-                    إشعار
+                    {sendingWhatsAppKey === `inv-${inv.invoiceId}` ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        جاري الإرسال
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-3.5 h-3.5" />
+                        واتساب API
+                      </>
+                    )}
                   </button>
                 </div>
               </div>
@@ -1481,6 +1607,7 @@ export default function InvoiceQuery({
           services={services}
           onClose={() => setPrintInvoice(null)}
           onSendWhatsApp={() => handleSendWhatsAppWelcome(printInvoice)}
+          sendingWhatsApp={sendingWhatsAppKey === `inv-${printInvoice.invoiceId}`}
         />
       )}
 
