@@ -2,14 +2,13 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 import dotenv from "dotenv";
-import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 
 // Load environment variables
 dotenv.config();
 
 const app = express();
-const PORT = Number(process.env.DEFAULT_APP_PORT) || 3000;
+const PORT = Number(process.env.DEFAULT_APP_PORT || process.env.PORT) || 3000;
 
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
@@ -3941,7 +3940,9 @@ app.post("/api/whatsapp/mojeeb/template", async (req, res) => {
 
 // Vite Middleware Integration for Dev / Static Asset Server for Production
 async function startServer() {
-  if (process.env.NODE_ENV !== "production") {
+  const isProd = process.env.NODE_ENV === "production" || Boolean(process.argv[1]?.endsWith("server.cjs"));
+  if (!isProd) {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",

@@ -63,7 +63,15 @@ import {
 } from "../lib/businessDays";
 
 import { GovernmentFine } from "../types";
-import { DEFAULT_READY_PASSPORT_MESSAGE, DEFAULT_READY_GENERAL_MESSAGE, DEFAULT_PARTIAL_READY_MESSAGE, MOJEEB_TEMPLATE_PLACEHOLDERS, resolveMojeebTemplatePayload } from "../lib/whatsapp";
+import {
+  DEFAULT_READY_PASSPORT_MESSAGE,
+  DEFAULT_READY_GENERAL_MESSAGE,
+  DEFAULT_PARTIAL_READY_MESSAGE,
+  MOJEEB_TEMPLATE_PLACEHOLDERS,
+  RECOMMENDED_UNIFIED_META_TEMPLATE_TEXT,
+  RECOMMENDED_UNIFIED_META_TEMPLATE_PARAMS,
+  resolveMojeebTemplatePayload
+} from "../lib/whatsapp";
 
 interface SettingsConfigProps {
   settings: AppSettings;
@@ -116,6 +124,7 @@ export default function SettingsConfig({
   const [mojeebTestBody, setMojeebTestBody] = useState("رسالة تجريبية من نظام مكتب مزايا عبر واجهة مجيب (Mojeeb API).");
   const [mojeebTestLoading, setMojeebTestLoading] = useState(false);
   const [mojeebTestFeedback, setMojeebTestFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [copiedUnifiedMetaTemplate, setCopiedUnifiedMetaTemplate] = useState(false);
 
   useEffect(() => {
     setMojeebAgentId(settings.mojeebAgentId || "");
@@ -1326,6 +1335,57 @@ export default function SettingsConfig({
                     </div>
                   </div>
 
+                  {/* Solution 1: Ready Unified Template Preset (Multi-Service & Passport Details) */}
+                  <div className="bg-blue-50/70 border border-blue-200 rounded-xl p-3.5 space-y-2.5">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <span className="text-xs font-extrabold text-blue-950 block">
+                          ⭐ نموذج القالب الموحّد (يدعم تعدد الخدمات + تفاصيل الجوازات تلقائياً في متغيّر واحد):
+                        </span>
+                        <span className="text-[10px] text-blue-800 block mt-0.5">
+                          متغيّر <code className="font-mono font-bold bg-blue-100 px-1 rounded">{"{تفاصيل_المعاملة_المختصرة}"}</code> يجمع تلقائياً كل الخدمات ومواعيدها + الاسم الإنجليزي والمهنة وصفة مقدم الطلب والرقم القومي بسطر واحد متوافق مع قواعد ميتا.
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard?.writeText(RECOMMENDED_UNIFIED_META_TEMPLATE_TEXT);
+                            setCopiedUnifiedMetaTemplate(true);
+                            setTimeout(() => setCopiedUnifiedMetaTemplate(false), 2500);
+                          }}
+                          className="px-2.5 py-1.5 bg-white hover:bg-blue-100 text-blue-900 border border-blue-300 rounded-lg text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                        >
+                          {copiedUnifiedMetaTemplate ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                          <span>{copiedUnifiedMetaTemplate ? "تم النسخ!" : "نسخ النص لمجيب"}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            updateScenarioTemplate(activeMojeebScenario, {
+                              enabled: true,
+                              language: currentTpl.language || "ar",
+                              parameters: RECOMMENDED_UNIFIED_META_TEMPLATE_PARAMS.map((p) => ({ ...p })),
+                            });
+                          }}
+                          className="px-2.5 py-1.5 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
+                        >
+                          <CheckCircle className="w-3.5 h-3.5" />
+                          <span>تطبيق المتغيّرات الـ 6 تلقائياً</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <pre className="bg-white border border-blue-100 rounded-lg p-2.5 text-[11px] text-slate-800 whitespace-pre-wrap font-cairo leading-relaxed">
+                      {RECOMMENDED_UNIFIED_META_TEMPLATE_TEXT}
+                    </pre>
+
+                    <div className="text-[10px] text-slate-600 bg-white/80 border border-blue-100 rounded-lg px-2.5 py-1.5 leading-relaxed">
+                      <strong className="text-blue-900">مثال لما سيُرسل في {"{{4}}"} تلقائياً:</strong>{" "}
+                      <span>استخراج جواز سفر مستعجل (تسليم 2026-11-25) + شهادة تحركات (تسليم 2026-11-29) - EN: AHMED ALI - المهنة: مهندس - الصفة: بنفسه - قومي: 29501011234567</span>
+                    </div>
+                  </div>
+
                   {/* Body Parameters Builder */}
                   <div className="space-y-2 border-t border-slate-100 pt-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1677,19 +1737,24 @@ export default function SettingsConfig({
                             return;
                           }
                           const sampleVars: Record<string, string> = {
+                            "{تفاصيل_المعاملة_المختصرة}": "استخراج جواز سفر مستعجل (تسليم 2026-11-25) + شهادة تحركات (تسليم 2026-11-29) - EN: AHMED MOHAMED ALI - المهنة: مهندس - الصفة: بنفسه - قومي: 29501011234567",
                             "{اسم_المكتب}": headerText.trim() || "مكتب مزايا للجوازات",
                             "{الترويسة_الفرعية}": subHeaderText.trim() || "جوازات طنطا والمعاملات الحكومية",
-                            "{اسم_العميل}": "أحمد محمد (تجربة)",
+                            "{اسم_العميل}": "أحمد محمد علي (تجربة)",
                             "{رقم_الفاتورة}": "1001",
                             "{تاريخ_اليوم}": new Date().toISOString().split("T")[0],
                             "{الموظف}": activeEmployee.name || "الموظف",
                             "{حالة_الفاتورة}": "جديدة",
-                            "{الخدمات}": "استخراج جواز سفر عادي",
+                            "{الخدمات}": "استخراج جواز سفر مستعجل + شهادة تحركات",
                             "{موعد_التسليم}": new Date().toISOString().split("T")[0],
-                            "{السعر}": "1500.00 ج.م",
+                            "{السعر}": "1850.00 ج.م",
                             "{رقم_الارشيف}": "A-12",
                             "{هاتف_التواصل}": contactPhone.trim() || "01000000000",
                             "{رقم_التواصل}": contactPhone.trim() || "01000000000",
+                            "{الاسم_الانجليزي}": "AHMED MOHAMED ALI",
+                            "{المهنة}": "مهندس",
+                            "{صفة_مقدم_الطلب}": "بنفسه",
+                            "{الرقم_القومي}": "29501011234567",
                             "{ملاحظة_التنفيذ}": "رسالة اختبار",
                             "{الرسالة_الكاملة}": mojeebTestBody.trim(),
                           };

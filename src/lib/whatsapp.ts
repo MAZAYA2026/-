@@ -646,12 +646,32 @@ export function getWhatsAppUrl(phone: string, text: string): string {
   return `https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}`;
 }
 
+export const RECOMMENDED_UNIFIED_META_TEMPLATE_TEXT = `مرحباً أ/ {{1}}، تم تسجيل فاتورتك رقم #{{2}} لدى {{3}}.
+📋 تفاصيل المعاملة: {{4}}
+📅 موعد الاستلام المتوقع: {{5}}
+💰 الإجمالي: {{6}}
+لمراجعة البيانات أو لأي استفسار، يُرجى الرد على هذه الرسالة.`;
+
+export const RECOMMENDED_UNIFIED_META_TEMPLATE_PARAMS: { key: string; value: string }[] = [
+  { key: "1", value: "{اسم_العميل}" },
+  { key: "2", value: "{رقم_الفاتورة}" },
+  { key: "3", value: "{اسم_المكتب}" },
+  { key: "4", value: "{تفاصيل_المعاملة_المختصرة}" },
+  { key: "5", value: "{موعد_التسليم}" },
+  { key: "6", value: "{السعر}" },
+];
+
 export const MOJEEB_TEMPLATE_PLACEHOLDERS: { token: string; label: string }[] = [
+  { token: "{تفاصيل_المعاملة_المختصرة}", label: "⭐ تفاصيل المعاملة الموحدة (الخدمات + الجوازات)" },
   { token: "{اسم_العميل}", label: "اسم العميل" },
   { token: "{رقم_الفاتورة}", label: "رقم الفاتورة" },
-  { token: "{الخدمات}", label: "الخدمات" },
+  { token: "{الخدمات}", label: "الخدمات فقط" },
   { token: "{موعد_التسليم}", label: "موعد التسليم" },
   { token: "{السعر}", label: "الإجمالي" },
+  { token: "{الاسم_الانجليزي}", label: "الاسم الإنجليزي" },
+  { token: "{المهنة}", label: "المهنة" },
+  { token: "{صفة_مقدم_الطلب}", label: "صفة مقدم الطلب" },
+  { token: "{الرقم_القومي}", label: "الرقم القومي" },
   { token: "{رقم_الارشيف}", label: "درج الأرشيف" },
   { token: "{اسم_المكتب}", label: "اسم المكتب" },
   { token: "{هاتف_التواصل}", label: "هاتف المكتب" },
@@ -661,15 +681,20 @@ export const MOJEEB_TEMPLATE_PLACEHOLDERS: { token: string; label: string }[] = 
 ];
 
 /**
- * Meta WhatsApp Template parameter values cannot contain newlines, tabs, or >4 consecutive spaces.
- * This normalizes resolved values safely into a clean single-line string.
+ * Meta WhatsApp Template parameter values cannot contain newlines, tabs, or >4 consecutive spaces,
+ * and Meta rejects empty parameter strings. This normalizes values safely into a clean single-line string.
  */
-export function sanitizeMetaTemplateParamValue(value: string): string {
-  return String(value ?? "")
+export function sanitizeMetaTemplateParamValue(value: string, maxLength: number = 700): string {
+  let clean = String(value ?? "")
     .replace(/\r?\n+/g, " - ")
     .replace(/\t+/g, " ")
     .replace(/ {2,}/g, " ")
     .trim();
+
+  if (maxLength > 10 && clean.length > maxLength) {
+    clean = `${clean.slice(0, maxLength - 3).trim()}...`;
+  }
+  return clean;
 }
 
 export function applyTemplateVariables(rawTemplate: string, variables: Record<string, string>): string {
@@ -678,6 +703,94 @@ export function applyTemplateVariables(rawTemplate: string, variables: Record<st
     out = out.split(token).join(val ?? "");
   }
   return out;
+}
+
+/**
+ * Solution 1 (Smart Unified Parameter):
+ * Builds a single-line, Meta-compliant summary containing ALL customers, ALL services
+ * (with quantities, fines, and individual delivery dates when multiple), plus passport-specific
+ * metadata (English name, profession, applicant capacity, national ID) whenever present.
+ */
+export function buildCompactTransactionDetailsForTemplate(
+  inv: Invoice,
+  services: Service[],
+  settings: AppSettings,
+  extra?: {
+    customerName?: string;
+    servicesSummary?: string;
+    executionNote?: string;
+  }
+): string {
+  const customHolidays = settings.customHolidays || [];
+  const includeSaturday = settings.includeSaturdayAsWeekend !== false;
+  const invoiceBaseDate = inv.date || new Date().toISOString().split("T")[0];
+  const customers = Array.isArray(inv.customers) ? inv.customers : [];
+
+  if (customers.length === 0) {
+    return sanitizeMetaTemplateParamValue(extra?.servicesSummary || "معاملة مسجلة", 650) || "-";
+  }
+
+  const isMultiCustomer = customers.length > 1;
+  const customerSegments: string[] = [];
+
+  customers.forEach((cust, cIdx) => {
+    const seqServices = recalculateCustomerServicesDeliveryDates(
+      cust.services || [],
+      invoiceBaseDate,
+      services,
+      customHolidays,
+      includeSaturday
+    );
+
+    const hasMultipleServicesForCustomer = seqServices.length > 1;
+    const serviceParts = seqServices.map((s) => {
+      const matched = services.find((srv) => srv.id === s.serviceId || srv.name === s.serviceId);
+      const rawName = matched?.name || s.serviceId || "";
+      const cleanName = rawName.replace(/^#+\s*/, "").trim() || rawName;
+
+      const tags: string[] = [];
+      if (s.quantity > 1) tags.push(`×${s.quantity}`);
+      if (s.fineAmount && s.fineAmount > 0) tags.push(`غرامة ${s.fineAmount} ج.م`);
+      if (hasMultipleServicesForCustomer && s.deliveryDate) tags.push(`تسليم ${s.deliveryDate}`);
+
+      return tags.length > 0 ? `${cleanName} (${tags.join("، ")})` : cleanName;
+    });
+
+    const detailsParts: string[] = [];
+    const servicesLine = serviceParts.length > 0
+      ? serviceParts.join(" + ")
+      : (extra?.servicesSummary || "");
+
+    if (servicesLine) {
+      detailsParts.push(servicesLine);
+    }
+
+    if (cust.englishName && cust.englishName.trim()) {
+      detailsParts.push(`EN: ${cust.englishName.trim()}`);
+    }
+    if (cust.profession && cust.profession.trim()) {
+      detailsParts.push(`المهنة: ${cust.profession.trim()}`);
+    }
+    if (cust.applicantCapacity && cust.applicantCapacity.trim()) {
+      detailsParts.push(`الصفة: ${cust.applicantCapacity.trim()}`);
+    }
+    if (cust.nationalId && cust.nationalId.trim()) {
+      detailsParts.push(`قومي: ${cust.nationalId.trim()}`);
+    }
+
+    const joinedDetails = detailsParts.join(" - ");
+    if (isMultiCustomer) {
+      customerSegments.push(`(${cIdx + 1}) ${cust.arabicName}: ${joinedDetails}`);
+    } else {
+      customerSegments.push(joinedDetails);
+    }
+  });
+
+  if (extra?.executionNote && extra.executionNote.trim()) {
+    customerSegments.push(`ملاحظة: ${extra.executionNote.trim()}`);
+  }
+
+  return sanitizeMetaTemplateParamValue(customerSegments.join(" | "), 650) || "-";
 }
 
 export function buildInvoiceTemplateVariables(
@@ -701,8 +814,17 @@ export function buildInvoiceTemplateVariables(
 
   const allDeliveryDates: string[] = [];
   const allServicesSummary: string[] = [];
+  const englishNames: string[] = [];
+  const professions: string[] = [];
+  const capacities: string[] = [];
+  const nationalIds: string[] = [];
 
   (inv.customers || []).forEach((cust) => {
+    if (cust.englishName?.trim()) englishNames.push(cust.englishName.trim());
+    if (cust.profession?.trim()) professions.push(cust.profession.trim());
+    if (cust.applicantCapacity?.trim()) capacities.push(cust.applicantCapacity.trim());
+    if (cust.nationalId?.trim()) nationalIds.push(cust.nationalId.trim());
+
     const seqServices = recalculateCustomerServicesDeliveryDates(
       cust.services || [],
       invoiceBaseDate,
@@ -712,7 +834,8 @@ export function buildInvoiceTemplateVariables(
     );
     seqServices.forEach((s) => {
       const matched = services.find((srv) => srv.id === s.serviceId || srv.name === s.serviceId);
-      const srvName = matched?.name || s.serviceId;
+      const rawName = matched?.name || s.serviceId;
+      const srvName = rawName.replace(/^#+\s*/, "").trim() || rawName;
       allServicesSummary.push(s.quantity > 1 ? `${srvName} (×${s.quantity})` : srvName);
       if (s.deliveryDate && !allDeliveryDates.includes(s.deliveryDate)) {
         allDeliveryDates.push(s.deliveryDate);
@@ -744,22 +867,29 @@ export function buildInvoiceTemplateVariables(
         ? `جاهزة للتسليم (درج: ${inv.archiveDrawer || "N/A"})`
         : "تم التسليم";
 
+  const compactTransactionDetails = buildCompactTransactionDetailsForTemplate(inv, services, settings, extra);
+
   return {
+    "{تفاصيل_المعاملة_المختصرة}": compactTransactionDetails,
     "{اسم_المكتب}": header,
     "{الترويسة_الفرعية}": subHeader,
     "{اسم_العميل}": customerNames,
     "{رقم_الفاتورة}": String(inv.invoiceId ?? ""),
     "{تاريخ_اليوم}": invoiceDateClean,
-    "{الموظف}": inv.employeeName || "",
+    "{الموظف}": inv.employeeName || "-",
     "{حالة_الفاتورة}": statusText,
-    "{الخدمات}": extra?.servicesSummary || allServicesSummary.join("، "),
+    "{الخدمات}": extra?.servicesSummary || allServicesSummary.join(" + ") || "-",
     "{موعد_التسليم}": formattedDelivery,
     "{السعر}": `${Number(inv.totalAmount || 0).toFixed(2)} ج.م`,
     "{رقم_الارشيف}": inv.archiveDrawer || "درج الحفظ المخصص",
-    "{هاتف_التواصل}": contact,
-    "{رقم_التواصل}": contact,
-    "{ملاحظة_التنفيذ}": extra?.executionNote || "",
-    "{الرسالة_الكاملة}": extra?.fullMessage || "",
+    "{هاتف_التواصل}": contact || "-",
+    "{رقم_التواصل}": contact || "-",
+    "{الاسم_الانجليزي}": englishNames.join(" | ") || "-",
+    "{المهنة}": professions.join(" | ") || "-",
+    "{صفة_مقدم_الطلب}": capacities.join(" | ") || "-",
+    "{الرقم_القومي}": nationalIds.join(" | ") || "-",
+    "{ملاحظة_التنفيذ}": extra?.executionNote || "-",
+    "{الرسالة_الكاملة}": extra?.fullMessage || "-",
   };
 }
 
@@ -779,15 +909,17 @@ export function resolveMojeebTemplatePayload(
     for (const p of config.parameters) {
       const k = String(p.key || "").trim();
       if (!k) continue;
-      parameters[k] = sanitizeMetaTemplateParamValue(applyTemplateVariables(p.value || "", variables));
+      const sanitized = sanitizeMetaTemplateParamValue(applyTemplateVariables(p.value || "", variables), 650);
+      parameters[k] = sanitized || "-";
     }
   }
 
   let header_parameters: Record<string, string> | undefined;
   const hKey = String(config.headerParameterKey || "").trim();
   if (hKey) {
+    const sanitizedHeader = sanitizeMetaTemplateParamValue(applyTemplateVariables(config.headerParameterValue || "", variables), 60);
     header_parameters = {
-      [hKey]: sanitizeMetaTemplateParamValue(applyTemplateVariables(config.headerParameterValue || "", variables)),
+      [hKey]: sanitizedHeader || "-",
     };
   }
 
@@ -798,7 +930,7 @@ export function resolveMojeebTemplatePayload(
   const buttons: MojeebTemplateButtonInput[] = [];
   if (Array.isArray(config.buttons)) {
     for (const btn of config.buttons) {
-      const resolvedVal = sanitizeMetaTemplateParamValue(applyTemplateVariables(btn.value || "", variables));
+      const resolvedVal = sanitizeMetaTemplateParamValue(applyTemplateVariables(btn.value || "", variables), 200);
       if (!resolvedVal) continue;
       const entry: MojeebTemplateButtonInput = { index: Number(btn.index) || 0 };
       if (btn.type === "url_suffix") entry.url_suffix = resolvedVal;
