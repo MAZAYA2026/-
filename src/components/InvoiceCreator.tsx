@@ -5,7 +5,7 @@ import { calculateWorkingDaysDeliveryDate, getArabicDayName, isNonWorkingDay, re
 import { generateWhatsAppWelcomeMessage, buildInvoiceTemplateVariables, dispatchWhatsAppViaMojeebSmart } from "../lib/whatsapp";
 import { breakdownArabicName, extractAtomicWordTokens, normalizeArabic } from "../lib/dictionary";
 import { playLanguageWarningSound } from "../lib/audio";
-import { Plus, Trash2, FileText, UserPlus, Sparkles, Printer, Send, Check, AlertCircle, Info, Calendar, BookOpen, ShieldAlert, CalendarCheck, AlertTriangle, Volume2, Users, Camera, CheckSquare, Square, Search, X, RefreshCw } from "lucide-react";
+import { Plus, Trash2, FileText, UserPlus, Sparkles, Printer, Send, Check, AlertCircle, Info, Calendar, BookOpen, ShieldAlert, CalendarCheck, AlertTriangle, Volume2, Users, Camera, CheckSquare, Square, Search, X, RefreshCw, ChevronDown, ChevronUp } from "lucide-react";
 import ThermalReceipt from "./ThermalReceipt";
 import DocumentScannerModal from "./DocumentScannerModal";
 import { getCustomerTheme, getArabicOrdinalLabel, getServiceItemTheme } from "../lib/customerVisualThemes";
@@ -41,6 +41,7 @@ export default function InvoiceCreator({
 
   // Master form state: list of customers on this invoice
   const [customers, setCustomers] = useState<CustomerInput[]>([createEmptyCustomer()]);
+  const [collapsedCustomers, setCollapsedCustomers] = useState<Record<number, boolean>>({});
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
 
@@ -533,7 +534,18 @@ export default function InvoiceCreator({
   };
 
   const addCustomer = () => {
-    setCustomers([...customers, createEmptyCustomer()]);
+    const newIdx = customers.length;
+    setCustomers((prev) => [...prev, createEmptyCustomer()]);
+    setTimeout(() => {
+      const cardEl = document.getElementById(`invoice-customer-card-${newIdx}`);
+      cardEl?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      const nameInput = document.getElementById(`customer-arabic-name-${newIdx}`) as HTMLInputElement | null;
+      nameInput?.focus();
+    }, 60);
+  };
+
+  const toggleCustomerCollapse = (cIdx: number) => {
+    setCollapsedCustomers((prev) => ({ ...prev, [cIdx]: !prev[cIdx] }));
   };
 
   const removeCustomer = (cIdx: number) => {
@@ -544,6 +556,7 @@ export default function InvoiceCreator({
 
     const updated = customers.filter((_, idx) => idx !== cIdx);
     setCustomers(updated);
+    setCollapsedCustomers({});
   };
 
   const addServiceToCustomer = (cIdx: number) => {
@@ -753,6 +766,7 @@ export default function InvoiceCreator({
 
       // Clear Form
       setCustomers([createEmptyCustomer()]);
+      setCollapsedCustomers({});
       setErrors({});
     } catch (err) {
       console.error(err);
@@ -855,8 +869,30 @@ export default function InvoiceCreator({
     }
   };
 
+  // Precomputed live invoice totals for the horizontal footer bar
+  const liveTotals = useMemo(() => {
+    let govWithFines = 0;
+    let office = 0;
+    let grand = 0;
+    let totalServicesCount = 0;
+
+    customers.forEach((c) => {
+      c.services.forEach((s) => {
+        totalServicesCount += 1;
+        const matched = services.find((srv) => srv.id === s.serviceId || srv.name === s.serviceId);
+        if (matched) {
+          govWithFines += (matched.govPrice + (s.fineAmount || 0)) * s.quantity;
+          office += matched.officeFee * s.quantity;
+        }
+        grand += s.price || 0;
+      });
+    });
+
+    return { govWithFines, office, grand, totalServicesCount };
+  }, [customers, services]);
+
   return (
-    <div className="space-y-6">
+    <div dir="rtl" className="space-y-3 font-cairo">
       
       {/* LARGE Attention-Grabbing Language Mismatch Alert Banner */}
       {activeLanguageMismatch && (
@@ -897,22 +933,63 @@ export default function InvoiceCreator({
         </div>
       )}
 
-      {/* Page Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-5">
-        <div>
-          <h2 className="text-xl font-extrabold text-slate-900 font-cairo">شاشة تنفيذ الفاتورة</h2>
-          <p className="text-sm text-slate-500 mt-1">تفريغ فواتير واستمارات عملاء الجوازات وتعيين الفترات</p>
+      {/* Compact Unified Workspace Top Bar (Title + Employee + Quick OCR/Prospects + Quick Add Family Member) */}
+      <div className="bg-slate-900 text-white rounded-2xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 shadow-xs">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
+          <h2 className="text-sm sm:text-base font-extrabold text-white whitespace-nowrap">
+            شاشة تنفيذ الفاتورة
+          </h2>
+          <span className="text-slate-600 hidden sm:inline" aria-hidden="true">|</span>
+          <span className="text-xs text-slate-300 font-semibold whitespace-nowrap">
+            الموظف: <strong className="text-amber-400">{activeEmployee.name}</strong>
+          </span>
+          <span className="text-slate-600 hidden md:inline" aria-hidden="true">·</span>
+          <span className="text-[11px] text-slate-400 hidden xl:inline">
+            يمين: بيانات العميل والترجمة — يسار: الخدمات المطلوبة
+          </span>
         </div>
-        <div className="flex items-center gap-2 bg-blue-50 border border-blue-100 text-blue-800 px-4 py-2 rounded-xl text-xs font-bold font-cairo">
-          <Info className="w-4 h-4 text-blue-500" />
-          <span>الموظف الحالي: {activeEmployee.name}</span>
+
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedProspectIds([]);
+              setProspectSearchTerm("");
+              setIsSelectProspectModalOpen(true);
+            }}
+            className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+          >
+            <CheckSquare className="w-3.5 h-3.5 text-emerald-300" />
+            <span>
+              العملاء المحتملين{potentialCustomers.length > 0 ? ` (${potentialCustomers.length})` : ""}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsScannerOpen(true)}
+            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+          >
+            <Camera className="w-3.5 h-3.5 text-indigo-300" />
+            <span>مسح بطاقة / شهادة ميلاد</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={addCustomer}
+            className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-extrabold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            title="إضافة فرد أسرة جديد لنفس الفاتورة"
+          >
+            <UserPlus className="w-3.5 h-3.5" />
+            <span>+ فرد أسرة</span>
+          </button>
         </div>
       </div>
 
       {/* Mojeeb WhatsApp Dispatch Status Banner */}
       {whatsappNotice && (
         <div
-          className={`rounded-xl p-4 border flex items-start justify-between gap-3 shadow-xs font-cairo ${
+          className={`rounded-xl px-4 py-2.5 border flex items-start justify-between gap-3 shadow-xs font-cairo ${
             whatsappNotice.type === "success"
               ? "bg-emerald-50 border-emerald-200 text-emerald-900"
               : "bg-rose-50 border-rose-200 text-rose-900"
@@ -939,14 +1016,14 @@ export default function InvoiceCreator({
 
       {/* Success Notification */}
       {showSuccessToast && createdInvoiceId && (
-        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5 flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm animate-fade-in-up">
+        <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 flex flex-col md:flex-row items-center justify-between gap-3 shadow-xs animate-fade-in-up">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-emerald-500 rounded-lg text-white">
-              <Check className="w-5 h-5" />
+            <div className="p-2 bg-emerald-500 rounded-lg text-white shrink-0">
+              <Check className="w-4 h-4" />
             </div>
             <div>
-              <h4 className="font-bold text-slate-900 font-cairo text-sm">تم إنشاء الفاتورة وتسجيلها مباشرة على جوجل شيت! 📊✅</h4>
-              <p className="text-xs text-slate-600 mt-0.5">رقم الفاتورة: <span className="font-bold font-mono">#{createdInvoiceId}</span></p>
+              <h4 className="font-bold text-slate-900 font-cairo text-xs sm:text-sm">تم إنشاء الفاتورة وتسجيلها مباشرة على جوجل شيت!</h4>
+              <p className="text-xs text-slate-600 mt-0.5">رقم الفاتورة: <span className="font-bold font-mono tabular-nums">#{createdInvoiceId}</span></p>
             </div>
           </div>
           <div className="flex items-center gap-2 w-full md:w-auto">
@@ -964,17 +1041,17 @@ export default function InvoiceCreator({
                   });
                 }
               }}
-              className="flex-1 md:flex-initial bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold font-cairo text-xs px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-colors shadow-xs cursor-pointer"
+              className="flex-1 md:flex-initial bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold font-cairo text-xs px-3.5 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-colors shadow-xs cursor-pointer whitespace-nowrap"
               title="إرسال رسالة ترحيبية للعميل مباشرة عبر Mojeeb WhatsApp API"
             >
               {sendingWhatsApp ? (
                 <>
-                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                   جاري الإرسال...
                 </>
               ) : (
                 <>
-                  <Send className="w-4 h-4" />
+                  <Send className="w-3.5 h-3.5" />
                   رسالة واتس ترحيبية (API)
                 </>
               )}
@@ -989,9 +1066,9 @@ export default function InvoiceCreator({
                   alert("لم يتم العثور على بيانات الفاتورة لإعادة الطباعة.");
                 }
               }}
-              className="flex-1 md:flex-initial bg-slate-900 hover:bg-slate-800 text-white font-bold font-cairo text-xs px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-colors shadow-xs cursor-pointer"
+              className="flex-1 md:flex-initial bg-slate-900 hover:bg-slate-800 text-white font-bold font-cairo text-xs px-3.5 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-colors shadow-xs cursor-pointer whitespace-nowrap"
             >
-              <Printer className="w-4 h-4" />
+              <Printer className="w-3.5 h-3.5" />
               إعادة طباعة إيصال 8سم
             </button>
             <button 
@@ -1001,7 +1078,7 @@ export default function InvoiceCreator({
                 setCreatedInvoiceId(null);
                 setLastCreatedInvoice(null);
               }}
-              className="px-3 py-2 text-slate-500 hover:text-slate-800 font-bold text-xs cursor-pointer"
+              className="px-2.5 py-1.5 text-slate-500 hover:text-slate-800 font-bold text-xs cursor-pointer whitespace-nowrap"
             >
               تجاهل
             </button>
@@ -1010,973 +1087,920 @@ export default function InvoiceCreator({
       )}
 
       {/* Invoice Form */}
-      <form onSubmit={handleSubmitInvoice} className="space-y-6">
-        
-        {/* Quick Action Toolbar: Select from Potential Customers & AI OCR Document Scanner */}
-        <div className="bg-linear-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-900/40 rounded-2xl p-4 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 bg-indigo-600/30 rounded-xl border border-indigo-400/30 text-indigo-300 shrink-0">
-              <Users className="w-5 h-5" />
-            </div>
-            <div>
-              <h4 className="text-xs font-bold text-white flex items-center gap-2">
-                <span>تعبئة سريعة لبيانات الجوازات (# أو ##)</span>
-                {potentialCustomers.length > 0 && (
-                  <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] px-2 py-0.5 rounded-full font-bold">
-                    {potentialCustomers.length} عميل محتمل جاهز
-                  </span>
-                )}
-              </h4>
-              <p className="text-[11px] text-slate-300">
-                يمكنك إدخال البيانات يدوياً كالمعتاد، أو الاختيار المباشر من قائمة العملاء المحتملين أو مسح المستند بالذكاء الاصطناعي
-              </p>
-            </div>
-          </div>
+      <form onSubmit={handleSubmitInvoice} className="space-y-3">
 
-          <div className="flex items-center gap-2 shrink-0">
+        {/* Compact Color-Coded Navigator Bar when invoice has multiple customers */}
+        {customers.length > 1 && (
+          <div className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 flex flex-wrap items-center justify-between gap-2 font-cairo">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-xs font-bold text-slate-600 ml-1 flex items-center gap-1.5">
+                <Users className="w-3.5 h-3.5 text-slate-500" />
+                <span>أفراد الفاتورة ({customers.length}):</span>
+              </span>
+              {customers.map((c, idx) => {
+                const t = getCustomerTheme(idx);
+                const cTotal = c.services.reduce((sum, s) => sum + (s.price || 0), 0);
+                return (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => {
+                      setCollapsedCustomers((prev) => ({ ...prev, [idx]: false }));
+                      setTimeout(() => {
+                        document.getElementById(`invoice-customer-card-${idx}`)?.scrollIntoView({
+                          behavior: "smooth",
+                          block: "nearest",
+                        });
+                      }, 30);
+                    }}
+                    className={`px-2.5 py-1 rounded-lg border text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${t.navChipActive}`}
+                  >
+                    <span className={`w-4.5 h-4.5 rounded-full text-[10px] font-mono font-black flex items-center justify-center ${t.badgeBg}`}>
+                      {idx + 1}
+                    </span>
+                    <span className="max-w-[130px] truncate">{c.arabicName?.trim() || `العميل ${getArabicOrdinalLabel(idx)}`}</span>
+                    <span className="text-[10px] opacity-80 font-mono tabular-nums">
+                      ({c.services.length} · {cTotal.toFixed(0)} ج.م)
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
             <button
               type="button"
               onClick={() => {
-                setSelectedProspectIds([]);
-                setProspectSearchTerm("");
-                setIsSelectProspectModalOpen(true);
+                const anyExpanded = customers.some((_, idx) => !collapsedCustomers[idx]);
+                const nextState: Record<number, boolean> = {};
+                customers.forEach((_, idx) => {
+                  nextState[idx] = anyExpanded;
+                });
+                setCollapsedCustomers(nextState);
               }}
-              className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+              className="text-[11px] font-bold text-slate-600 hover:text-slate-900 px-2 py-1 rounded-lg hover:bg-slate-200/70 transition-colors cursor-pointer whitespace-nowrap"
             >
-              <CheckSquare className="w-4 h-4 text-emerald-300" />
-              <span>📋 اختيار من العملاء المحتملين</span>
+              {customers.some((_, idx) => !collapsedCustomers[idx]) ? "طي الكل" : "توسيع الكل"}
             </button>
-
-            <button
-              type="button"
-              onClick={() => setIsScannerOpen(true)}
-              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
-            >
-              <Camera className="w-4 h-4 text-indigo-300" />
-              <span>📸 مسح بطاقة / شهادة ميلاد</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Quick Color-Coded Navigator Bar when invoice has multiple customers */}
-        {customers.length > 1 && (
-          <div className="bg-white border border-slate-200 rounded-2xl p-3 shadow-xs flex flex-wrap items-center gap-2 font-cairo">
-            <span className="text-xs font-bold text-slate-600 ml-1 flex items-center gap-1.5">
-              <Users className="w-4 h-4 text-slate-500" />
-              <span>عملاء الفاتورة ({customers.length}):</span>
-            </span>
-            {customers.map((c, idx) => {
-              const t = getCustomerTheme(idx);
-              const cTotal = c.services.reduce((sum, s) => sum + (s.price || 0), 0);
-              return (
-                <button
-                  key={idx}
-                  type="button"
-                  onClick={() => {
-                    document.getElementById(`invoice-customer-card-${idx}`)?.scrollIntoView({
-                      behavior: "smooth",
-                      block: "start",
-                    });
-                  }}
-                  className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${t.navChipActive}`}
-                >
-                  <span className={`w-5 h-5 rounded-full text-[11px] font-mono font-black flex items-center justify-center ${t.badgeBg}`}>
-                    {idx + 1}
-                  </span>
-                  <span>{c.arabicName?.trim() || `العميل ${getArabicOrdinalLabel(idx)}`}</span>
-                  <span className="text-[10px] opacity-80 font-mono">
-                    ({c.services.length} خدمة • {cTotal.toFixed(0)} ج.م)
-                  </span>
-                </button>
-              );
-            })}
           </div>
         )}
 
-        {/* Customers list section */}
-        {customers.map((customer, cIdx) => {
-          const isPass = isPassportRelated(customer);
-          const theme = getCustomerTheme(cIdx);
-          const customerTotal = customer.services.reduce((sum, s) => sum + (s.price || 0), 0);
-          const customerOrdinal = getArabicOrdinalLabel(cIdx);
+        {/* Horizontal Widescreen Customer Cards */}
+        <div className="space-y-3">
+          {customers.map((customer, cIdx) => {
+            const isPass = isPassportRelated(customer);
+            const theme = getCustomerTheme(cIdx);
+            const customerTotal = customer.services.reduce((sum, s) => sum + (s.price || 0), 0);
+            const customerOrdinal = getArabicOrdinalLabel(cIdx);
+            const isCollapsed = customers.length > 1 && Boolean(collapsedCustomers[cIdx]);
 
-          return (
-            <React.Fragment key={cIdx}>
-              {/* Clear inter-customer visual separator */}
-              {cIdx > 0 && (
-                <div className="flex items-center gap-3 py-1 select-none">
-                  <div className={`flex-1 border-t-2 border-dashed ${theme.dividerLine}`} />
-                  <span className={`px-4 py-1 rounded-full text-xs font-extrabold font-cairo shadow-xs flex items-center gap-1.5 ${theme.dividerBadge}`}>
-                    <span>⬇️</span>
-                    <span>العميل {customerOrdinal} بنفس الفاتورة (لون {theme.colorName})</span>
-                  </span>
-                  <div className={`flex-1 border-t-2 border-dashed ${theme.dividerLine}`} />
-                </div>
-              )}
-
+            return (
               <div
+                key={cIdx}
                 id={`invoice-customer-card-${cIdx}`}
-                className={`bg-white rounded-2xl shadow-md overflow-hidden relative transition-all ${theme.cardBorder}`}
+                className={`bg-white rounded-2xl shadow-sm overflow-hidden relative transition-all ${theme.cardBorder}`}
               >
-                {/* Customer Index Header */}
-                <div className={`px-6 py-4 flex flex-wrap justify-between items-center gap-3 ${theme.headerBg}`}>
-                  <div className="flex items-center gap-3">
-                    <span className={`w-8 h-8 rounded-xl text-sm font-black font-mono flex items-center justify-center shadow-xs ${theme.badgeBg}`}>
+                {/* Compact Customer Header Strip */}
+                <div className={`px-4 py-2 flex flex-wrap justify-between items-center gap-2 ${theme.headerBg}`}>
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className={`w-6 h-6 rounded-lg text-xs font-black font-mono flex items-center justify-center shrink-0 ${theme.badgeBg}`}>
                       {cIdx + 1}
                     </span>
-                    <div>
-                      <h3 className={`font-extrabold text-sm font-cairo flex flex-wrap items-center gap-2 ${theme.titleText}`}>
-                        <span>بيانات العميل {customerOrdinal}</span>
-                        {customer.arabicName?.trim() && (
-                          <span className="text-xs font-bold bg-white/90 px-2.5 py-0.5 rounded-lg border border-slate-200 text-slate-800">
+                    <div className="flex flex-wrap items-center gap-2 min-w-0 text-xs">
+                      <h3 className={`font-extrabold whitespace-nowrap ${theme.titleText}`}>
+                        العميل {customerOrdinal}
+                      </h3>
+                      {customer.arabicName?.trim() && (
+                        <>
+                          <span className="text-slate-400" aria-hidden="true">·</span>
+                          <span className="font-bold text-slate-900 truncate max-w-[220px]">
                             {customer.arabicName.trim()}
                           </span>
-                        )}
-                      </h3>
+                        </>
+                      )}
+                      {customer.phone?.trim() && isCollapsed && (
+                        <>
+                          <span className="text-slate-400" aria-hidden="true">·</span>
+                          <span className="font-mono text-[11px] text-slate-600 tabular-nums">
+                            {customer.phone}
+                          </span>
+                        </>
+                      )}
+                      {isPass && (
+                        <>
+                          <span className="text-slate-400" aria-hidden="true">·</span>
+                          <span className="text-[11px] font-bold text-blue-700 whitespace-nowrap">
+                            جوازات (#)
+                          </span>
+                        </>
+                      )}
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className={`text-[11px] font-bold px-2.5 py-1 rounded-lg font-cairo ${theme.pillBg}`}>
+                  <div className="flex items-center gap-2.5 shrink-0 text-xs">
+                    <span className="text-slate-600 font-semibold whitespace-nowrap">
                       {customer.services.length} {customer.services.length === 1 ? "خدمة" : "خدمات"}
                     </span>
-                    <span className="text-[11px] font-mono font-extrabold px-2.5 py-1 rounded-lg bg-white border border-slate-300 text-slate-900 shadow-2xs">
-                      إجمالي العميل: {customerTotal.toFixed(0)} ج.م
+                    <span className="text-slate-300" aria-hidden="true">|</span>
+                    <span className="font-mono font-black text-slate-900 tabular-nums whitespace-nowrap">
+                      {customerTotal.toFixed(0)} ج.م
                     </span>
+
                     {customers.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => removeCustomer(cIdx)}
-                        className="px-2.5 py-1.5 bg-white/90 border border-rose-200 text-rose-600 hover:bg-rose-50 hover:text-rose-700 rounded-xl transition-colors text-xs font-bold font-cairo flex items-center gap-1 cursor-pointer"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>حذف العميل {customerOrdinal}</span>
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Customer input fields */}
-                <div className="p-6 space-y-6">
-                
-                {/* Row 1: Arabic Name & Phone */}
-                <div className="grid md:grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-slate-700 font-cairo flex items-center gap-1">
-                      الاسم العربي الثنائي أو الثلاثي <span className="text-rose-500 font-mono">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={customer.arabicName}
-                      onChange={(e) => handleArabicNameChange(cIdx, e.target.value)}
-                      onBlur={() => handleArabicNameBlur(cIdx)}
-                      placeholder="مثال: أحمد محمد علي"
-                      className={`w-full bg-slate-50 border rounded-xl px-4 py-3 text-sm focus:outline-hidden focus:ring-2 transition-all ${
-                        errors[`c-${cIdx}-arabicName`] 
-                          ? "border-rose-400 focus:ring-rose-200 text-rose-900 bg-rose-50/20" 
-                          : "border-slate-200 focus:border-red-500 focus:ring-red-100"
-                      }`}
-                      required
-                    />
-                    {/[a-zA-Z]/.test(customer.arabicName) && (
-                      <div className="bg-amber-100 border border-amber-300 text-amber-950 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 mt-1.5 animate-pulse">
-                        <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-                        <span>⚠️ تنبيه لفت نظر: تم إدخال حروف إنجليزية في خانة الاسم العربي! يرجى تحويل لغة الكتابة بالضغط على (Alt + Shift)</span>
-                      </div>
-                    )}
-                    {errors[`c-${cIdx}-arabicName`] && (
-                      <p className="text-[11px] text-rose-600 flex items-center gap-1 mt-1">
-                        <AlertCircle className="w-3.5 h-3.5" />
-                        <span>{errors[`c-${cIdx}-arabicName`]}</span>
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-slate-700 font-cairo flex justify-between items-center">
-                      <span>رقم الهاتف <span className="text-rose-500 font-mono">*</span></span>
-                      <span className={`text-[10px] font-mono ${customer.phone.length === 11 ? "text-emerald-600 font-bold" : "text-slate-400"}`}>
-                        {customer.phone.length} / 11 رقم
-                      </span>
-                    </label>
-                    <input
-                      type="text"
-                      value={customer.phone}
-                      onChange={(e) => handlePhoneChange(cIdx, e.target.value)}
-                      placeholder="رقم الهاتف (مصر: 11 رقم يبدأ بـ 01)"
-                      className={`w-full bg-slate-50 border rounded-xl px-4 py-3 text-sm focus:outline-hidden focus:ring-2 transition-all ${
-                        errors[`c-${cIdx}-phone`] 
-                          ? "border-rose-400 focus:ring-rose-200 text-rose-900 bg-rose-50/20" 
-                          : "border-slate-200 focus:border-red-500 focus:ring-red-100"
-                      }`}
-                      required
-                    />
-                    {errors[`c-${cIdx}-phone`] && (
-                      <p className="text-[11px] text-rose-600 flex items-center gap-1 mt-1">
-                        <AlertCircle className="w-3.5 h-3.5" />
-                        <span>{errors[`c-${cIdx}-phone`]}</span>
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                {/* Passport specific fields row: visible conditionally if starts with # or ## */}
-                {isPass && (
-                  <div className="bg-blue-50/40 p-4 rounded-xl border border-blue-100/60 space-y-4 animate-fade-in">
-                    
-                    <div className="flex items-center gap-1.5 text-blue-700 text-xs font-bold border-b border-blue-100/60 pb-1.5 font-cairo">
-                      <Sparkles className="w-4 h-4" />
-                      <span>بيانات استمارة الجوازات (مطلوبة لتفعيل الخدمة #)</span>
-                    </div>
-
-                    {/* Passport complementary fields in 4 columns: National ID, Birth Date, Profession, Applicant Capacity */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-                      {/* National ID */}
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-bold text-slate-700 font-cairo flex justify-between items-center">
-                          <span>الرقم القومي للعميل (14 رقم) <span className="text-rose-500">*</span></span>
-                          <span className={`text-[10px] font-mono ${customer.nationalId.length === 14 ? "text-emerald-600 font-bold" : "text-slate-400"}`}>
-                            {customer.nationalId.length} / 14 رقم
-                          </span>
-                        </label>
-                        <input
-                          type="text"
-                          value={customer.nationalId}
-                          onChange={(e) => handleNationalIdChange(cIdx, e.target.value)}
-                          placeholder="الرقم القومي المكون من 14 رقماً"
-                          className={`w-full bg-slate-50 border rounded-xl px-3 py-2.5 text-xs focus:outline-hidden font-mono ${
-                            errors[`c-${cIdx}-nationalId`] ? "border-rose-300 bg-rose-50/10" : "border-slate-200"
-                          }`}
-                        />
-                        {errors[`c-${cIdx}-nationalId`] && (
-                          <p className="text-[10px] text-rose-600 flex items-center gap-1 mt-1 font-cairo">
-                            <AlertCircle className="w-3.5 h-3.5" />
-                            <span>{errors[`c-${cIdx}-nationalId`]}</span>
-                          </p>
-                        )}
-                      </div>
-
-                      {/* Calculated / Editable Birth Date */}
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-bold text-slate-700 font-cairo flex items-center justify-between">
-                          <span>تاريخ الميلاد <span className="text-[9px] text-slate-400">(مستخرج تلقائياً)</span></span>
-                        </label>
-                        <div className="relative flex items-center">
-                          <input
-                            type="text"
-                            value={customer.birthDate}
-                            onChange={(e) => {
-                              const updated = [...customers];
-                              updated[cIdx].birthDate = e.target.value;
-                              setCustomers(updated);
-                            }}
-                            placeholder="YYYY/MM/DD (أو من الرقم القومي)"
-                            className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-3 py-2.5 text-xs font-mono font-bold focus:outline-hidden focus:border-red-500 focus:ring-2 focus:ring-red-200"
-                          />
-                        </div>
-                      </div>
-
-                      {/* Profession */}
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-bold text-slate-700 font-cairo flex justify-between">
-                          <span>المهنة بالبطاقة أو الجواز <span className="text-rose-500">*</span></span>
-                          <span className={`text-[10px] ${customer.profession.length >= 32 ? "text-rose-500 font-bold" : "text-slate-400"}`}>
-                            {customer.profession.length} / 32 حرف
-                          </span>
-                        </label>
-                        <input
-                          type="text"
-                          value={customer.profession}
-                          onChange={(e) => {
-                            if (/[a-zA-Z]/.test(e.target.value)) {
-                              playLanguageWarningSound();
-                            }
-                            handleProfessionChange(cIdx, e.target.value);
-                          }}
-                          maxLength={32}
-                          placeholder="المهنة بالبطاقة (أقصى 32 حرف)"
-                          className={`w-full bg-slate-50 border rounded-xl px-3 py-2.5 text-xs focus:outline-hidden transition-all ${
-                            /[a-zA-Z]/.test(customer.profession)
-                              ? "border-amber-500 ring-2 ring-amber-400 bg-amber-50/40 text-amber-950 font-bold"
-                              : errors[`c-${cIdx}-profession`] ? "border-rose-300 bg-rose-50/10" : "border-slate-200"
-                          }`}
-                        />
-                        {/[a-zA-Z]/.test(customer.profession) && (
-                          <div className="bg-amber-100 border border-amber-300 text-amber-950 px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1.5 mt-1 animate-pulse font-cairo">
-                            <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                            <span>⚠️ حروف إنجليزية في خانة المهنة! يرجى التحويل للعربية (Alt + Shift)</span>
-                          </div>
-                        )}
-                        {errors[`c-${cIdx}-profession`] && (
-                          <p className="text-[10px] text-rose-600 flex items-center gap-1 mt-1 font-cairo">
-                            <AlertCircle className="w-3.5 h-3.5" />
-                            <span>{errors[`c-${cIdx}-profession`]}</span>
-                          </p>
-                        )}
-                      </div>
-
-                      {/* Applicant Capacity (صفة مقدم الطلب) */}
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-bold text-slate-700 font-cairo flex justify-between items-center">
-                          <span>صفة مقدم الطلب <span className="text-rose-500">*</span></span>
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md transition-all ${
-                            customer.applicantCapacity 
-                              ? "bg-emerald-100 text-emerald-800" 
-                              : "bg-amber-100 text-amber-900 border border-amber-300 animate-pulse"
-                          }`}>
-                            {customer.applicantCapacity ? "تم التحديد ✓" : "مطلوب تحديدها ⚠️"}
-                          </span>
-                        </label>
-                        <select
-                          value={customer.applicantCapacity || ""}
-                          onChange={(e) => {
-                            const updated = [...customers];
-                            updated[cIdx].applicantCapacity = e.target.value;
-                            setCustomers(updated);
-                            if (errors[`c-${cIdx}-applicantCapacity`]) {
-                              const errs = { ...errors };
-                              delete errs[`c-${cIdx}-applicantCapacity`];
-                              setErrors(errs);
-                            }
-                          }}
-                          className={`w-full bg-slate-50 border rounded-xl px-3 py-2.5 text-xs font-bold font-cairo focus:outline-hidden focus:border-red-500 focus:ring-2 focus:ring-red-200 cursor-pointer shadow-xs transition-all ${
-                            errors[`c-${cIdx}-applicantCapacity`]
-                              ? "border-rose-400 bg-rose-50/40 text-rose-900 ring-2 ring-rose-200"
-                              : !customer.applicantCapacity
-                                ? "border-amber-400 bg-amber-50/40 text-amber-950 font-bold ring-1 ring-amber-300"
-                                : "border-slate-200 text-slate-800 font-bold"
-                          }`}
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => toggleCustomerCollapse(cIdx)}
+                          className="px-2 py-1 bg-white/90 border border-slate-200 text-slate-700 hover:bg-slate-100 rounded-lg transition-colors text-[11px] font-bold flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                          title={isCollapsed ? "توسيع بيانات هذا العميل" : "طي بيانات هذا العميل لتوفير مساحة"}
                         >
-                          <option value="" disabled className="text-slate-400 font-normal">
-                            -- اختر صفة مقدم الطلب (إلزامي) --
-                          </option>
-                          {applicantCapacityOptions.map((opt) => (
-                            <option key={opt} value={opt} className="text-slate-900 font-bold">
-                              {opt}
-                            </option>
-                          ))}
-                        </select>
-                        {errors[`c-${cIdx}-applicantCapacity`] && (
-                          <p className="text-[10px] text-rose-600 flex items-center gap-1 mt-1 font-cairo">
-                            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                            <span>{errors[`c-${cIdx}-applicantCapacity`]}</span>
-                          </p>
-                        )}
-                        {!customer.applicantCapacity && !errors[`c-${cIdx}-applicantCapacity`] && (
-                          <p className="text-[10px] text-amber-700 flex items-center gap-1 mt-0.5 font-cairo font-medium">
-                            <span>⚠️ يرجى الانتباه لتحديد الصفة (بنفسه، الأب، الأم، الزوج...)</span>
-                          </p>
+                          {isCollapsed ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
+                          <span>{isCollapsed ? "توسيع" : "طي"}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeCustomer(cIdx)}
+                          className="px-2 py-1 bg-white/90 border border-rose-200 text-rose-600 hover:bg-rose-50 hover:text-rose-700 rounded-lg transition-colors text-[11px] font-bold flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                          title={`حذف العميل ${customerOrdinal}`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>حذف</span>
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Widescreen 2-Column Split Body (RTL: First col = RIGHT Customer/Translation, Second col = LEFT Services) */}
+                {!isCollapsed && (
+                  <div className="grid grid-cols-1 lg:grid-cols-12 items-stretch divide-y lg:divide-y-0 lg:divide-x lg:divide-x-reverse divide-slate-200">
+                    
+                    {/* =================================================================== */}
+                    {/* RIGHT COLUMN: Customer Info, Phone, Passport Data & Name Translation */}
+                    {/* =================================================================== */}
+                    <div className="lg:col-span-6 p-3.5 space-y-2.5 bg-white min-w-0">
+                      <div className="flex items-center justify-between border-b border-slate-100 pb-1.5">
+                        <span className="text-[11px] font-extrabold text-slate-700">
+                          بيانات العميل{isPass ? " والاستمارة والترجمة" : ""}
+                        </span>
+                        {isPass && (
+                          <span className="text-[10px] font-bold text-blue-700 flex items-center gap-1">
+                            <Sparkles className="w-3 h-3" />
+                            <span>حقول الجوازات مفعّلة</span>
+                          </span>
                         )}
                       </div>
-                    </div>
 
-                    <div className="flex items-center text-[11px] text-slate-500 px-1 pt-0.5 font-cairo">
-                      <Info className="w-4 h-4 text-blue-500 shrink-0 ml-1.5" />
-                      <span>سيقوم النظام بحساب تاريخ الميلاد وتجهيز بيانات استمارة الجوازات تلقائياً.</span>
-                    </div>
-
-                    {/* English Name translation panel - placed UNDER National ID & Profession so switching to English is the very last step! */}
-                    <div className="space-y-3 bg-white/95 p-4 rounded-xl border border-blue-200/90 shadow-xs">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <label className="text-xs font-bold text-slate-800 font-cairo flex items-center gap-1.5">
-                          <BookOpen className="w-3.5 h-3.5 text-blue-600" />
-                          <span>الاسم باللغة الإنجليزية (القاموس المعتمد للجوازات)</span>
-                          <span className="text-rose-500">*</span>
-                          <span className="text-[10px] text-blue-600 font-bold mr-1">(التحويل للإنجليزية آخر خطوة بعد إنهاء البيانات)</span>
-                        </label>
-                        
-                        {/* Options */}
-                        <div className="flex items-center gap-4 text-xs text-slate-600 font-medium font-cairo">
-                          <label className="flex items-center gap-1.5 cursor-pointer hover:text-blue-700 transition-colors">
-                            <input
-                              type="radio"
-                              name={`c-${cIdx}-eng-opt`}
-                              checked={customer.englishNameOption !== "previous"}
-                              onChange={() => {
-                                const updated = [...customers];
-                                updated[cIdx].englishNameOption = "dictionary";
-                                const breakdown = breakdownArabicName(customer.arabicName, dictionary);
-                                if (breakdown.assembledEnglish) {
-                                  updated[cIdx].englishName = breakdown.assembledEnglish;
-                                }
-                                setCustomers(updated);
-                              }}
-                              className="w-3.5 h-3.5 text-blue-600 focus:ring-0 cursor-pointer"
-                            />
-                            <span>ترجمة معتمدة بالقاموس وجوجل شيت</span>
+                      {/* Row 1: Arabic Name & Phone side by side */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div className="space-y-1">
+                          <label htmlFor={`customer-arabic-name-${cIdx}`} className="text-[11px] font-bold text-slate-700 flex items-center gap-1">
+                            <span>الاسم العربي</span>
+                            <span className="text-rose-500 font-mono">*</span>
                           </label>
-                          <label className="flex items-center gap-1.5 cursor-pointer hover:text-blue-700 transition-colors">
-                            <input
-                              type="radio"
-                              name={`c-${cIdx}-eng-opt`}
-                              checked={customer.englishNameOption === "previous"}
-                              onChange={() => {
-                                const updated = [...customers];
-                                updated[cIdx].englishNameOption = "previous";
-                                updated[cIdx].englishName = "نفس ترجمة الجواز السابق";
-                                setCustomers(updated);
-                              }}
-                              className="w-3.5 h-3.5 text-blue-600 focus:ring-0 cursor-pointer"
-                            />
-                            <span>نفس ترجمة الجواز السابق</span>
-                          </label>
-                        </div>
-                      </div>
-                      
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          value={customer.englishNameOption === "previous" ? "نفس ترجمة الجواز السابق" : customer.englishName}
-                          onChange={(e) => {
-                            const val = e.target.value.toUpperCase();
-                            if (customer.englishNameOption !== "previous" && /[\u0600-\u06FF]/.test(val)) {
-                              playLanguageWarningSound();
-                            }
-                            const updated = [...customers];
-                            updated[cIdx].englishName = val;
-                            if (customer.englishNameOption === "previous" && val !== "نفس ترجمة الجواز السابق") {
-                              updated[cIdx].englishNameOption = "dictionary";
-                            }
-                            setCustomers(updated);
-                          }}
-                          placeholder="مثال: MOHAMED AHMED MAHMOUD ALI"
-                          dir="ltr"
-                          className={`w-full bg-slate-50 border rounded-xl px-4 py-3 text-sm font-bold font-mono tracking-wide focus:outline-hidden transition-all ${
-                            customer.englishNameOption !== "previous" && /[\u0600-\u06FF]/.test(customer.englishName)
-                              ? "border-amber-500 bg-amber-50/40 text-amber-950 ring-2 ring-amber-400"
-                              : errors[`c-${cIdx}-englishName`] 
-                                ? "border-rose-400 bg-rose-50/20 text-rose-900 focus:ring-rose-200" 
-                                : "border-slate-300 focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-100 text-slate-800"
-                          } ${customer.englishNameOption === "previous" ? "italic text-slate-600 font-sans" : ""}`}
-                        />
-                        {customer.englishNameOption !== "previous" && (
-                          <button
-                            type="button"
-                            onClick={() => handleTranslateName(cIdx)}
-                            className="px-4 py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shrink-0 shadow-xs cursor-pointer whitespace-nowrap font-cairo"
-                            title="تطبيق الترجمة من قاموس الأسماء المعتمد"
-                          >
-                            <BookOpen className="w-4 h-4" />
-                            <span>تطبيق القاموس</span>
-                          </button>
-                        )}
-                      </div>
-
-                      {customer.englishNameOption !== "previous" && (
-                        <p className="text-[11px] text-slate-500 font-cairo flex items-center gap-1.5 mt-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0"></span>
-                          <span>متاح تعديل الاسم الإنجليزي المعروض بحرية؛ وسيبقى التعديل مؤقتاً خاصاً بهذا العميل في هذه الفاتورة فقط ولن يغير القاموس العام للمواطنين الآخرين.</span>
-                        </p>
-                      )}
-
-                      {customer.englishNameOption !== "previous" && /[\u0600-\u06FF]/.test(customer.englishName) && (
-                        <div className="bg-amber-100 border border-amber-300 text-amber-950 px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 mt-1.5 animate-pulse font-cairo">
-                          <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-                          <span>⚠️ تنبيه: تم إدخال حروف عربية داخل خانة الاسم الإنجليزي! يرجى تحويل لوحة المفاتيح إلى الإنجليزية (Alt + Shift)</span>
-                        </div>
-                      )}
-
-                      {/* Dictionary status and missing words alert section */}
-                      {(() => {
-                        if (customer.englishNameOption === "previous" || !customer.arabicName.trim()) return null;
-                        const breakdown = breakdownArabicName(customer.arabicName, dictionary);
-
-                        // All words found in dictionary
-                        if (breakdown.allFound) {
-                          return (
-                            <div className="flex items-center gap-2 text-xs text-emerald-800 bg-emerald-50 px-3 py-2 rounded-xl border border-emerald-200/90 font-cairo">
-                              <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                              <span>تم اعتماد ترجمة جميع مقاطع الاسم بالكامل من قاموس جوجل شيت المعتمد 📖✅</span>
+                          <input
+                            id={`customer-arabic-name-${cIdx}`}
+                            name={`c-${cIdx}-arabicName`}
+                            type="text"
+                            value={customer.arabicName}
+                            onChange={(e) => handleArabicNameChange(cIdx, e.target.value)}
+                            onBlur={() => handleArabicNameBlur(cIdx)}
+                            placeholder="مثال: أحمد محمد علي"
+                            className={`w-full bg-slate-50 border rounded-lg px-3 py-2 text-xs font-semibold focus:outline-hidden focus:ring-2 transition-all ${
+                              errors[`c-${cIdx}-arabicName`]
+                                ? "border-rose-400 focus:ring-rose-200 text-rose-900 bg-rose-50/20"
+                                : "border-slate-200 focus:border-red-500 focus:bg-white focus:ring-red-100"
+                            }`}
+                            required
+                          />
+                          {/[a-zA-Z]/.test(customer.arabicName) && (
+                            <div className="bg-amber-100 border border-amber-300 text-amber-950 px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1.5 animate-pulse">
+                              <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                              <span>حروف إنجليزية في الاسم العربي! اضغط (Alt + Shift)</span>
                             </div>
-                          );
-                        }
-
-                        // Some words missing in dictionary
-                        return (
-                          <div className="p-3.5 bg-amber-50/90 border-2 border-amber-300 rounded-xl space-y-3 animate-fade-in font-cairo">
-                            {/* Required explicit prompt */}
-                            <div className="flex items-center gap-2 text-amber-900 font-bold text-xs font-cairo">
-                              <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
-                              <span className="text-sm">من فضلك تأكد من ترجمة الاسم بالإنجليزي قبل مغادرة المكتب</span>
-                            </div>
-                            <p className="text-[11px] text-amber-800 font-cairo leading-relaxed">
-                              يوجد مقطع أو أكثر من اسم المواطن غير مسجل في قاموس جوجل شيت. يرجى كتابة ترجمة المقطع بالإنجليزية وفقاً لرغبة العميل لاعتماده وحفظه كمرجع لنا في قاعدة البيانات:
+                          )}
+                          {errors[`c-${cIdx}-arabicName`] && (
+                            <p className="text-[10px] text-rose-600 flex items-center gap-1">
+                              <AlertCircle className="w-3 h-3 shrink-0" />
+                              <span>{errors[`c-${cIdx}-arabicName`]}</span>
                             </p>
+                          )}
+                        </div>
 
-                            {/* Missing words dedicated inputs */}
-                            <div className="space-y-2 pt-1 border-t border-amber-200/80">
-                              {breakdown.missingWords.map((missingWord) => {
-                                const inputVal = missingWordInputs[missingWord] || "";
-                                const isSaving = savingWord === missingWord;
-
-                                return (
-                                  <div key={missingWord} className="flex flex-col sm:flex-row sm:items-center gap-2 bg-white/95 p-2.5 rounded-lg border border-amber-200 shadow-2xs">
-                                    <div className="flex items-center gap-1.5 shrink-0">
-                                      <span className="text-[11px] font-medium text-slate-500 font-cairo">المقطع غير المسجل:</span>
-                                      <span className="px-2.5 py-0.5 bg-amber-100 text-amber-900 font-bold rounded-md text-xs font-cairo">
-                                        {missingWord}
-                                      </span>
-                                    </div>
-
-                                    <div className="flex-1">
-                                      <input
-                                        type="text"
-                                        value={inputVal}
-                                        onChange={(e) => {
-                                          const val = e.target.value.toUpperCase();
-                                          if (/[\u0600-\u06FF]/.test(val)) {
-                                            playLanguageWarningSound();
-                                          }
-                                          setMissingWordInputs(prev => ({ ...prev, [missingWord]: val }));
-                                        }}
-                                        placeholder={`اكتب ترجمة (${missingWord}) بالإنجليزية...`}
-                                        dir="ltr"
-                                        className={`w-full bg-slate-50 border rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold uppercase text-slate-800 focus:outline-hidden ${
-                                          /[\u0600-\u06FF]/.test(inputVal)
-                                            ? "border-amber-500 ring-2 ring-amber-400 bg-amber-50/50"
-                                            : "border-slate-300 focus:border-blue-500 focus:bg-white"
-                                        }`}
-                                      />
-                                    </div>
-
-                                    <button
-                                      type="button"
-                                      onClick={() => handleSaveMissingWord(cIdx, missingWord)}
-                                      disabled={isSaving || !inputVal.trim()}
-                                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg text-xs font-bold font-cairo flex items-center justify-center gap-1 transition-colors shrink-0 disabled:opacity-40 cursor-pointer shadow-xs whitespace-nowrap"
-                                    >
-                                      <Plus className="w-3.5 h-3.5" />
-                                      <span>{isSaving ? "جاري الحفظ..." : "حفظ في القاموس والشيت 💾"}</span>
-                                    </button>
-                                  </div>
-                                );
-                              })}
-                            </div>
-
-                            {/* Batch save if customer.englishName has matched word count */}
-                            {(() => {
-                              if (!customer.englishName.trim()) return null;
-                              const arWords = customer.arabicName.trim().split(/\s+/).filter(Boolean);
-                              const enWords = customer.englishName.trim().split(/\s+/).filter(Boolean);
-                              if (arWords.length !== enWords.length || arWords.length === 0) return null;
-
-                              return (
-                                <button
-                                  type="button"
-                                  onClick={async () => {
-                                    const tokens = extractAtomicWordTokens(customer.arabicName, customer.englishName);
-                                    for (const t of tokens) {
-                                      if (breakdown.missingWords.includes(t.arabic)) {
-                                        await handleSaveMissingWord(cIdx, t.arabic, t.english);
-                                      }
-                                    }
-                                  }}
-                                  className="w-full py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold font-cairo flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs mt-1"
-                                >
-                                  <Check className="w-3.5 h-3.5" />
-                                  <span>حفظ ترجمة المقاطع الجديدة في القاموس وجوجل شيت دفعة واحدة 💾</span>
-                                </button>
-                              );
-                            })()}
-                          </div>
-                        );
-                      })()}
-
-                      {errors[`c-${cIdx}-englishName`] && (
-                        <p className="text-[11px] text-rose-600 flex items-center gap-1 mt-1 font-cairo font-bold">
-                          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                          <span>{errors[`c-${cIdx}-englishName`]}</span>
-                        </p>
-                      )}
-                    </div>
-
-                  </div>
-                )}
-
-                {/* Customer services list inside */}
-                <div className={`space-y-4 p-4 rounded-2xl border-2 ${theme.servicesBoxBg}`}>
-                  <div className="flex flex-wrap justify-between items-center gap-2 pb-2 border-b border-slate-200/80">
-                    <div className="flex items-center gap-2">
-                      <span className={`w-6 h-6 rounded-lg text-xs font-black font-mono flex items-center justify-center ${theme.badgeBg}`}>
-                        {cIdx + 1}
-                      </span>
-                      <h4 className={`text-xs font-extrabold font-cairo ${theme.titleText}`}>
-                        الخدمات المطلوبة للعميل {customerOrdinal}
-                        {customer.arabicName?.trim() ? ` (${customer.arabicName.trim()})` : ""}:
-                      </h4>
-                      <span className="text-[11px] font-bold bg-white border border-slate-200 text-slate-700 px-2 py-0.5 rounded-md font-mono">
-                        {customer.services.length} {customer.services.length === 1 ? "خدمة" : "خدمات"}
-                      </span>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => addServiceToCustomer(cIdx)}
-                      className={`px-3.5 py-1.5 rounded-xl text-xs font-bold font-cairo flex items-center gap-1.5 cursor-pointer transition-all ${theme.addServiceBtn}`}
-                    >
-                      <Plus className="w-4 h-4" />
-                      <span>أضف خدمة أخرى للعميل {customerOrdinal}</span>
-                    </button>
-                  </div>
-
-                  {customer.services.map((srv, sIdx) => {
-                    const selectedServiceObj = services.find(s => s.id === srv.serviceId || s.name === srv.serviceId);
-                    const sTheme = getServiceItemTheme(sIdx);
-
-                    return (
-                      <React.Fragment key={sIdx}>
-                        {/* Connector divider when adding 2nd+ service for the SAME customer */}
-                        {sIdx > 0 && (
-                          <div className="flex items-center gap-2 px-1">
-                            <div className="flex-1 border-t border-dashed border-slate-300" />
-                            <span className="text-[11px] font-bold bg-white border border-slate-300 text-slate-700 px-3 py-0.5 rounded-full shadow-2xs font-cairo">
-                              ➕ خدمة رقم ({sIdx + 1}) لنفس العميل ({customer.arabicName?.trim() || `العميل ${customerOrdinal}`})
+                        <div className="space-y-1">
+                          <label className="text-[11px] font-bold text-slate-700 flex justify-between items-center">
+                            <span>رقم الهاتف <span className="text-rose-500 font-mono">*</span></span>
+                            <span className={`text-[10px] font-mono tabular-nums ${customer.phone.length === 11 ? "text-emerald-600 font-bold" : "text-slate-400"}`}>
+                              {customer.phone.length}/11
                             </span>
-                            <div className="flex-1 border-t border-dashed border-slate-300" />
-                          </div>
-                        )}
+                          </label>
+                          <input
+                            name={`c-${cIdx}-phone`}
+                            type="text"
+                            value={customer.phone}
+                            onChange={(e) => handlePhoneChange(cIdx, e.target.value)}
+                            placeholder="01XXXXXXXXX"
+                            dir="ltr"
+                            className={`w-full bg-slate-50 border rounded-lg px-3 py-2 text-xs font-mono font-bold text-right focus:outline-hidden focus:ring-2 transition-all ${
+                              errors[`c-${cIdx}-phone`]
+                                ? "border-rose-400 focus:ring-rose-200 text-rose-900 bg-rose-50/20"
+                                : "border-slate-200 focus:border-red-500 focus:bg-white focus:ring-red-100"
+                            }`}
+                            required
+                          />
+                          {errors[`c-${cIdx}-phone`] && (
+                            <p className="text-[10px] text-rose-600 flex items-center gap-1">
+                              <AlertCircle className="w-3 h-3 shrink-0" />
+                              <span>{errors[`c-${cIdx}-phone`]}</span>
+                            </p>
+                          )}
+                        </div>
+                      </div>
 
-                        <div className={`rounded-2xl overflow-hidden relative transition-all ${sTheme.wrapper}`}>
-                          {/* Service Sub-card Header Strip */}
-                          <div className={`px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 ${sTheme.headerBg}`}>
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span className={`px-2 py-0.5 rounded-lg text-[11px] font-black font-cairo shrink-0 ${sTheme.badge}`}>
-                                خدمة {sIdx + 1}
-                              </span>
-                              <span className={`text-xs font-extrabold truncate font-cairo ${sTheme.title}`}>
-                                {selectedServiceObj ? selectedServiceObj.name : "يرجى اختيار الخدمة من القائمة"}
-                              </span>
-                              <span className="text-[10px] font-bold bg-white/80 text-slate-600 px-2 py-0.5 rounded-md border border-slate-200 hidden sm:inline-block shrink-0">
-                                العميل {customerOrdinal}
-                              </span>
+                      {/* Passport & Translation Fields (visible conditionally when any service starts with # or ##) */}
+                      {isPass && (
+                        <div className="pt-2.5 border-t border-blue-100 bg-blue-50/35 -mx-3.5 px-3.5 pb-2 space-y-2.5 animate-fade-in">
+                          {/* Compact 2x2 Grid: National ID, Birth Date, Profession, Applicant Capacity */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                            {/* National ID */}
+                            <div className="space-y-1">
+                              <label className="text-[11px] font-bold text-slate-700 flex justify-between items-center">
+                                <span>الرقم القومي <span className="text-rose-500">*</span></span>
+                                <span className={`text-[10px] font-mono tabular-nums ${customer.nationalId.length === 14 ? "text-emerald-600 font-bold" : "text-slate-400"}`}>
+                                  {customer.nationalId.length}/14
+                                </span>
+                              </label>
+                              <input
+                                name={`c-${cIdx}-nationalId`}
+                                type="text"
+                                value={customer.nationalId}
+                                onChange={(e) => handleNationalIdChange(cIdx, e.target.value)}
+                                placeholder="14 رقماً"
+                                dir="ltr"
+                                className={`w-full bg-white border rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold text-right focus:outline-hidden focus:ring-2 focus:ring-blue-100 focus:border-blue-400 ${
+                                  errors[`c-${cIdx}-nationalId`] ? "border-rose-400 bg-rose-50/20" : "border-slate-200"
+                                }`}
+                              />
+                              {errors[`c-${cIdx}-nationalId`] && (
+                                <p className="text-[10px] text-rose-600 flex items-center gap-1">
+                                  <AlertCircle className="w-3 h-3 shrink-0" />
+                                  <span>{errors[`c-${cIdx}-nationalId`]}</span>
+                                </p>
+                              )}
                             </div>
 
-                            <div className="flex items-center gap-2 shrink-0">
-                              <span className="text-xs font-mono font-black bg-white px-2.5 py-0.5 rounded-lg border border-slate-300 text-slate-900">
-                                {srv.price.toFixed(0)} ج.م
-                              </span>
-                              {customer.services.length > 1 && (
-                                <button
-                                  type="button"
-                                  onClick={() => removeServiceFromCustomer(cIdx, sIdx)}
-                                  className="px-2 py-1 bg-white border border-rose-200 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors text-[11px] font-bold flex items-center gap-1 cursor-pointer"
-                                  title="إلغاء هذه الخدمة"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                  <span>حذف</span>
-                                </button>
+                            {/* Birth Date */}
+                            <div className="space-y-1">
+                              <label className="text-[11px] font-bold text-slate-700 flex items-center justify-between">
+                                <span>تاريخ الميلاد</span>
+                                <span className="text-[10px] text-slate-400 font-normal">تلقائي</span>
+                              </label>
+                              <input
+                                type="text"
+                                value={customer.birthDate}
+                                onChange={(e) => {
+                                  const updated = [...customers];
+                                  updated[cIdx].birthDate = e.target.value;
+                                  setCustomers(updated);
+                                }}
+                                placeholder="YYYY/MM/DD"
+                                dir="ltr"
+                                className="w-full bg-white border border-slate-200 text-slate-800 rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold text-right focus:outline-hidden focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                              />
+                            </div>
+
+                            {/* Profession */}
+                            <div className="space-y-1">
+                              <label className="text-[11px] font-bold text-slate-700 flex justify-between items-center">
+                                <span>المهنة بالبطاقة <span className="text-rose-500">*</span></span>
+                                <span className={`text-[10px] font-mono tabular-nums ${customer.profession.length >= 32 ? "text-rose-500 font-bold" : "text-slate-400"}`}>
+                                  {customer.profession.length}/32
+                                </span>
+                              </label>
+                              <input
+                                name={`c-${cIdx}-profession`}
+                                type="text"
+                                value={customer.profession}
+                                onChange={(e) => {
+                                  if (/[a-zA-Z]/.test(e.target.value)) {
+                                    playLanguageWarningSound();
+                                  }
+                                  handleProfessionChange(cIdx, e.target.value);
+                                }}
+                                maxLength={32}
+                                placeholder="المهنة (أقصى 32 حرف)"
+                                className={`w-full bg-white border rounded-lg px-2.5 py-1.5 text-xs focus:outline-hidden transition-all ${
+                                  /[a-zA-Z]/.test(customer.profession)
+                                    ? "border-amber-500 ring-2 ring-amber-300 bg-amber-50/40 text-amber-950 font-bold"
+                                    : errors[`c-${cIdx}-profession`]
+                                      ? "border-rose-400 bg-rose-50/20"
+                                      : "border-slate-200 focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                                }`}
+                              />
+                              {/[a-zA-Z]/.test(customer.profession) && (
+                                <p className="text-[10px] text-amber-800 font-bold">
+                                  ⚠️ حروف إنجليزية بالمهنة! حوّل للعربية (Alt + Shift)
+                                </p>
+                              )}
+                              {errors[`c-${cIdx}-profession`] && (
+                                <p className="text-[10px] text-rose-600 flex items-center gap-1">
+                                  <AlertCircle className="w-3 h-3 shrink-0" />
+                                  <span>{errors[`c-${cIdx}-profession`]}</span>
+                                </p>
+                              )}
+                            </div>
+
+                            {/* Applicant Capacity */}
+                            <div className="space-y-1">
+                              <label className="text-[11px] font-bold text-slate-700 flex justify-between items-center">
+                                <span>صفة مقدم الطلب <span className="text-rose-500">*</span></span>
+                                <span className={`text-[10px] font-bold ${customer.applicantCapacity ? "text-emerald-700" : "text-amber-700"}`}>
+                                  {customer.applicantCapacity ? "محدد ✓" : "مطلوب"}
+                                </span>
+                              </label>
+                              <select
+                                name={`c-${cIdx}-applicantCapacity`}
+                                value={customer.applicantCapacity || ""}
+                                onChange={(e) => {
+                                  const updated = [...customers];
+                                  updated[cIdx].applicantCapacity = e.target.value;
+                                  setCustomers(updated);
+                                  if (errors[`c-${cIdx}-applicantCapacity`]) {
+                                    const errs = { ...errors };
+                                    delete errs[`c-${cIdx}-applicantCapacity`];
+                                    setErrors(errs);
+                                  }
+                                }}
+                                className={`w-full border rounded-lg px-2.5 py-1.5 text-xs font-bold focus:outline-hidden cursor-pointer transition-all ${
+                                  errors[`c-${cIdx}-applicantCapacity`]
+                                    ? "border-rose-400 bg-rose-50/40 text-rose-900 ring-2 ring-rose-200"
+                                    : !customer.applicantCapacity
+                                      ? "border-amber-400 bg-amber-50/60 text-amber-950"
+                                      : "bg-white border-slate-200 text-slate-800"
+                                }`}
+                              >
+                                <option value="" disabled className="text-slate-400 font-normal">
+                                  -- اختر الصفة (إلزامي) --
+                                </option>
+                                {applicantCapacityOptions.map((opt) => (
+                                  <option key={opt} value={opt} className="text-slate-900 font-bold">
+                                    {opt}
+                                  </option>
+                                ))}
+                              </select>
+                              {errors[`c-${cIdx}-applicantCapacity`] && (
+                                <p className="text-[10px] text-rose-600 flex items-center gap-1">
+                                  <AlertCircle className="w-3 h-3 shrink-0" />
+                                  <span>{errors[`c-${cIdx}-applicantCapacity`]}</span>
+                                </p>
                               )}
                             </div>
                           </div>
 
-                          <div className="p-4 space-y-3">
-                            <div className="grid md:grid-cols-4 gap-4">
-                          
-                          {/* Service Dropdown */}
-                          <div className="md:col-span-2 space-y-1">
-                            <label className="text-[10px] font-bold text-slate-600 font-cairo">الخدمة المطلوبة <span className="text-rose-500">*</span></label>
-                            <select
-                              value={srv.serviceId}
-                              onChange={(e) => handleServiceChange(cIdx, sIdx, e.target.value)}
-                              className={`w-full bg-white border rounded-lg px-3 py-2 text-xs focus:outline-hidden focus:border-red-500 focus:ring-2 focus:ring-red-200 transition-all ${
-                                errors[`c-${cIdx}-s-${sIdx}-id`] ? "border-rose-400 text-rose-900 bg-rose-50/20" : "border-slate-200"
-                              }`}
-                              required
-                            >
-                              <option value="">-- اختر الخدمة --</option>
-                              {services.map((s, idx) => (
-                                <option key={s.id} value={s.id}>
-                                  {idx + 1}. {s.name} (حكومي: {s.govPrice} - مكتب: {s.officeFee})
-                                </option>
-                              ))}
-                            </select>
-                          </div>
+                          {/* English Name & Dictionary Translation Panel */}
+                          <div className="pt-2 border-t border-blue-200/70 space-y-2">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <label className="text-[11px] font-bold text-slate-800 flex items-center gap-1">
+                                <BookOpen className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                                <span>الاسم بالإنجليزية <span className="text-rose-500">*</span></span>
+                              </label>
 
-                          {/* Quantity */}
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-slate-600 font-cairo">الكمية / عدد النسخ</label>
-                            <input
-                              type="number"
-                              min="1"
-                              value={srv.quantity}
-                              onChange={(e) => handleQtyChange(cIdx, sIdx, parseInt(e.target.value) || 1)}
-                              className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-hidden focus:border-red-500 focus:ring-2 focus:ring-red-200 font-mono transition-all"
-                              required
-                            />
-                          </div>
-
-                          {/* Computed Price */}
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-slate-500 font-cairo">السعر الكلي للخدمة</label>
-                            <div className="w-full bg-slate-100 border border-slate-200 text-slate-700 rounded-lg px-3 py-2 text-xs font-mono font-bold flex justify-between">
-                              <span>{srv.price.toFixed(2)}</span>
-                              <span className="text-[10px] text-slate-400 font-cairo">ج.م</span>
-                            </div>
-                          </div>
-
-                        </div>
-
-                        {/* Embedded Service metadata details when selected */}
-                        {selectedServiceObj && (
-                          <div className="bg-white p-3 rounded-lg border border-slate-200 text-[11px] space-y-2 leading-relaxed text-slate-600">
-                            <div className="grid md:grid-cols-2 gap-2 text-slate-700">
-                              <div>
-                                <span className="font-bold text-slate-800">مدة تنفيذ الخدمة:</span> {selectedServiceObj.duration}
-                              </div>
-                              <div className="text-amber-700 flex flex-wrap items-center gap-1 font-bold">
-                                <Calendar className="w-3.5 h-3.5" />
-                                <span>
-                                  موعد الاستلام: {srv.deliveryDate ? `${getArabicDayName(srv.deliveryDate) ? getArabicDayName(srv.deliveryDate) + " " : ""}${srv.deliveryDate} (أيام عمل ${selectedServiceObj.name.trim().startsWith("#") ? "• السبت عمل" : "• السبت عطلة"})` : "غير محدد"}
-                                </span>
-                                {sIdx > 0 && customer.services[sIdx - 1]?.deliveryDate && (
-                                  <span className="text-[10px] text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded-sm border border-blue-200 mr-1">
-                                    يبدأ احتسابها بعد انتهاء الخدمة السابقة ({customer.services[sIdx - 1].deliveryDate})
-                                  </span>
-                                )}
+                              <div className="flex items-center gap-3 text-[11px] text-slate-700 font-semibold">
+                                <label className="flex items-center gap-1 cursor-pointer hover:text-blue-700">
+                                  <input
+                                    type="radio"
+                                    name={`c-${cIdx}-eng-opt`}
+                                    checked={customer.englishNameOption !== "previous"}
+                                    onChange={() => {
+                                      const updated = [...customers];
+                                      updated[cIdx].englishNameOption = "dictionary";
+                                      const breakdown = breakdownArabicName(customer.arabicName, dictionary);
+                                      if (breakdown.assembledEnglish) {
+                                        updated[cIdx].englishName = breakdown.assembledEnglish;
+                                      }
+                                      setCustomers(updated);
+                                    }}
+                                    className="w-3.5 h-3.5 text-blue-600 focus:ring-0 cursor-pointer"
+                                  />
+                                  <span>القاموس المعتمد</span>
+                                </label>
+                                <label className="flex items-center gap-1 cursor-pointer hover:text-blue-700">
+                                  <input
+                                    type="radio"
+                                    name={`c-${cIdx}-eng-opt`}
+                                    checked={customer.englishNameOption === "previous"}
+                                    onChange={() => {
+                                      const updated = [...customers];
+                                      updated[cIdx].englishNameOption = "previous";
+                                      updated[cIdx].englishName = "نفس ترجمة الجواز السابق";
+                                      setCustomers(updated);
+                                    }}
+                                    className="w-3.5 h-3.5 text-blue-600 focus:ring-0 cursor-pointer"
+                                  />
+                                  <span>نفس الجواز السابق</span>
+                                </label>
                               </div>
                             </div>
 
-                            {/* Prominent individual delivery instructions */}
-                            <div className="bg-blue-50/80 border border-blue-200 rounded-lg p-2.5 text-blue-950">
-                              <div className="font-bold text-xs flex items-center gap-1.5 text-blue-900 mb-0.5">
-                                <Info className="w-3.5 h-3.5 text-blue-600" />
-                                <span>📋 تعليمات تسليم واستلام هذه الخدمة:</span>
-                              </div>
-                              <div className="text-[11.5px] leading-relaxed pr-5">
-                                {selectedServiceObj.instructions || "يرجى إحضار أصل بطاقة الرقم القومي سارية أو المستندات الأصلية للمطابقة عند الاستلام."}
-                              </div>
+                            <div className="flex items-center gap-1.5">
+                              <input
+                                name={`c-${cIdx}-englishName`}
+                                type="text"
+                                value={customer.englishNameOption === "previous" ? "نفس ترجمة الجواز السابق" : customer.englishName}
+                                onChange={(e) => {
+                                  const val = e.target.value.toUpperCase();
+                                  if (customer.englishNameOption !== "previous" && /[\u0600-\u06FF]/.test(val)) {
+                                    playLanguageWarningSound();
+                                  }
+                                  const updated = [...customers];
+                                  updated[cIdx].englishName = val;
+                                  if (customer.englishNameOption === "previous" && val !== "نفس ترجمة الجواز السابق") {
+                                    updated[cIdx].englishNameOption = "dictionary";
+                                  }
+                                  setCustomers(updated);
+                                }}
+                                placeholder="MOHAMED AHMED ALI"
+                                dir="ltr"
+                                className={`flex-1 min-w-0 bg-white border rounded-lg px-3 py-1.5 text-xs font-bold font-mono tracking-wide focus:outline-hidden transition-all ${
+                                  customer.englishNameOption !== "previous" && /[\u0600-\u06FF]/.test(customer.englishName)
+                                    ? "border-amber-500 bg-amber-50/40 text-amber-950 ring-2 ring-amber-300"
+                                    : errors[`c-${cIdx}-englishName`]
+                                      ? "border-rose-400 bg-rose-50/20 text-rose-900"
+                                      : "border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 text-slate-900"
+                                } ${customer.englishNameOption === "previous" ? "italic text-slate-600 font-sans" : ""}`}
+                              />
+                              {customer.englishNameOption !== "previous" && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleTranslateName(cIdx)}
+                                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[11px] font-bold flex items-center gap-1 transition-colors shrink-0 cursor-pointer whitespace-nowrap"
+                                  title="تطبيق الترجمة من قاموس الأسماء المعتمد"
+                                >
+                                  <BookOpen className="w-3.5 h-3.5" />
+                                  <span>القاموس</span>
+                                </button>
+                              )}
                             </div>
 
-                            {/* Government Fines option for passport services starting with # */}
-                            {selectedServiceObj.name.trim().startsWith("#") && (() => {
-                              const currentFines: { name: string; amount: number }[] = Array.isArray(srv.fines) && srv.fines.length > 0
-                                ? srv.fines
-                                : (srv.fineName || (srv.fineAmount && srv.fineAmount > 0))
-                                  ? [{ name: srv.fineName || "غرامة حكومية", amount: srv.fineAmount || 0 }]
-                                  : [];
+                            {customer.englishNameOption !== "previous" && (
+                              <p className="text-[10.5px] text-slate-500">
+                                التعديل اليدوي للاسم الإنجليزي مؤقت لهذه الفاتورة فقط ولا يغيّر القاموس العام.
+                              </p>
+                            )}
+
+                            {customer.englishNameOption !== "previous" && /[\u0600-\u06FF]/.test(customer.englishName) && (
+                              <div className="bg-amber-100 border border-amber-300 text-amber-950 px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1.5 animate-pulse">
+                                <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                <span>حروف عربية داخل الاسم الإنجليزي! حوّل للإنجليزية (Alt + Shift)</span>
+                              </div>
+                            )}
+
+                            {/* Dictionary status & missing words */}
+                            {(() => {
+                              if (customer.englishNameOption === "previous" || !customer.arabicName.trim()) return null;
+                              const breakdown = breakdownArabicName(customer.arabicName, dictionary);
+
+                              if (breakdown.allFound) {
+                                return (
+                                  <div className="flex items-center gap-1.5 text-[11px] text-emerald-800 bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-200">
+                                    <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                    <span>جميع مقاطع الاسم معتمدة من القاموس وجوجل شيت ✓</span>
+                                  </div>
+                                );
+                              }
 
                               return (
-                                <div className="bg-amber-50/80 border border-amber-200 rounded-lg p-2.5 space-y-2 text-xs">
-                                  <div className="flex items-center justify-between">
-                                    <span className="font-bold text-amber-900 flex items-center gap-1.5">
-                                      <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
-                                      <span>الغرامات الحكومية للخدمة (يمكنك إضافة أكثر من غرامة لنفس الجواز):</span>
-                                    </span>
-                                    {currentFines.length > 0 && (
-                                      <button
-                                        type="button"
-                                        onClick={() => handleRemoveAllFines(cIdx, sIdx)}
-                                        className="text-[10px] text-red-600 hover:text-red-800 font-bold cursor-pointer"
-                                      >
-                                        إلغاء كافة الغرامات ✕
-                                      </button>
-                                    )}
+                                <div className="p-2.5 bg-amber-50 border border-amber-300 rounded-xl space-y-2">
+                                  <div className="flex items-center gap-1.5 text-amber-950 font-bold text-[11px]">
+                                    <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                                    <span>من فضلك تأكد من ترجمة الاسم بالإنجليزي قبل مغادرة المكتب</span>
                                   </div>
 
-                                  {/* List of currently selected fines */}
-                                  {currentFines.length > 0 && (
-                                    <div className="space-y-1.5 pt-0.5">
-                                      {currentFines.map((fine, fIdx) => (
-                                        <div key={fIdx} className="flex items-center gap-2 bg-white border border-amber-300 rounded-lg p-1.5 shadow-2xs">
-                                          <span className="text-[11px] font-bold text-amber-800 shrink-0">
-                                            غرامة {fIdx + 1}:
+                                  <div className="space-y-1.5">
+                                    {breakdown.missingWords.map((missingWord) => {
+                                      const inputVal = missingWordInputs[missingWord] || "";
+                                      const isSaving = savingWord === missingWord;
+
+                                      return (
+                                        <div key={missingWord} className="flex items-center gap-1.5 bg-white p-1.5 rounded-lg border border-amber-200">
+                                          <span className="px-2 py-0.5 bg-amber-100 text-amber-950 font-bold rounded text-[11px] shrink-0">
+                                            {missingWord}
                                           </span>
                                           <input
                                             type="text"
-                                            value={fine.name}
-                                            onChange={(e) => handleUpdateFineInService(cIdx, sIdx, fIdx, { name: e.target.value })}
-                                            placeholder="مسمى الغرامة..."
-                                            className="flex-1 bg-amber-50/30 border border-amber-200 rounded-md px-2 py-1 text-xs text-amber-950 font-cairo font-semibold focus:outline-none focus:ring-1 focus:ring-amber-500"
+                                            value={inputVal}
+                                            onChange={(e) => {
+                                              const val = e.target.value.toUpperCase();
+                                              if (/[\u0600-\u06FF]/.test(val)) {
+                                                playLanguageWarningSound();
+                                              }
+                                              setMissingWordInputs((prev) => ({ ...prev, [missingWord]: val }));
+                                            }}
+                                            placeholder={`ترجمة ${missingWord} بالإنجليزية...`}
+                                            dir="ltr"
+                                            className={`flex-1 min-w-0 bg-slate-50 border rounded-md px-2 py-1 text-xs font-mono font-bold uppercase text-slate-800 focus:outline-hidden ${
+                                              /[\u0600-\u06FF]/.test(inputVal)
+                                                ? "border-amber-500 ring-2 ring-amber-300 bg-amber-50/50"
+                                                : "border-slate-300 focus:border-blue-500 focus:bg-white"
+                                            }`}
                                           />
-                                          <div className="relative w-24 shrink-0">
-                                            <input
-                                              type="number"
-                                              min="0"
-                                              value={fine.amount}
-                                              onChange={(e) => handleUpdateFineInService(cIdx, sIdx, fIdx, { amount: parseFloat(e.target.value) || 0 })}
-                                              placeholder="المبلغ"
-                                              className="w-full bg-amber-50/30 border border-amber-200 rounded-md px-2 py-1 text-xs font-mono text-amber-950 font-bold text-left focus:outline-none focus:ring-1 focus:ring-amber-500"
-                                            />
-                                            <span className="absolute left-1.5 top-1 text-[9px] text-slate-400">ج.م</span>
-                                          </div>
                                           <button
                                             type="button"
-                                            onClick={() => handleRemoveFineFromService(cIdx, sIdx, fIdx)}
-                                            className="p-1 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors cursor-pointer shrink-0"
-                                            title="حذف هذه الغرامة"
+                                            onClick={() => handleSaveMissingWord(cIdx, missingWord)}
+                                            disabled={isSaving || !inputVal.trim()}
+                                            className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-[11px] font-bold flex items-center gap-1 transition-colors shrink-0 disabled:opacity-40 cursor-pointer whitespace-nowrap"
                                           >
-                                            <Trash2 className="w-3.5 h-3.5" />
+                                            <Plus className="w-3 h-3" />
+                                            <span>{isSaving ? "حفظ..." : "حفظ بالقاموس"}</span>
                                           </button>
                                         </div>
-                                      ))}
-                                    </div>
-                                  )}
-
-                                  {/* Add new fine selector */}
-                                  <div className="flex items-center gap-2 pt-0.5">
-                                    <select
-                                      value=""
-                                      onChange={(e) => {
-                                        if (e.target.value) {
-                                          handleAddFineToService(cIdx, sIdx, e.target.value);
-                                          e.target.value = "";
-                                        }
-                                      }}
-                                      className="flex-1 bg-white border border-amber-300 rounded-lg px-2.5 py-1.5 text-xs text-amber-950 font-cairo cursor-pointer font-bold hover:bg-amber-50/50 transition-colors"
-                                    >
-                                      <option value="">
-                                        {currentFines.length === 0 ? "➕ إضافة غرامة حكومية للجواز..." : "➕ إضافة غرامة أخرى للجواز..."}
-                                      </option>
-                                      {governmentFines.map((f) => (
-                                        <option key={f.id} value={f.name}>
-                                          {f.name} (+{f.amount} ج.م)
-                                        </option>
-                                      ))}
-                                      <option value="__custom__">غرامة أخرى بمبلغ مخصص...</option>
-                                    </select>
+                                      );
+                                    })}
                                   </div>
 
-                                  {/* Subtotal of fines */}
-                                  {currentFines.length > 0 && (
-                                    <div className="bg-amber-100/70 border border-amber-300/80 rounded-md p-1.5 text-[11px] text-amber-900 font-bold flex items-center justify-between">
-                                      <span className="flex items-center gap-1">
-                                        <Check className="w-3.5 h-3.5 text-amber-700" />
-                                        <span>إجمالي الغرامات المضافة ({currentFines.length} غرامة):</span>
-                                      </span>
-                                      <span className="font-mono text-xs font-black text-amber-950">
-                                        +{(srv.fineAmount || 0) * srv.quantity} ج.م ({srv.fineAmount} ج.م × {srv.quantity})
-                                      </span>
-                                    </div>
-                                  )}
+                                  {(() => {
+                                    if (!customer.englishName.trim()) return null;
+                                    const arWords = customer.arabicName.trim().split(/\s+/).filter(Boolean);
+                                    const enWords = customer.englishName.trim().split(/\s+/).filter(Boolean);
+                                    if (arWords.length !== enWords.length || arWords.length === 0) return null;
+
+                                    return (
+                                      <button
+                                        type="button"
+                                        onClick={async () => {
+                                          const tokens = extractAtomicWordTokens(customer.arabicName, customer.englishName);
+                                          for (const t of tokens) {
+                                            if (breakdown.missingWords.includes(t.arabic)) {
+                                              await handleSaveMissingWord(cIdx, t.arabic, t.english);
+                                            }
+                                          }
+                                        }}
+                                        className="w-full py-1.5 px-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                                      >
+                                        <Check className="w-3.5 h-3.5" />
+                                        <span>حفظ المقاطع الجديدة بالقاموس دفعة واحدة</span>
+                                      </button>
+                                    );
+                                  })()}
                                 </div>
                               );
                             })()}
 
-                            {selectedServiceObj.notes && (
-                              <div className="text-slate-500 bg-slate-50 p-1.5 rounded-sm">
-                                <span className="font-bold">ملاحظات:</span> {selectedServiceObj.notes}
-                              </div>
+                            {errors[`c-${cIdx}-englishName`] && (
+                              <p className="text-[10.5px] text-rose-600 flex items-center gap-1 font-bold">
+                                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                                <span>{errors[`c-${cIdx}-englishName`]}</span>
+                              </p>
                             )}
                           </div>
-                        )}
-
-                          </div>
                         </div>
-                      </React.Fragment>
-                    );
-                  })}
-
-                  {/* Cumulative Delivery Date Summary for Multiple Services */}
-                  {customer.services.length > 1 && (() => {
-                    const validDates = customer.services.map(s => s.deliveryDate).filter(Boolean);
-                    const finalDelivery = validDates.length > 0 ? validDates[validDates.length - 1] : "";
-                    const finalDayName = finalDelivery ? getArabicDayName(finalDelivery) : "";
-                    return finalDelivery ? (
-                      <div className="bg-emerald-50/90 border border-emerald-300 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2 text-xs font-cairo">
-                        <div className="flex items-center gap-2 text-emerald-950 font-bold">
-                          <CalendarCheck className="w-4.5 h-4.5 text-emerald-600" />
-                          <span>الميعاد النهائي الفعلي لتسليم كافة خدمات ({customer.arabicName?.trim() || `العميل ${customerOrdinal}`}):</span>
-                        </div>
-                        <div className="font-mono font-black text-emerald-900 bg-white px-3 py-1 rounded-lg border border-emerald-300 shadow-2xs text-xs flex items-center gap-1.5">
-                          <span>{finalDayName ? `${finalDayName} ` : ""}{finalDelivery}</span>
-                          <span className="text-[10px] text-emerald-600 font-normal font-cairo">(تراكمي متتابع)</span>
-                        </div>
-                      </div>
-                    ) : null;
-                  })()}
-
-                  {/* Bottom action strip inside Customer card: per-customer subtotal + quick add another service for SAME customer */}
-                  <div className="pt-2 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-2">
-                    <div className="text-xs font-bold text-slate-700 font-cairo flex items-center gap-2">
-                      <span>إجمالي حساب العميل {customerOrdinal}:</span>
-                      <span className="font-mono font-black text-slate-900 bg-white px-2.5 py-1 rounded-lg border border-slate-300">
-                        {customerTotal.toFixed(2)} ج.م
-                      </span>
+                      )}
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => addServiceToCustomer(cIdx)}
-                      className={`px-3.5 py-2 rounded-xl text-xs font-bold font-cairo flex items-center gap-1.5 cursor-pointer transition-all ${theme.addServiceBtn}`}
-                    >
-                      <Plus className="w-4 h-4" />
-                      <span>إضافة خدمة تالية لنفس العميل ({customer.arabicName?.trim() || customerOrdinal})</span>
-                    </button>
+                    {/* =================================================================== */}
+                    {/* LEFT COLUMN: Requested Services for this Customer (1 or multiple)   */}
+                    {/* =================================================================== */}
+                    <div className={`lg:col-span-6 p-3.5 space-y-2.5 min-w-0 flex flex-col ${theme.servicesBoxBg}`}>
+                      <div className="flex items-center justify-between gap-2 border-b border-slate-200/80 pb-1.5">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <h4 className={`text-[11px] font-extrabold truncate ${theme.titleText}`}>
+                            الخدمات المطلوبة ({customer.services.length})
+                          </h4>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => addServiceToCustomer(cIdx)}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-all whitespace-nowrap shrink-0 ${theme.addServiceBtn}`}
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>إضافة خدمة أخرى</span>
+                        </button>
+                      </div>
+
+                      <div className="space-y-2.5 flex-1">
+                        {customer.services.map((srv, sIdx) => {
+                          const selectedServiceObj = services.find((s) => s.id === srv.serviceId || s.name === srv.serviceId);
+                          const sTheme = getServiceItemTheme(sIdx);
+
+                          return (
+                            <div key={sIdx} className={`rounded-xl overflow-hidden transition-all ${sTheme.wrapper}`}>
+                              {/* Compact Service Sub-Header */}
+                              <div className={`px-3 py-1.5 flex items-center justify-between gap-2 ${sTheme.headerBg}`}>
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-black shrink-0 ${sTheme.badge}`}>
+                                    خدمة {sIdx + 1}
+                                  </span>
+                                  <span className={`text-xs font-extrabold truncate ${sTheme.title}`}>
+                                    {selectedServiceObj ? selectedServiceObj.name : "اختر الخدمة من القائمة"}
+                                  </span>
+                                </div>
+
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <span className="text-xs font-mono font-black tabular-nums text-slate-900">
+                                    {srv.price.toFixed(0)} ج.م
+                                  </span>
+                                  {customer.services.length > 1 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => removeServiceFromCustomer(cIdx, sIdx)}
+                                      className="p-1 bg-white border border-rose-200 text-rose-600 hover:bg-rose-50 rounded-md transition-colors cursor-pointer"
+                                      title="حذف هذه الخدمة"
+                                      aria-label="حذف هذه الخدمة"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Compact Single-Row Service Selector + Qty + Total */}
+                              <div className="p-2.5 space-y-2">
+                                <div className="grid grid-cols-12 gap-2 items-end">
+                                  {/* Service Dropdown */}
+                                  <div className="col-span-7 sm:col-span-8 space-y-0.5">
+                                    <label className="text-[10px] font-bold text-slate-600">
+                                      الخدمة المطلوبة <span className="text-rose-500">*</span>
+                                    </label>
+                                    <select
+                                      name={`c-${cIdx}-s-${sIdx}-id`}
+                                      value={srv.serviceId}
+                                      onChange={(e) => handleServiceChange(cIdx, sIdx, e.target.value)}
+                                      className={`w-full bg-white border rounded-lg px-2.5 py-1.5 text-xs font-semibold focus:outline-hidden focus:border-red-500 focus:ring-2 focus:ring-red-100 transition-all ${
+                                        errors[`c-${cIdx}-s-${sIdx}-id`] ? "border-rose-400 text-rose-900 bg-rose-50/20" : "border-slate-200"
+                                      }`}
+                                      required
+                                    >
+                                      <option value="">-- اختر الخدمة --</option>
+                                      {services.map((s, idx) => (
+                                        <option key={s.id} value={s.id}>
+                                          {idx + 1}. {s.name} ({s.govPrice + s.officeFee} ج.م)
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+
+                                  {/* Quantity */}
+                                  <div className="col-span-2 space-y-0.5">
+                                    <label className="text-[10px] font-bold text-slate-600 block text-center">العدد</label>
+                                    <input
+                                      type="number"
+                                      min="1"
+                                      value={srv.quantity}
+                                      onChange={(e) => handleQtyChange(cIdx, sIdx, parseInt(e.target.value) || 1)}
+                                      className="w-full bg-white border border-slate-200 rounded-lg px-1.5 py-1.5 text-xs font-mono font-bold text-center tabular-nums focus:outline-hidden focus:border-red-500 focus:ring-2 focus:ring-red-100"
+                                      required
+                                    />
+                                  </div>
+
+                                  {/* Computed Price */}
+                                  <div className="col-span-3 sm:col-span-2 space-y-0.5">
+                                    <label className="text-[10px] font-bold text-slate-500 block text-center">السعر</label>
+                                    <div className="w-full bg-slate-100 border border-slate-200 text-slate-800 rounded-lg px-2 py-1.5 text-xs font-mono font-bold tabular-nums text-center truncate">
+                                      {srv.price.toFixed(0)}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {errors[`c-${cIdx}-s-${sIdx}-id`] && (
+                                  <p className="text-[10px] text-rose-600 flex items-center gap-1">
+                                    <AlertCircle className="w-3 h-3 shrink-0" />
+                                    <span>{errors[`c-${cIdx}-s-${sIdx}-id`]}</span>
+                                  </p>
+                                )}
+
+                                {/* Compact Embedded Service Metadata */}
+                                {selectedServiceObj && (
+                                  <div className="space-y-1.5 text-[11px]">
+                                    {/* Duration + Delivery Date on one tight line */}
+                                    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 bg-slate-50 border border-slate-200/80 rounded-lg px-2.5 py-1.5 text-slate-700">
+                                      <span>
+                                        <strong className="text-slate-900">المدة:</strong> {selectedServiceObj.duration}
+                                      </span>
+                                      <span className="text-amber-800 font-bold flex items-center gap-1">
+                                        <Calendar className="w-3 h-3 shrink-0" />
+                                        <span>
+                                          الاستلام: {srv.deliveryDate ? `${getArabicDayName(srv.deliveryDate) ? getArabicDayName(srv.deliveryDate) + " " : ""}${srv.deliveryDate}` : "غير محدد"}
+                                        </span>
+                                      </span>
+                                    </div>
+
+                                    {sIdx > 0 && customer.services[sIdx - 1]?.deliveryDate && (
+                                      <div className="text-[10.5px] text-blue-800 bg-blue-50/70 px-2.5 py-1 rounded-md border border-blue-200/70">
+                                        يبدأ احتسابها بعد انتهاء الخدمة السابقة ({customer.services[sIdx - 1].deliveryDate})
+                                      </div>
+                                    )}
+
+                                    {/* Compact Delivery Instructions */}
+                                    <div className="bg-blue-50/70 border border-blue-200/80 rounded-lg px-2.5 py-1.5 text-blue-950 leading-snug">
+                                      <span className="font-bold text-blue-900">تعليمات التسليم: </span>
+                                      <span>
+                                        {selectedServiceObj.instructions || "يرجى إحضار أصل بطاقة الرقم القومي سارية أو المستندات الأصلية للمطابقة عند الاستلام."}
+                                      </span>
+                                    </div>
+
+                                    {/* Government Fines for Passport Services (#) */}
+                                    {selectedServiceObj.name.trim().startsWith("#") && (() => {
+                                      const currentFines: { name: string; amount: number }[] = Array.isArray(srv.fines) && srv.fines.length > 0
+                                        ? srv.fines
+                                        : (srv.fineName || (srv.fineAmount && srv.fineAmount > 0))
+                                          ? [{ name: srv.fineName || "غرامة حكومية", amount: srv.fineAmount || 0 }]
+                                          : [];
+
+                                      return (
+                                        <div className="bg-amber-50/80 border border-amber-200 rounded-lg p-2 space-y-1.5 text-[11px]">
+                                          <div className="flex items-center justify-between gap-2">
+                                            <span className="font-bold text-amber-950 flex items-center gap-1">
+                                              <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                              <span>غرامات الجواز الحكومية</span>
+                                            </span>
+                                            {currentFines.length > 0 && (
+                                              <button
+                                                type="button"
+                                                onClick={() => handleRemoveAllFines(cIdx, sIdx)}
+                                                className="text-[10px] text-rose-600 hover:text-rose-800 font-bold cursor-pointer"
+                                              >
+                                                إلغاء الكل ✕
+                                              </button>
+                                            )}
+                                          </div>
+
+                                          {currentFines.length > 0 && (
+                                            <div className="space-y-1">
+                                              {currentFines.map((fine, fIdx) => (
+                                                <div key={fIdx} className="flex items-center gap-1.5 bg-white border border-amber-300 rounded-md p-1">
+                                                  <input
+                                                    type="text"
+                                                    value={fine.name}
+                                                    onChange={(e) => handleUpdateFineInService(cIdx, sIdx, fIdx, { name: e.target.value })}
+                                                    placeholder="مسمى الغرامة..."
+                                                    className="flex-1 min-w-0 bg-amber-50/30 border border-amber-200 rounded px-2 py-1 text-[11px] text-amber-950 font-semibold focus:outline-hidden focus:ring-1 focus:ring-amber-500"
+                                                  />
+                                                  <div className="relative w-20 shrink-0">
+                                                    <input
+                                                      type="number"
+                                                      min="0"
+                                                      value={fine.amount}
+                                                      onChange={(e) => handleUpdateFineInService(cIdx, sIdx, fIdx, { amount: parseFloat(e.target.value) || 0 })}
+                                                      className="w-full bg-amber-50/30 border border-amber-200 rounded px-1.5 py-1 text-[11px] font-mono font-bold text-left tabular-nums text-amber-950 focus:outline-hidden focus:ring-1 focus:ring-amber-500"
+                                                    />
+                                                  </div>
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => handleRemoveFineFromService(cIdx, sIdx, fIdx)}
+                                                    className="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded cursor-pointer shrink-0"
+                                                    title="حذف الغرامة"
+                                                  >
+                                                    <Trash2 className="w-3 h-3" />
+                                                  </button>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          )}
+
+                                          <select
+                                            value=""
+                                            onChange={(e) => {
+                                              if (e.target.value) {
+                                                handleAddFineToService(cIdx, sIdx, e.target.value);
+                                                e.target.value = "";
+                                              }
+                                            }}
+                                            className="w-full bg-white border border-amber-300 rounded-md px-2 py-1 text-[11px] text-amber-950 font-bold cursor-pointer hover:bg-amber-50/50 transition-colors"
+                                          >
+                                            <option value="">
+                                              {currentFines.length === 0 ? "+ إضافة غرامة حكومية للجواز..." : "+ إضافة غرامة أخرى..."}
+                                            </option>
+                                            {governmentFines.map((f) => (
+                                              <option key={f.id} value={f.name}>
+                                                {f.name} (+{f.amount} ج.م)
+                                              </option>
+                                            ))}
+                                            <option value="__custom__">غرامة أخرى بمبلغ مخصص...</option>
+                                          </select>
+
+                                          {currentFines.length > 0 && (
+                                            <div className="flex items-center justify-between text-[10.5px] font-bold text-amber-950 bg-amber-100/70 rounded px-2 py-1">
+                                              <span>إجمالي الغرامات ({currentFines.length}):</span>
+                                              <span className="font-mono tabular-nums">
+                                                +{(srv.fineAmount || 0) * srv.quantity} ج.م
+                                              </span>
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })()}
+
+                                    {selectedServiceObj.notes && (
+                                      <div className="text-slate-600 bg-slate-50 px-2 py-1 rounded text-[10.5px]">
+                                        <span className="font-bold">ملاحظات:</span> {selectedServiceObj.notes}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Cumulative Delivery Date Summary for Multiple Services */}
+                      {customer.services.length > 1 && (() => {
+                        const validDates = customer.services.map((s) => s.deliveryDate).filter(Boolean);
+                        const finalDelivery = validDates.length > 0 ? validDates[validDates.length - 1] : "";
+                        const finalDayName = finalDelivery ? getArabicDayName(finalDelivery) : "";
+                        return finalDelivery ? (
+                          <div className="bg-emerald-50 border border-emerald-300 rounded-lg px-2.5 py-1.5 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                            <span className="text-emerald-950 font-bold flex items-center gap-1.5">
+                              <CalendarCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                              <span>الاستلام النهائي المتتابع:</span>
+                            </span>
+                            <span className="font-mono font-black text-emerald-900 tabular-nums">
+                              {finalDayName ? `${finalDayName} ` : ""}{finalDelivery}
+                            </span>
+                          </div>
+                        ) : null;
+                      })()}
+
+                      {/* Secondary bottom quick-add button when customer already has 2+ services */}
+                      {customer.services.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => addServiceToCustomer(cIdx)}
+                          className="w-full py-1.5 border border-dashed border-slate-300 hover:border-slate-500 bg-white/80 hover:bg-white text-slate-700 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>إضافة خدمة تالية للعميل {customerOrdinal}</span>
+                        </button>
+                      )}
+                    </div>
+
                   </div>
-                </div>
-
+                )}
               </div>
+            );
+          })}
+        </div>
 
-            </div>
-            </React.Fragment>
-          );
-        })}
-
-        {/* Master Actions & Invoice Totals */}
-        <div className="flex flex-col md:flex-row gap-4 items-stretch justify-between">
+        {/* Compact Horizontal Widescreen Totals & Primary Action Bar */}
+        <div className="bg-slate-900 text-white rounded-2xl px-4 py-3 shadow-md flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
           
+          {/* Right: Add Family Member Button */}
           <button
             type="button"
             onClick={addCustomer}
-            className="px-5 py-3 border-2 border-dashed border-blue-200 hover:border-blue-400 text-blue-600 hover:bg-blue-50/50 rounded-2xl text-xs font-bold font-cairo flex items-center justify-center gap-2 transition-all"
+            className="px-4 py-2.5 border border-dashed border-sky-400/70 bg-sky-500/10 hover:bg-sky-500/20 text-sky-200 hover:text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0"
           >
-            <UserPlus className="w-4.5 h-4.5" />
-            إضافة عميل / أفراد أسرة للفاتورة المجمعة
+            <UserPlus className="w-4 h-4 text-sky-300" />
+            <span>إضافة عميل / فرد أسرة جديد</span>
           </button>
 
-          {/* Totals Breakdown Card */}
-          <div className="bg-slate-900 text-white rounded-2xl p-5 shadow-lg space-y-3 w-full md:max-w-md">
-            <h4 className="font-bold text-xs font-cairo text-slate-400 border-b border-slate-800 pb-1.5">حسابات الفاتورة المجمعة</h4>
-            <div className="space-y-1.5 text-xs font-mono text-slate-300">
-              <div className="flex justify-between">
-                <span className="font-cairo">الرسوم الحكومية للأوراق:</span>
-                <span>
-                  {customers.reduce((tot, c) => tot + c.services.reduce((sTot, s) => {
-                    const matched = services.find(srv => srv.id === s.serviceId || srv.name === s.serviceId);
-                    return sTot + (matched ? matched.govPrice * s.quantity : 0);
-                  }, 0), 0).toFixed(2)} ج.م
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="font-cairo">أتعاب وتصاريح المكتب:</span>
-                <span>
-                  {customers.reduce((tot, c) => tot + c.services.reduce((sTot, s) => {
-                    const matched = services.find(srv => srv.id === s.serviceId || srv.name === s.serviceId);
-                    return sTot + (matched ? matched.officeFee * s.quantity : 0);
-                  }, 0), 0).toFixed(2)} ج.م
-                </span>
-              </div>
-              <div className="flex justify-between text-sm font-bold text-white pt-2 border-t border-slate-800">
-                <span className="font-cairo text-emerald-400">الإجمالي النهائي للفاتورة:</span>
-                <span className="text-emerald-400">
-                  {customers.reduce((tot, c) => tot + c.services.reduce((sTot, s) => sTot + s.price, 0), 0).toFixed(2)} ج.م
-                </span>
-              </div>
+          {/* Center: Compact Horizontal Totals Breakdown */}
+          <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 text-xs">
+            <div className="flex items-center gap-1.5 text-slate-300">
+              <span>العملاء:</span>
+              <span className="font-mono font-bold text-white tabular-nums">{customers.length}</span>
+              <span className="text-slate-600" aria-hidden="true">·</span>
+              <span>الخدمات:</span>
+              <span className="font-mono font-bold text-white tabular-nums">{liveTotals.totalServicesCount}</span>
             </div>
-
-            <button
-              type="submit"
-              disabled={loading}
-              className={`w-full font-extrabold font-cairo text-sm py-3.5 px-4 rounded-xl flex items-center justify-center gap-2 shadow-md transition-all pt-2.5 ${
-                loading
-                  ? "bg-emerald-800 text-emerald-200 cursor-not-allowed opacity-75 pointer-events-none"
-                  : "bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer active:scale-98"
-              }`}
-              title={loading ? "جاري المعالجة، يرجى الانتظار..." : "حفظ الفاتورة الحالية وإصدار الإيصال"}
-            >
-              {loading ? (
-                <>
-                  <RefreshCw className="w-5 h-5 animate-spin text-emerald-300" />
-                  <span>جاري الحفظ وإصدار الإيصال...</span>
-                </>
-              ) : (
-                <>
-                  <FileText className="w-5 h-5" />
-                  <span>حفظ الفاتورة وإنتاج الإيصال 💾</span>
-                </>
-              )}
-            </button>
+            <div className="flex items-center gap-1.5 text-slate-300">
+              <span>حكومي وغرامات:</span>
+              <span className="font-mono font-bold text-slate-100 tabular-nums">{liveTotals.govWithFines.toFixed(0)} ج.م</span>
+            </div>
+            <div className="flex items-center gap-1.5 text-slate-300">
+              <span>أتعاب المكتب:</span>
+              <span className="font-mono font-bold text-slate-100 tabular-nums">{liveTotals.office.toFixed(0)} ج.م</span>
+            </div>
+            <div className="flex items-center gap-1.5 border-r border-slate-700 pr-4">
+              <span className="font-bold text-emerald-400">الإجمالي النهائي:</span>
+              <span className="font-mono text-base font-black text-emerald-400 tabular-nums">
+                {liveTotals.grand.toFixed(2)} ج.م
+              </span>
+            </div>
           </div>
+
+          {/* Left: Save & Issue Receipt Primary CTA */}
+          <button
+            type="submit"
+            disabled={loading}
+            className={`font-extrabold text-xs sm:text-sm py-2.5 px-5 rounded-xl flex items-center justify-center gap-2 shadow-sm transition-all whitespace-nowrap shrink-0 ${
+              loading
+                ? "bg-emerald-800 text-emerald-200 cursor-not-allowed opacity-75 pointer-events-none"
+                : "bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer active:scale-98"
+            }`}
+            title={loading ? "جاري المعالجة، يرجى الانتظار..." : "حفظ الفاتورة الحالية وإصدار الإيصال"}
+          >
+            {loading ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin text-emerald-300" />
+                <span>جاري الحفظ...</span>
+              </>
+            ) : (
+              <>
+                <FileText className="w-4 h-4" />
+                <span>حفظ الفاتورة وإصدار الإيصال</span>
+              </>
+            )}
+          </button>
 
         </div>
 

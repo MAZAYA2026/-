@@ -251,10 +251,10 @@ export default function App() {
       </header>
 
       {/* Primary Workspace Layout (Sidebar on Desktop, Top buttons on Mobile) */}
-      <div className="max-w-[1720px] 2xl:max-w-[1850px] w-full flex-1 flex flex-col md:flex-row p-3 sm:p-4 lg:p-5 gap-5">
+      <div className="max-w-[1760px] 2xl:max-w-[1900px] w-full mx-auto flex-1 flex flex-col md:flex-row p-2.5 sm:p-3 lg:p-4 gap-3.5 lg:gap-4">
         
         {/* Sidebar Nav Panels */}
-        <aside className="w-full md:w-56 lg:w-60 shrink-0 flex flex-col gap-2.5 no-print font-cairo">
+        <aside className="w-full md:w-52 lg:w-56 shrink-0 flex flex-col gap-2 no-print font-cairo">
           
           <button
             onClick={() => setActiveTab("create")}
@@ -387,7 +387,7 @@ export default function App() {
         </aside>
 
         {/* Primary Workspace View Area */}
-        <main className="min-w-0 flex-1 bg-white border border-slate-200/60 shadow-xs rounded-3xl p-4 sm:p-5 lg:p-6 min-h-[600px] overflow-hidden">
+        <main className="min-w-0 flex-1 bg-white border border-slate-200/60 shadow-xs rounded-3xl p-3 sm:p-4 lg:p-4 min-h-[600px] overflow-hidden">
           {activeTab === "create" && (
             <InvoiceCreator 
               services={services} 
