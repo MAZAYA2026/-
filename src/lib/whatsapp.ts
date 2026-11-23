@@ -662,10 +662,11 @@ export const RECOMMENDED_UNIFIED_META_TEMPLATE_PARAMS: { key: string; value: str
 ];
 
 export const MOJEEB_TEMPLATE_PLACEHOLDERS: { token: string; label: string }[] = [
-  { token: "{تفاصيل_المعاملة_المختصرة}", label: "⭐ تفاصيل المعاملة الموحدة (الخدمات + الجوازات)" },
+  { token: "{تفاصيل_المعاملة_المختصرة}", label: "⭐ تفاصيل المعاملة الموحدة (الخدمات + الجوازات + تعليمات التسليم)" },
   { token: "{اسم_العميل}", label: "اسم العميل" },
   { token: "{رقم_الفاتورة}", label: "رقم الفاتورة" },
   { token: "{الخدمات}", label: "الخدمات فقط" },
+  { token: "{تعليمات_التسليم}", label: "تعليمات تسليم الخدمة" },
   { token: "{موعد_التسليم}", label: "موعد التسليم" },
   { token: "{السعر}", label: "الإجمالي" },
   { token: "{الاسم_الانجليزي}", label: "الاسم الإنجليزي" },
@@ -727,11 +728,13 @@ export function buildCompactTransactionDetailsForTemplate(
   const customers = Array.isArray(inv.customers) ? inv.customers : [];
 
   if (customers.length === 0) {
-    return sanitizeMetaTemplateParamValue(extra?.servicesSummary || "معاملة مسجلة", 650) || "-";
+    return sanitizeMetaTemplateParamValue(extra?.servicesSummary || "معاملة مسجلة", 780) || "-";
   }
 
   const isMultiCustomer = customers.length > 1;
   const customerSegments: string[] = [];
+  const uniqueInstructions: { serviceName: string; text: string }[] = [];
+  const seenInstructionTexts = new Set<string>();
 
   customers.forEach((cust, cIdx) => {
     const seqServices = recalculateCustomerServicesDeliveryDates(
@@ -747,6 +750,12 @@ export function buildCompactTransactionDetailsForTemplate(
       const matched = services.find((srv) => srv.id === s.serviceId || srv.name === s.serviceId);
       const rawName = matched?.name || s.serviceId || "";
       const cleanName = rawName.replace(/^#+\s*/, "").trim() || rawName;
+
+      const instrText = matched?.instructions ? matched.instructions.trim() : "";
+      if (instrText && !seenInstructionTexts.has(instrText)) {
+        seenInstructionTexts.add(instrText);
+        uniqueInstructions.push({ serviceName: cleanName, text: instrText });
+      }
 
       const tags: string[] = [];
       if (s.quantity > 1) tags.push(`×${s.quantity}`);
@@ -786,11 +795,20 @@ export function buildCompactTransactionDetailsForTemplate(
     }
   });
 
+  if (uniqueInstructions.length === 1) {
+    customerSegments.push(`تعليمات التسليم: ${uniqueInstructions[0].text}`);
+  } else if (uniqueInstructions.length > 1) {
+    const combinedInstr = uniqueInstructions
+      .map((item) => `(${item.serviceName}): ${item.text}`)
+      .join(" | ");
+    customerSegments.push(`تعليمات التسليم: ${combinedInstr}`);
+  }
+
   if (extra?.executionNote && extra.executionNote.trim()) {
     customerSegments.push(`ملاحظة: ${extra.executionNote.trim()}`);
   }
 
-  return sanitizeMetaTemplateParamValue(customerSegments.join(" | "), 650) || "-";
+  return sanitizeMetaTemplateParamValue(customerSegments.join(" | "), 780) || "-";
 }
 
 export function buildInvoiceTemplateVariables(
@@ -818,6 +836,8 @@ export function buildInvoiceTemplateVariables(
   const professions: string[] = [];
   const capacities: string[] = [];
   const nationalIds: string[] = [];
+  const uniqueDeliveryInstructions: string[] = [];
+  const seenInstr = new Set<string>();
 
   (inv.customers || []).forEach((cust) => {
     if (cust.englishName?.trim()) englishNames.push(cust.englishName.trim());
@@ -839,6 +859,11 @@ export function buildInvoiceTemplateVariables(
       allServicesSummary.push(s.quantity > 1 ? `${srvName} (×${s.quantity})` : srvName);
       if (s.deliveryDate && !allDeliveryDates.includes(s.deliveryDate)) {
         allDeliveryDates.push(s.deliveryDate);
+      }
+      const instr = matched?.instructions?.trim();
+      if (instr && !seenInstr.has(instr)) {
+        seenInstr.add(instr);
+        uniqueDeliveryInstructions.push(instr);
       }
     });
   });
@@ -879,6 +904,7 @@ export function buildInvoiceTemplateVariables(
     "{الموظف}": inv.employeeName || "-",
     "{حالة_الفاتورة}": statusText,
     "{الخدمات}": extra?.servicesSummary || allServicesSummary.join(" + ") || "-",
+    "{تعليمات_التسليم}": uniqueDeliveryInstructions.join(" | ") || "-",
     "{موعد_التسليم}": formattedDelivery,
     "{السعر}": `${Number(inv.totalAmount || 0).toFixed(2)} ج.م`,
     "{رقم_الارشيف}": inv.archiveDrawer || "درج الحفظ المخصص",
@@ -909,7 +935,7 @@ export function resolveMojeebTemplatePayload(
     for (const p of config.parameters) {
       const k = String(p.key || "").trim();
       if (!k) continue;
-      const sanitized = sanitizeMetaTemplateParamValue(applyTemplateVariables(p.value || "", variables), 650);
+      const sanitized = sanitizeMetaTemplateParamValue(applyTemplateVariables(p.value || "", variables), 780);
       parameters[k] = sanitized || "-";
     }
   }
