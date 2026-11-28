@@ -424,20 +424,60 @@ export function parsePastedCustomerText(
 
     if (lines.length === 0) continue;
 
-    // Check if every line is a self-contained single-line record (contains 14-digit NID and delimiter or name)
+    // Helpers to identify per-person boundaries inside a chunk without blank lines
+    const isNumberedLine = (l: string) => /^[\d]+[\.\-\)\:]\s+[\u0600-\u06FFa-zA-Z]/.test(l);
+    const isNameLabelLine = (l: string) =>
+      /^(?:[\d]+[\.\-\)\:]\s*)?(?:الاسم|اسم|العميل|المواطن|الفرد|الشخص)\s*[:：]/.test(l);
+    const isMetaFieldOnlyLine = (l: string) =>
+      /^(?:الرقم\s*القومي|الرقم|رقم\s*البطاقة|البطاقة|المهنة|الوظيفة|العمل|الهاتف|الموبايل|التليفون|الجوال|تاريخ\s*الميلاد|الميلاد|الصفة|صفة\s*مقدم\s*الطلب|نوع\s*المستند|المستند|ملاحظات)\s*[:：]/.test(l) ||
+      /^\+?\d[\d\s\-/]+$/.test(l) ||
+      isKnownProfessionPhrase(l);
+
     const nidCountInChunk = (chunk.match(/(?<!\d)[23]\d{13}(?!\d)/g) || []).length;
     const linesWithNid = lines.filter((l) => /(?<!\d)[23]\d{13}(?!\d)/.test(l));
+    const numberedStartsCount = lines.filter(isNumberedLine).length;
+    const nameLabelCount = lines.filter(isNameLabelLine).length;
 
+    // Case 1: Every line contains a 14-digit NID -> one customer per line
     if (lines.length > 1 && linesWithNid.length >= 2 && linesWithNid.length === lines.length) {
-      // One customer per line!
       for (const l of lines) {
         blocks.push([l]);
       }
       continue;
     }
 
+    // Case 2: Numbered list of multiple people (e.g., "1- ... 2- ... 6- ...") with or without sub-lines
+    if (numberedStartsCount >= 2) {
+      let currentBlock: string[] = [];
+      for (const line of lines) {
+        if (isNumberedLine(line) && currentBlock.length > 0) {
+          blocks.push(currentBlock);
+          currentBlock = [line];
+        } else {
+          currentBlock.push(line);
+        }
+      }
+      if (currentBlock.length > 0) blocks.push(currentBlock);
+      continue;
+    }
+
+    // Case 3: Repeated "الاسم: ..." labels without blank lines between people
+    if (nameLabelCount >= 2) {
+      let currentBlock: string[] = [];
+      for (const line of lines) {
+        if (isNameLabelLine(line) && currentBlock.length > 0) {
+          blocks.push(currentBlock);
+          currentBlock = [line];
+        } else {
+          currentBlock.push(line);
+        }
+      }
+      if (currentBlock.length > 0) blocks.push(currentBlock);
+      continue;
+    }
+
+    // Case 4: Multiple NIDs in the same chunk without blank lines
     if (nidCountInChunk > 1) {
-      // Multi-line chunk containing multiple customers without blank lines between them
       let currentBlock: string[] = [];
       let currentHasNid = false;
 
@@ -446,11 +486,17 @@ export function parsePastedCustomerText(
         const nextLine = lines[i + 1] || "";
         const lineHasNid = /(?<!\d)[23]\d{13}(?!\d)/.test(line);
         const nextHasNid = /(?<!\d)[23]\d{13}(?!\d)/.test(nextLine);
-        const isMetaLabel = /^(?:المهنة|الوظيفة|الهاتف|الموبايل|التليفون|تاريخ\s*الميلاد|الصفة|ملاحظات)\s*[:：]/.test(line);
-        const isNumberedStart = /^[\d]+[\.\-\)]\s+[\u0600-\u06FF]/.test(line);
+        const isMetaLabel = isMetaFieldOnlyLine(line);
+        const isNumberedStart = isNumberedLine(line);
+        const isNameLabel = isNameLabelLine(line);
 
         if (currentHasNid) {
-          if (lineHasNid || isNumberedStart || (nextHasNid && !isMetaLabel && !isKnownProfessionPhrase(line))) {
+          if (
+            lineHasNid ||
+            isNumberedStart ||
+            isNameLabel ||
+            (nextHasNid && !isMetaLabel)
+          ) {
             blocks.push(currentBlock);
             currentBlock = [line];
             currentHasNid = lineHasNid;
@@ -465,9 +511,25 @@ export function parsePastedCustomerText(
       if (currentBlock.length > 0) {
         blocks.push(currentBlock);
       }
-    } else {
-      blocks.push(lines);
+      continue;
     }
+
+    // Case 5: Multiple standalone person lines without NIDs yet (e.g., 6 family names one per line)
+    if (lines.length >= 2) {
+      const hasAnyMetaOnlyLine = lines.some(isMetaFieldOnlyLine);
+      const personLikeLines = lines.filter((l) => {
+        const arabicWords = l.replace(/[^\u0600-\u06FF\s]/g, " ").trim().split(/\s+/).filter(Boolean);
+        return arabicWords.length >= 2 || /[|\t;،,]|\s-\s/.test(l);
+      });
+      if (!hasAnyMetaOnlyLine && personLikeLines.length === lines.length) {
+        for (const l of lines) {
+          blocks.push([l]);
+        }
+        continue;
+      }
+    }
+
+    blocks.push(lines);
   }
 
   const parsed: ParsedFastCustomer[] = [];

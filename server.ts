@@ -3176,9 +3176,10 @@ app.post("/api/ocr/scan-document", async (req, res) => {
   }
 });
 
-// 1B. AI Smart One-Sentence Voice Dictation (Arabic Egyptian Speech -> Structured Customer Fields)
+// 1B. AI Smart Voice Dictation (Arabic Egyptian Speech -> Single or Multi-Customer Structured Fields)
 app.post("/api/voice/parse-customer", async (req, res) => {
-  const { audio, mimeType: rawMimeType, applicantCapacities } = req.body || {};
+  const { audio, mimeType: rawMimeType, applicantCapacities, allowMultiple } = req.body || {};
+  const isMultiCustomer = Boolean(allowMultiple);
 
   if (!audio || typeof audio !== "string") {
     return res.status(400).json({ error: "لم يتم استلام التسجيل الصوتي للمعالجة." });
@@ -3217,8 +3218,13 @@ app.post("/api/voice/parse-customer", async (req, res) => {
   if (base64Data.length < 200) {
     return res.status(400).json({ error: "التسجيل الصوتي قصير جداً، يرجى التحدث بوضوح ثم الضغط على إيقاف." });
   }
-  if (base64Data.length > 16 * 1024 * 1024) {
-    return res.status(413).json({ error: "حجم التسجيل الصوتي كبير جداً، يرجى اختصار الإملاء لأقل من 45 ثانية." });
+  const maxBase64Bytes = isMultiCustomer ? 24 * 1024 * 1024 : 16 * 1024 * 1024;
+  if (base64Data.length > maxBase64Bytes) {
+    return res.status(413).json({
+      error: isMultiCustomer
+        ? "حجم التسجيل الصوتي كبير جداً، يرجى تقسيم الإملاء على تسجيلين (كل تسجيل أقل من دقيقتين)."
+        : "حجم التسجيل الصوتي كبير جداً، يرجى اختصار الإملاء لأقل من 45 ثانية.",
+    });
   }
 
   if (!ai) {
@@ -3332,26 +3338,47 @@ app.post("/api/voice/parse-customer", async (req, res) => {
       }
 
       // Stage 2: Structured Customer Field Extraction from transcript
+      const multiRules = isMultiCustomer
+        ? `\n7. هام جداً لتعدد الأفراد: قد يتضمن النص بيانات عميل واحد أو عدة أفراد من أسرة أو مجموعة (مثل 2 أو 4 أو 6 أفراد أو أكثر). استخرج كل شخص مذكور كعنصر مستقل داخل المصفوفة "customers" بنفس الترتيب الذي ذُكر به، ولا تدمج شخصين في عنصر واحد، ولا تحذف أي شخص حتى لو لم تُذكر كل بياناته. إذا ذُكر رقم هاتف مشترك للأسرة كلها فضعه في حقل phone لكل فرد.`
+        : "";
+
       const extractionPrompt = `النص المفرغ من إملاء موظف مكتب جوازات مصري:
 """
 ${transcript}
 """
 
-استخرج فقط البيانات المذكورة فعلياً في النص وأرجعها بصيغة JSON حسب المخطط المحدد.
-${extractionRules}`;
+${isMultiCustomer ? 'استخرج بيانات جميع الأفراد المذكورين فعلياً في النص داخل المصفوفة "customers" بصيغة JSON حسب المخطط المحدد.' : "استخرج فقط البيانات المذكورة فعلياً في النص وأرجعها بصيغة JSON حسب المخطط المحدد."}
+${extractionRules}${multiRules}`;
+
+      const customerItemSchema = {
+        type: Type.OBJECT,
+        properties: baseExtractionSchemaProps,
+        required: ["arabicName", "nationalId", "phone", "profession", "applicantCapacity"],
+      };
+
+      const stage2Schema = isMultiCustomer
+        ? {
+            type: Type.OBJECT,
+            properties: {
+              customers: {
+                type: Type.ARRAY,
+                description: "List of all explicitly spoken customers/family members in order.",
+                items: customerItemSchema,
+              },
+            },
+            required: ["customers"],
+          }
+        : customerItemSchema;
 
       let extractLastErr: any = null;
       for (const modelName of candidateFlashModels) {
         try {
           const extractConfig: any = {
-            systemInstruction:
-              "You are an accurate Arabic data extraction assistant for an Egyptian passports and government services office. Extract only explicitly spoken customer fields into strict JSON without hallucinating missing fields.",
+            systemInstruction: isMultiCustomer
+              ? "You are an accurate Arabic data extraction assistant for an Egyptian passports office. Extract EVERY explicitly spoken customer or family member into the 'customers' array in strict JSON without merging people or hallucinating missing fields."
+              : "You are an accurate Arabic data extraction assistant for an Egyptian passports and government services office. Extract only explicitly spoken customer fields into strict JSON without hallucinating missing fields.",
             responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: baseExtractionSchemaProps,
-              required: ["arabicName", "nationalId", "phone", "profession", "applicantCapacity"],
-            },
+            responseSchema: stage2Schema,
           };
           if (modelName === "gemini-4-hydrogen") {
             extractConfig.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
@@ -3381,29 +3408,63 @@ ${extractionRules}`;
       }
     } else {
       // Fallback Direct Multimodal Audio -> Transcript + Structured JSON in one request
-      const directAudioPrompt = `استمع إلى التسجيل الصوتي باللهجة العربية المصرية لموظف مكتب جوازات يملي بيانات عميل في جملة واحدة.
+      const multiRules = isMultiCustomer
+        ? `\n7. هام جداً لتعدد الأفراد: قد يتضمن التسجيل الصوتي بيانات عميل واحد أو عدة أفراد من أسرة أو مجموعة (مثل 2 أو 4 أو 6 أفراد أو أكثر). استخرج كل شخص مذكور كعنصر مستقل داخل المصفوفة "customers" بنفس الترتيب الذي ذُكر به، ولا تدمج شخصين في عنصر واحد، ولا تحذف أي شخص حتى لو لم تُذكر كل بياناته. إذا ذُكر رقم هاتف مشترك للأسرة كلها فضعه في حقل phone لكل فرد.`
+        : "";
+
+      const directAudioPrompt = isMultiCustomer
+        ? `استمع إلى التسجيل الصوتي باللهجة العربية المصرية لموظف مكتب جوازات يملي بيانات عميل واحد أو عدة أفراد من أسرة أو مجموعة.
+أولاً: فرّغ الكلام المسموع بدقة في الحقل transcript باللغة العربية.
+ثانياً: استخرج بيانات جميع الأفراد المذكورين فعلياً في التسجيل داخل المصفوفة "customers" بصيغة JSON حسب المخطط المحدد.
+${extractionRules}${multiRules}`
+        : `استمع إلى التسجيل الصوتي باللهجة العربية المصرية لموظف مكتب جوازات يملي بيانات عميل في جملة واحدة.
 أولاً: فرّغ الكلام المسموع بدقة في الحقل transcript باللغة العربية.
 ثانياً: استخرج فقط البيانات المذكورة فعلياً في التسجيل وأرجعها بصيغة JSON حسب المخطط المحدد.
 ${extractionRules}`;
+
+      const customerItemSchema = {
+        type: Type.OBJECT,
+        properties: baseExtractionSchemaProps,
+        required: ["arabicName", "nationalId", "phone", "profession", "applicantCapacity"],
+      };
+
+      const directSchema = isMultiCustomer
+        ? {
+            type: Type.OBJECT,
+            properties: {
+              transcript: {
+                type: Type.STRING,
+                description: "Exact Arabic transcription of the spoken audio.",
+              },
+              customers: {
+                type: Type.ARRAY,
+                description: "List of all explicitly spoken customers/family members in order.",
+                items: customerItemSchema,
+              },
+            },
+            required: ["transcript", "customers"],
+          }
+        : {
+            type: Type.OBJECT,
+            properties: {
+              transcript: {
+                type: Type.STRING,
+                description: "Exact Arabic transcription of the spoken audio.",
+              },
+              ...baseExtractionSchemaProps,
+            },
+            required: ["transcript", "arabicName", "nationalId", "phone", "profession", "applicantCapacity"],
+          };
 
       let directLastErr: any = null;
       for (const modelName of candidateFlashModels) {
         try {
           const directConfig: any = {
-            systemInstruction:
-              "You are an accurate Egyptian Arabic speech-to-data assistant for an Egyptian passports office. Transcribe the audio accurately in Arabic script into 'transcript', and extract only explicitly spoken customer fields into strict JSON without hallucinating.",
+            systemInstruction: isMultiCustomer
+              ? "You are an accurate Egyptian Arabic speech-to-data assistant for an Egyptian passports office. Transcribe the audio accurately in Arabic script into 'transcript', and extract EVERY explicitly spoken customer or family member into the 'customers' array in strict JSON without merging people or hallucinating."
+              : "You are an accurate Egyptian Arabic speech-to-data assistant for an Egyptian passports office. Transcribe the audio accurately in Arabic script into 'transcript', and extract only explicitly spoken customer fields into strict JSON without hallucinating.",
             responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                transcript: {
-                  type: Type.STRING,
-                  description: "Exact Arabic transcription of the spoken audio.",
-                },
-                ...baseExtractionSchemaProps,
-              },
-              required: ["transcript", "arabicName", "nationalId", "phone", "profession", "applicantCapacity"],
-            },
+            responseSchema: directSchema,
           };
           if (modelName === "gemini-4-hydrogen") {
             directConfig.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
@@ -3435,7 +3496,11 @@ ${extractionRules}`;
         throw directLastErr || new Error("تعذر معالجة التسجيل الصوتي عبر نماذج الذكاء الاصطناعي المتاحة.");
       }
 
-      if (!transcript && !parsed.arabicName && !parsed.nationalId && !parsed.phone && !parsed.profession) {
+      const hasAnyDirectCustomer = isMultiCustomer
+        ? Array.isArray(parsed.customers) && parsed.customers.length > 0
+        : Boolean(parsed.arabicName || parsed.nationalId || parsed.phone || parsed.profession);
+
+      if (!transcript && !hasAnyDirectCustomer) {
         return res.status(422).json({
           error: "لم يتم التقاط كلام واضح في التسجيل الصوتي، يرجى التحدث بالقرب من الميكروفون وإعادة المحاولة.",
         });
@@ -3447,34 +3512,56 @@ ${extractionRules}`;
         .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
         .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0));
 
-    const arabicName = String(parsed.arabicName || "").replace(/[a-zA-Z0-9]/g, "").replace(/\s+/g, " ").trim();
-    const nationalId = toWesternDigits(parsed.nationalId || "").replace(/\D/g, "").slice(0, 14);
-    const phone = toWesternDigits(parsed.phone || "").replace(/\D/g, "");
-    const profession = String(parsed.profession || "").replace(/[a-zA-Z]/g, "").replace(/\s+/g, " ").trim().slice(0, 32);
-    const rawCapacity = String(parsed.applicantCapacity || "").trim();
-    const matchedCapacity = rawCapacity
-      ? capacitiesList.find((opt) => opt === rawCapacity || opt.includes(rawCapacity) || rawCapacity.includes(opt)) || ""
-      : "";
+    const normalizeCustomerRecord = (rawItem: any) => {
+      const arabicName = String(rawItem?.arabicName || "").replace(/[a-zA-Z0-9]/g, "").replace(/\s+/g, " ").trim();
+      const nationalId = toWesternDigits(rawItem?.nationalId || "").replace(/\D/g, "").slice(0, 14);
+      const phone = toWesternDigits(rawItem?.phone || "").replace(/\D/g, "");
+      const profession = String(rawItem?.profession || "").replace(/[a-zA-Z]/g, "").replace(/\s+/g, " ").trim().slice(0, 32);
+      const rawCapacity = String(rawItem?.applicantCapacity || "").trim();
+      const matchedCapacity = rawCapacity
+        ? capacitiesList.find((opt) => opt === rawCapacity || opt.includes(rawCapacity) || rawCapacity.includes(opt)) || ""
+        : "";
 
-    let birthDate = "";
-    if (nationalId.length >= 7) {
-      const nidInfo = parseEgyptianNationalId(nationalId.padEnd(14, "0"));
-      if (nidInfo?.birthDate) {
-        birthDate = nidInfo.birthDate.replace(/-/g, "/");
+      let birthDate = "";
+      if (nationalId.length >= 7) {
+        const nidInfo = parseEgyptianNationalId(nationalId.padEnd(14, "0"));
+        if (nidInfo?.birthDate) {
+          birthDate = nidInfo.birthDate.replace(/-/g, "/");
+        }
       }
-    }
 
-    return res.json({
-      status: "success",
-      transcript,
-      extracted: {
+      return {
         arabicName,
         nationalId,
         birthDate,
         phone,
         profession,
         applicantCapacity: matchedCapacity,
-      },
+      };
+    };
+
+    const rawList = isMultiCustomer
+      ? (Array.isArray(parsed.customers) ? parsed.customers : [parsed])
+      : [parsed];
+
+    const normalizedCustomers = rawList
+      .map(normalizeCustomerRecord)
+      .filter((c: any) => Boolean(c.arabicName || c.nationalId || c.phone || c.profession || c.applicantCapacity));
+
+    const primaryExtracted = normalizedCustomers[0] || {
+      arabicName: "",
+      nationalId: "",
+      birthDate: "",
+      phone: "",
+      profession: "",
+      applicantCapacity: "",
+    };
+
+    return res.json({
+      status: "success",
+      transcript,
+      extracted: primaryExtracted,
+      customers: normalizedCustomers,
     });
   } catch (err: any) {
     console.error("AI Voice Dictation Error:", err);
@@ -3557,8 +3644,12 @@ app.post("/api/db/potential-customers", async (req, res) => {
       createdAt: item.createdAt || new Date().toISOString().split("T")[0],
       status: item.status || "جديد"
     };
-    db.potentialCustomers.unshift(newItem);
     added.push(newItem);
+  }
+
+  // Insert batch at the top while preserving exact entered order (1..N)
+  if (added.length > 0) {
+    db.potentialCustomers.unshift(...added);
   }
 
   writeDB(db);

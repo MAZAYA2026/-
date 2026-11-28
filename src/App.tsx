@@ -39,7 +39,7 @@ export default function App() {
   const [dictionary, setDictionary] = useState<DictionaryItem[]>([]);
   const [governmentFines, setGovernmentFines] = useState<GovernmentFine[]>([]);
   const [potentialCustomers, setPotentialCustomers] = useState<PotentialCustomer[]>([]);
-  const [customerToCreate, setCustomerToCreate] = useState<PotentialCustomer | null>(null);
+  const [customersToCreate, setCustomersToCreate] = useState<PotentialCustomer[] | null>(null);
   
   const [activeTab, setActiveTab] = useState<"create" | "query" | "aman" | "reminders" | "collection" | "services" | "settings" | "prospects">("create");
   const [loading, setLoading] = useState(true);
@@ -142,7 +142,7 @@ export default function App() {
       );
     }
 
-    setCustomerToCreate(null);
+    setCustomersToCreate(null);
   };
 
   const handleInvoiceUpdated = (updatedInv: Invoice) => {
@@ -398,7 +398,7 @@ export default function App() {
               onDictionaryUpdated={(newDict) => setDictionary(newDict)}
               governmentFines={governmentFines}
               potentialCustomers={potentialCustomers}
-              initialCustomerToCreate={customerToCreate}
+              initialCustomersToCreate={customersToCreate}
             />
           )}
 
@@ -510,8 +510,9 @@ export default function App() {
             <PotentialCustomersPanel 
               potentialCustomers={potentialCustomers}
               onCustomersUpdated={(updatedList) => setPotentialCustomers(updatedList)}
-              onUseCustomerInInvoice={(cust) => {
-                setCustomerToCreate(cust);
+              onUseCustomerInInvoice={(custOrList) => {
+                const list = Array.isArray(custOrList) ? [...custOrList] : [custOrList];
+                setCustomersToCreate(list);
                 setActiveTab("create");
               }}
               dictionary={dictionary}

@@ -20,6 +20,7 @@ interface InvoiceCreatorProps {
   governmentFines?: GovernmentFine[];
   potentialCustomers?: PotentialCustomer[];
   initialCustomerToCreate?: PotentialCustomer | null;
+  initialCustomersToCreate?: PotentialCustomer[] | null;
   onPotentialCustomerConverted?: (convertedId: string) => void;
 }
 
@@ -33,6 +34,7 @@ export default function InvoiceCreator({
   governmentFines = [],
   potentialCustomers = [],
   initialCustomerToCreate = null,
+  initialCustomersToCreate = null,
   onPotentialCustomerConverted
 }: InvoiceCreatorProps) {
   const applicantCapacityOptions = (settings.applicantCapacities && settings.applicantCapacities.length > 0)
@@ -440,90 +442,128 @@ export default function InvoiceCreator({
     }
   };
 
-  // Auto pre-fill if initialCustomerToCreate is provided from Potential Customers tab
-  useEffect(() => {
-    if (initialCustomerToCreate) {
-      const p = initialCustomerToCreate;
-      const passportService = services.find((s) => s.name.startsWith("##") || s.name.startsWith("#"));
-      const defaultServiceId = passportService ? passportService.name : (services[0]?.name || "");
+  const buildCustomerInputFromProspect = (p: PotentialCustomer): CustomerInput => {
+    const passportService = services.find((s) => s.name.startsWith("##") || s.name.startsWith("#"));
+    const defaultServiceId = passportService ? passportService.name : (services[0]?.name || "");
 
-      let en = p.englishName || "";
-      if (!en && p.arabicName) {
-        try {
-          const breakdown = breakdownArabicName(p.arabicName, dictionary);
-          if (breakdown && breakdown.assembledEnglish) {
-            en = breakdown.assembledEnglish.toUpperCase();
-          }
-        } catch {}
-      }
-
-      const prefilled: CustomerInput = {
-        arabicName: p.arabicName,
-        englishName: en,
-        englishNameOption: "dictionary",
-        nationalId: p.nationalId,
-        birthDate: p.birthDate || "",
-        profession: p.profession || "",
-        phone: p.phone || "",
-        applicantCapacity: p.applicantCapacity || "",
-        services: [
-          {
-            serviceId: defaultServiceId,
-            quantity: 1,
-            price: 0,
-            deliveryDate: "",
-          },
-        ],
-      };
-      setCustomers([prefilled]);
+    let en = p.englishName || "";
+    if (!en && p.arabicName) {
+      try {
+        const breakdown = breakdownArabicName(p.arabicName, dictionary);
+        if (breakdown && breakdown.assembledEnglish) {
+          en = breakdown.assembledEnglish.toUpperCase();
+        }
+      } catch {}
     }
-  }, [initialCustomerToCreate]);
 
-  // Handle confirming selection of customers from potential customers list
+    return {
+      arabicName: p.arabicName,
+      englishName: en,
+      englishNameOption: "dictionary",
+      nationalId: p.nationalId || "",
+      birthDate: p.birthDate || "",
+      profession: p.profession || "",
+      phone: p.phone || "",
+      applicantCapacity: p.applicantCapacity || "",
+      services: [
+        {
+          serviceId: defaultServiceId,
+          quantity: 1,
+          price: 0,
+          deliveryDate: "",
+        },
+      ],
+    };
+  };
+
+  // Group available potential customers by familyGroupId (keeping members consecutive in exact entered order)
+  const groupedAvailableProspects = useMemo(() => {
+    const available = potentialCustomers.filter((p) => p.status !== "تم_التحويل_لفاتورة");
+    const groups: {
+      key: string;
+      familyGroupId?: string;
+      label: string;
+      members: PotentialCustomer[];
+    }[] = [];
+    const groupById = new Map<string, (typeof groups)[number]>();
+
+    for (const p of available) {
+      if (p.familyGroupId) {
+        const existing = groupById.get(p.familyGroupId);
+        if (existing) {
+          existing.members.push(p);
+        } else {
+          const headName = p.arabicName.trim().split(/\s+/).slice(0, 3).join(" ");
+          const newGroup = {
+            key: p.familyGroupId,
+            familyGroupId: p.familyGroupId,
+            label: p.familyGroupLabel || `أسرة ${headName}`,
+            members: [p],
+          };
+          groupById.set(p.familyGroupId, newGroup);
+          groups.push(newGroup);
+        }
+      } else {
+        groups.push({
+          key: p.id,
+          label: p.arabicName,
+          members: [p],
+        });
+      }
+    }
+
+    const term = prospectSearchTerm.trim().toLowerCase();
+    if (!term) return groups;
+
+    return groups.filter((group) => {
+      if (group.label.toLowerCase().includes(term)) return true;
+      return group.members.some((p) => {
+        const nMatch = p.arabicName?.toLowerCase().includes(term);
+        const enMatch = p.englishName?.toLowerCase().includes(term);
+        const nidMatch = p.nationalId?.includes(term);
+        const pMatch = p.profession?.toLowerCase().includes(term);
+        const phMatch = p.phone?.includes(term);
+        return Boolean(nMatch || enMatch || nidMatch || pMatch || phMatch);
+      });
+    });
+  }, [potentialCustomers, prospectSearchTerm]);
+
+  const insertProspectsIntoInvoice = (prospectsList: PotentialCustomer[]) => {
+    if (prospectsList.length === 0) return;
+    const newCustomers = prospectsList.map((p) => buildCustomerInputFromProspect(p));
+    setCustomers(newCustomers);
+    setCollapsedCustomers({});
+    setIsSelectProspectModalOpen(false);
+    setSelectedProspectIds([]);
+  };
+
+  // Auto pre-fill if initialCustomersToCreate (single or entire family) is provided from Potential Customers tab
+  useEffect(() => {
+    const incoming =
+      initialCustomersToCreate && initialCustomersToCreate.length > 0
+        ? initialCustomersToCreate
+        : initialCustomerToCreate
+          ? [initialCustomerToCreate]
+          : [];
+    if (incoming.length > 0) {
+      const prefilledList = incoming.map((p) => buildCustomerInputFromProspect(p));
+      setCustomers(prefilledList);
+      setCollapsedCustomers({});
+    }
+  }, [initialCustomersToCreate, initialCustomerToCreate]);
+
+  // Handle confirming selection of customers from potential customers list (preserving family order)
   const handleConfirmSelectProspects = () => {
-    const selectedList = potentialCustomers.filter((p) => selectedProspectIds.includes(p.id));
-    if (selectedList.length === 0) {
+    const orderedSelected = groupedAvailableProspects
+      .flatMap((g) => g.members)
+      .filter((p) => selectedProspectIds.includes(p.id));
+
+    if (orderedSelected.length === 0) {
       setIsSelectProspectModalOpen(false);
       return;
     }
 
-    const passportService = services.find((s) => s.name.startsWith("##") || s.name.startsWith("#"));
-    const defaultServiceId = passportService ? passportService.name : (services[0]?.name || "");
-
-    const newCustomers: CustomerInput[] = selectedList.map((p) => {
-      let en = p.englishName || "";
-      if (!en && p.arabicName) {
-        try {
-          const breakdown = breakdownArabicName(p.arabicName, dictionary);
-          if (breakdown && breakdown.assembledEnglish) {
-            en = breakdown.assembledEnglish.toUpperCase();
-          }
-        } catch {}
-      }
-
-      return {
-        arabicName: p.arabicName,
-        englishName: en,
-        englishNameOption: "dictionary",
-        nationalId: p.nationalId,
-        birthDate: p.birthDate || "",
-        profession: p.profession || "",
-        phone: p.phone || "", // Kept empty for the employee to type
-        applicantCapacity: p.applicantCapacity || "", // Kept unselected so employee notices and selects
-        services: [
-          {
-            serviceId: defaultServiceId,
-            quantity: 1,
-            price: 0,
-            deliveryDate: "",
-          },
-        ],
-      };
-    });
-
-    setCustomers(newCustomers);
-    setIsSelectProspectModalOpen(false);
-    setSelectedProspectIds([]);
+    insertProspectsIntoInvoice(orderedSelected);
   };
 
   // Handle scanned customer direct insertion
@@ -2620,71 +2660,177 @@ export default function InvoiceCreator({
               />
             </div>
 
-            {/* List of available customers */}
-            <div className="flex-1 overflow-y-auto space-y-2 max-h-[46vh] pr-1">
-              {potentialCustomers
-                .filter((p) => {
-                  if (p.status === "تم_التحويل_لفاتورة") return false;
-                  if (prospectSearchTerm) {
-                    const term = prospectSearchTerm.toLowerCase();
-                    const nMatch = p.arabicName?.toLowerCase().includes(term);
-                    const nidMatch = p.nationalId?.includes(term);
-                    const pMatch = p.profession?.toLowerCase().includes(term);
-                    if (!nMatch && !nidMatch && !pMatch) return false;
-                  }
-                  return true;
-                })
-                .map((p) => {
-                  const isChecked = selectedProspectIds.includes(p.id);
+            {/* List of available customers (grouped by family) */}
+            <div className="flex-1 overflow-y-auto space-y-3 max-h-[50vh] pr-1">
+              {groupedAvailableProspects.map((group) => {
+                const isFamilyGroup = group.members.length > 1;
+                const memberIds = group.members.map((m) => m.id);
+                const allGroupChecked = memberIds.every((id) => selectedProspectIds.includes(id));
+
+                if (isFamilyGroup) {
                   return (
                     <div
-                      key={p.id}
-                      onClick={() => {
-                        setSelectedProspectIds((prev) =>
-                          prev.includes(p.id) ? prev.filter((id) => id !== p.id) : [...prev, p.id]
-                        );
-                      }}
-                      className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
-                        isChecked
-                          ? "bg-indigo-50/80 border-indigo-300 shadow-2xs"
-                          : "bg-slate-50/70 border-slate-200 hover:bg-slate-100/70"
+                      key={group.key}
+                      className={`rounded-2xl border-2 overflow-hidden transition-all ${
+                        allGroupChecked
+                          ? "border-indigo-400 bg-indigo-50/40 shadow-xs"
+                          : "border-indigo-200/90 bg-white"
                       }`}
                     >
-                      <div className="flex items-center gap-3">
-                        <button type="button" className="text-indigo-600">
-                          {isChecked ? <CheckSquare className="w-5 h-5" /> : <Square className="w-5 h-5 text-slate-300" />}
-                        </button>
-                        <div>
-                          <div className="font-bold text-xs text-slate-900 flex items-center gap-2">
-                            <span>{p.arabicName}</span>
-                            {p.documentType && (
-                              <span className="text-[10px] bg-white border border-slate-200 px-1.5 py-0.2 rounded-md text-slate-500 font-normal">
-                                {p.documentType === "شهادة_ميلاد" ? "📜 شهادة ميلاد" : "🆔 بطاقة رقم قومي"}
-                              </span>
+                      {/* Family Group Header */}
+                      <div
+                        onClick={() => {
+                          if (allGroupChecked) {
+                            setSelectedProspectIds((prev) => prev.filter((id) => !memberIds.includes(id)));
+                          } else {
+                            setSelectedProspectIds((prev) => Array.from(new Set([...prev, ...memberIds])));
+                          }
+                        }}
+                        className="px-3.5 py-2.5 bg-indigo-50/90 border-b border-indigo-100 flex flex-wrap items-center justify-between gap-2 cursor-pointer hover:bg-indigo-100/70 transition-colors"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <button type="button" className="text-indigo-700 shrink-0">
+                            {allGroupChecked ? (
+                              <CheckSquare className="w-5 h-5" />
+                            ) : (
+                              <Square className="w-5 h-5 text-indigo-400" />
                             )}
-                          </div>
-                          <div className="text-[11px] font-mono text-slate-600 mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1">
-                            <span>الرقم القومي: {p.nationalId}</span>
-                            {p.birthDate && <span>الميلاد: {p.birthDate}</span>}
-                            {p.profession && <span className="font-bold text-slate-800">المهنة: {p.profession}</span>}
+                          </button>
+                          <div className="min-w-0">
+                            <div className="font-extrabold text-xs text-indigo-950 flex flex-wrap items-center gap-2">
+                              <Users className="w-4 h-4 text-indigo-600 shrink-0" />
+                              <span>{group.label}</span>
+                              <span className="text-[10px] font-bold bg-white text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-md">
+                                {group.members.length} أفراد معاً — فاتورة واحدة
+                              </span>
+                            </div>
                           </div>
                         </div>
+
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            insertProspectsIntoInvoice(group.members);
+                          }}
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[11px] font-extrabold flex items-center gap-1.5 shadow-2xs cursor-pointer shrink-0 transition-colors"
+                        >
+                          <Sparkles className="w-3.5 h-3.5 text-amber-200" />
+                          <span>إدراج الأسرة معاً ({group.members.length})</span>
+                        </button>
                       </div>
-                      <div className="text-left shrink-0">
-                        <span className="text-[10px] font-bold text-indigo-700 bg-indigo-100/60 px-2 py-0.5 rounded-md">
-                          جاهز للإدراج
-                        </span>
+
+                      {/* Consecutive Family Members */}
+                      <div className="divide-y divide-slate-100">
+                        {group.members.map((p, mIdx) => {
+                          const isChecked = selectedProspectIds.includes(p.id);
+                          return (
+                            <div
+                              key={p.id}
+                              onClick={() => {
+                                setSelectedProspectIds((prev) =>
+                                  prev.includes(p.id) ? prev.filter((id) => id !== p.id) : [...prev, p.id]
+                                );
+                              }}
+                              className={`px-3.5 py-2.5 transition-colors cursor-pointer flex items-center justify-between gap-3 ${
+                                isChecked ? "bg-indigo-50/70" : "bg-white hover:bg-slate-50"
+                              }`}
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <button type="button" className="text-indigo-600 shrink-0">
+                                  {isChecked ? (
+                                    <CheckSquare className="w-4 h-4" />
+                                  ) : (
+                                    <Square className="w-4 h-4 text-slate-300" />
+                                  )}
+                                </button>
+                                <span className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-indigo-100 text-indigo-800 font-mono text-[10px] font-extrabold shrink-0">
+                                  {mIdx + 1}
+                                </span>
+                                <div className="min-w-0">
+                                  <div className="font-bold text-xs text-slate-900 flex flex-wrap items-center gap-1.5">
+                                    <span>{p.arabicName}</span>
+                                    <span className="text-[10px] bg-slate-50 border border-slate-200 px-1.5 py-0.2 rounded-md text-slate-500 font-normal">
+                                      {p.documentType === "شهادة_ميلاد"
+                                        ? "📜 شهادة ميلاد"
+                                        : !p.nationalId
+                                          ? "📝 خدمة عامة"
+                                          : "🆔 بطاقة رقم قومي"}
+                                    </span>
+                                  </div>
+                                  <div className="text-[11px] font-mono text-slate-600 mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5">
+                                    {p.nationalId && <span>الرقم القومي: {p.nationalId}</span>}
+                                    {p.birthDate && <span>الميلاد: {p.birthDate}</span>}
+                                    {p.profession && <span className="font-bold text-slate-800 font-cairo">المهنة: {p.profession}</span>}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   );
-                })}
+                }
 
-              {potentialCustomers.length === 0 && (
+                // Single prospect card
+                const p = group.members[0];
+                const isChecked = selectedProspectIds.includes(p.id);
+                return (
+                  <div
+                    key={p.id}
+                    onClick={() => {
+                      setSelectedProspectIds((prev) =>
+                        prev.includes(p.id) ? prev.filter((id) => id !== p.id) : [...prev, p.id]
+                      );
+                    }}
+                    className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                      isChecked
+                        ? "bg-indigo-50/80 border-indigo-300 shadow-2xs"
+                        : "bg-slate-50/70 border-slate-200 hover:bg-slate-100/70"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <button type="button" className="text-indigo-600">
+                        {isChecked ? <CheckSquare className="w-5 h-5" /> : <Square className="w-5 h-5 text-slate-300" />}
+                      </button>
+                      <div>
+                        <div className="font-bold text-xs text-slate-900 flex flex-wrap items-center gap-2">
+                          <span>{p.arabicName}</span>
+                          <span className="text-[10px] bg-white border border-slate-200 px-1.5 py-0.2 rounded-md text-slate-500 font-normal">
+                            {p.documentType === "شهادة_ميلاد"
+                              ? "📜 شهادة ميلاد"
+                              : !p.nationalId
+                                ? "📝 خدمة عامة"
+                                : "🆔 بطاقة رقم قومي"}
+                          </span>
+                        </div>
+                        <div className="text-[11px] font-mono text-slate-600 mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+                          {p.nationalId && <span>الرقم القومي: {p.nationalId}</span>}
+                          {p.birthDate && <span>الميلاد: {p.birthDate}</span>}
+                          {p.profession && <span className="font-bold text-slate-800 font-cairo">المهنة: {p.profession}</span>}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-left shrink-0">
+                      <span className="text-[10px] font-bold text-indigo-700 bg-indigo-100/60 px-2 py-0.5 rounded-md">
+                        جاهز للإدراج
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {groupedAvailableProspects.length === 0 && (
                 <div className="text-center py-10 text-slate-400 space-y-2">
                   <Users className="w-10 h-10 mx-auto text-slate-300" />
-                  <p className="font-bold text-xs text-slate-600">لا يوجد عملاء محتملون متاحون حالياً</p>
+                  <p className="font-bold text-xs text-slate-600">
+                    {prospectSearchTerm.trim()
+                      ? "لا توجد نتائج مطابقة للبحث في العملاء المحتملين"
+                      : "لا يوجد عملاء محتملون متاحون حالياً"}
+                  </p>
                   <p className="text-[11px] text-slate-400">
-                    يمكنك تصوير مستندات العملاء (بطاقة أو شهادة ميلاد) بالضغط على "مسح بطاقة / شهادة ميلاد"
+                    يمكنك تسجيل العملاء والأسر من تبويب «العملاء المحتملين» لتظهر مجمّعة هنا
                   </p>
                 </div>
               )}

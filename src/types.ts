@@ -211,5 +211,7 @@ export interface PotentialCustomer {
   notes?: string;
   cardFrontImage?: string; // base64 preview
   cardBackImage?: string; // base64 preview
+  familyGroupId?: string; // Shared batch ID for family members entered together in one session
+  familyGroupLabel?: string; // Display label for the family group (e.g. "أسرة أحمد محمد")
 }
 

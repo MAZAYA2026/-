@@ -665,21 +665,25 @@ export async function scanDocumentWithAI(params: {
   return response.json();
 }
 
+export interface VoiceExtractedCustomer {
+  arabicName?: string;
+  nationalId?: string;
+  birthDate?: string;
+  phone?: string;
+  profession?: string;
+  applicantCapacity?: string;
+}
+
 export async function parseVoiceCustomerWithAI(params: {
   audio: string; // base64 or data URL
   mimeType: string;
   applicantCapacities?: string[];
+  allowMultiple?: boolean;
 }): Promise<{
   status: string;
   transcript: string;
-  extracted: {
-    arabicName?: string;
-    nationalId?: string;
-    birthDate?: string;
-    phone?: string;
-    profession?: string;
-    applicantCapacity?: string;
-  };
+  extracted: VoiceExtractedCustomer;
+  customers?: VoiceExtractedCustomer[];
 }> {
   const response = await fetch("/api/voice/parse-customer", {
     method: "POST",

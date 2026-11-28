@@ -2,27 +2,17 @@ import React, { useState, useMemo } from "react";
 import { 
   Users, 
   Search, 
-  Camera, 
-  Plus, 
-  Download, 
   RefreshCw, 
   Trash2, 
   Edit2, 
   CheckCircle, 
   FileText, 
   User, 
-  ArrowRight, 
   Sparkles, 
-  Phone, 
-  Calendar, 
-  Briefcase, 
   FileSpreadsheet,
   CheckSquare,
   Square,
-  AlertCircle,
-  Zap,
-  ClipboardPaste,
-  Table2
+  Zap
 } from "lucide-react";
 import { PotentialCustomer, DictionaryItem, AppSettings } from "../types";
 import { 
@@ -32,20 +22,12 @@ import {
   syncPotentialCustomersToGoogleSheets, 
   exportPotentialCustomersToExcel 
 } from "../lib/api";
-import DocumentScannerModal from "./DocumentScannerModal";
-import FastPotentialCustomerModal, { FastEntryTab } from "./FastPotentialCustomerModal";
-import {
-  normalizeDigits,
-  extractBirthDateFromNationalId,
-  inferDocAndProfessionFromBirthDate,
-  translateNameWithDictionary,
-  QUICK_PROFESSIONS,
-} from "../lib/fastCustomerParser";
+import FastPotentialCustomerModal from "./FastPotentialCustomerModal";
 
 interface PotentialCustomersPanelProps {
   potentialCustomers: PotentialCustomer[];
   onCustomersUpdated: (updatedList: PotentialCustomer[]) => void;
-  onUseCustomerInInvoice: (customer: PotentialCustomer) => void;
+  onUseCustomerInInvoice: (customers: PotentialCustomer | PotentialCustomer[]) => void;
   dictionary?: DictionaryItem[];
   settings?: AppSettings;
 }
@@ -66,28 +48,12 @@ export default function PotentialCustomersPanel({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   // Modals state
-  const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [isFastModalOpen, setIsFastModalOpen] = useState(false);
-  const [fastModalTab, setFastModalTab] = useState<FastEntryTab>("paste");
-  const [isManualModalOpen, setIsManualModalOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<PotentialCustomer | null>(null);
 
   // Syncing state
   const [isSyncing, setIsSyncing] = useState(false);
   const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
-
-  // Manual Add Form State
-  const [manualForm, setManualForm] = useState({
-    arabicName: "",
-    englishName: "",
-    nationalId: "",
-    birthDate: "",
-    profession: "",
-    phone: "",
-    applicantCapacity: "",
-    documentType: "بطاقة_رقم_قومي" as "بطاقة_رقم_قومي" | "شهادة_ميلاد" | "يدوي",
-    notes: "",
-  });
 
   const showNotice = (msg: string) => {
     setNoticeMessage(msg);
@@ -105,7 +71,8 @@ export default function PotentialCustomersPanel({
         const nidMatch = c.nationalId?.includes(term);
         const profMatch = c.profession?.toLowerCase().includes(term);
         const phoneMatch = c.phone?.includes(term);
-        if (!nameMatch && !enMatch && !nidMatch && !profMatch && !phoneMatch) {
+        const familyMatch = c.familyGroupLabel?.toLowerCase().includes(term);
+        if (!nameMatch && !enMatch && !nidMatch && !profMatch && !phoneMatch && !familyMatch) {
           return false;
         }
       }
@@ -121,6 +88,44 @@ export default function PotentialCustomersPanel({
       return true;
     });
   }, [potentialCustomers, searchTerm, statusFilter, docFilter]);
+
+  // Group customers sharing the same familyGroupId consecutively in exact entered order
+  const groupedCustomers = useMemo(() => {
+    const groups: {
+      key: string;
+      familyGroupId?: string;
+      label: string;
+      members: PotentialCustomer[];
+    }[] = [];
+    const groupById = new Map<string, (typeof groups)[number]>();
+
+    for (const c of filteredCustomers) {
+      if (c.familyGroupId) {
+        const existing = groupById.get(c.familyGroupId);
+        if (existing) {
+          existing.members.push(c);
+        } else {
+          const headName = c.arabicName.trim().split(/\s+/).slice(0, 3).join(" ");
+          const newGroup = {
+            key: c.familyGroupId,
+            familyGroupId: c.familyGroupId,
+            label: c.familyGroupLabel || `أسرة ${headName}`,
+            members: [c],
+          };
+          groupById.set(c.familyGroupId, newGroup);
+          groups.push(newGroup);
+        }
+      } else {
+        groups.push({
+          key: c.id,
+          label: c.arabicName,
+          members: [c],
+        });
+      }
+    }
+
+    return groups;
+  }, [filteredCustomers]);
 
   // Counters
   const totalCount = potentialCustomers.length;
@@ -161,83 +166,55 @@ export default function PotentialCustomersPanel({
     }
   };
 
-  // Save new scanned customer
-  const handleSaveScannedCustomer = async (cust: Partial<PotentialCustomer>, useImmediately?: boolean) => {
-    try {
-      const updated = await savePotentialCustomers([cust]);
-      onCustomersUpdated(updated);
-      showNotice("تم حفظ العميل في قائمة العملاء المحتملين بنجاح! 💾");
-
-      if (useImmediately && updated.length > 0) {
-        const target = updated.find((c) => c.nationalId === cust.nationalId) || updated[0];
-        if (target) {
-          onUseCustomerInInvoice(target);
-        }
-      }
-    } catch (err: any) {
-      alert("خطأ أثناء الحفظ: " + err.message);
+  const handleToggleSelectGroup = (memberIds: string[]) => {
+    const allSelected = memberIds.every((id) => selectedIds.includes(id));
+    if (allSelected) {
+      setSelectedIds((prev) => prev.filter((id) => !memberIds.includes(id)));
+    } else {
+      setSelectedIds((prev) => Array.from(new Set([...prev, ...memberIds])));
     }
   };
 
-  // Save batch from Fast Non-AI Modal
+  const handleUseSelectedInInvoice = () => {
+    const orderedSelected = groupedCustomers
+      .flatMap((g) => g.members)
+      .filter((c) => selectedIds.includes(c.id));
+    if (orderedSelected.length === 0) return;
+    onUseCustomerInInvoice(orderedSelected);
+  };
+
+  // Save batch from Fast Modal (WhatsApp Paste + Smart Voice Dictation)
   const handleSaveFastBatch = async (
     customersBatch: Partial<PotentialCustomer>[],
-    useFirstImmediately?: boolean
+    useBatchImmediately?: boolean
   ) => {
     const updated = await savePotentialCustomers(customersBatch);
     onCustomersUpdated(updated);
-    showNotice(`تم حفظ (${customersBatch.length}) عميل محتمل بسرعة فائقة بدون ذكاء اصطناعي! ⚡`);
+    showNotice(
+      customersBatch.length > 1
+        ? `تم حفظ الأسرة (${customersBatch.length} أفراد) معاً كمجموعة واحدة جاهزة لفاتورة واحدة! ⚡`
+        : `تم حفظ عميل محتمل بنجاح! ⚡`
+    );
 
-    if (useFirstImmediately && customersBatch.length > 0 && updated.length > 0) {
-      const firstNid = customersBatch[0].nationalId;
-      const target =
-        (firstNid && updated.find((c) => c.nationalId === firstNid)) || updated[0];
-      if (target) {
-        onUseCustomerInInvoice(target);
+    if (useBatchImmediately && customersBatch.length > 0 && updated.length > 0) {
+      const batchGroupId = customersBatch[0].familyGroupId;
+      const batchTargets = batchGroupId
+        ? updated.filter((c) => c.familyGroupId === batchGroupId)
+        : [];
+
+      if (batchTargets.length > 0) {
+        onUseCustomerInInvoice(batchTargets);
+      } else {
+        const firstNid = customersBatch[0].nationalId;
+        const firstName = customersBatch[0].arabicName;
+        const target =
+          (firstNid && updated.find((c) => c.nationalId === firstNid)) ||
+          (firstName && updated.find((c) => c.arabicName === firstName)) ||
+          updated[0];
+        if (target) {
+          onUseCustomerInInvoice([target]);
+        }
       }
-    }
-  };
-
-  // Save manual customer
-  const handleSaveManual = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!manualForm.arabicName.trim() || !manualForm.nationalId.trim()) {
-      alert("يرجى إدخال الاسم الرباعي والرقم القومي 14 رقم.");
-      return;
-    }
-
-    try {
-      const newCust: Partial<PotentialCustomer> = {
-        arabicName: manualForm.arabicName.trim(),
-        englishName: manualForm.englishName.trim() || undefined,
-        nationalId: manualForm.nationalId.trim(),
-        birthDate: manualForm.birthDate.trim() || undefined,
-        profession: manualForm.profession.trim() || "",
-        phone: manualForm.phone.trim() || undefined,
-        applicantCapacity: manualForm.applicantCapacity.trim() || undefined,
-        documentType: manualForm.documentType,
-        notes: manualForm.notes.trim() || undefined,
-        status: "جديد",
-        createdAt: new Date().toISOString().split("T")[0],
-      };
-
-      const updated = await savePotentialCustomers([newCust]);
-      onCustomersUpdated(updated);
-      setIsManualModalOpen(false);
-      setManualForm({
-        arabicName: "",
-        englishName: "",
-        nationalId: "",
-        birthDate: "",
-        profession: "",
-        phone: "",
-        applicantCapacity: "",
-        documentType: "بطاقة_رقم_قومي",
-        notes: "",
-      });
-      showNotice("تمت إضافة العميل المحتمل بنجاح!");
-    } catch (err: any) {
-      alert("خطأ أثناء الإضافة: " + err.message);
     }
   };
 
@@ -349,47 +326,12 @@ export default function PotentialCustomersPanel({
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => {
-              setFastModalTab("paste");
-              setIsFastModalOpen(true);
-            }}
+            onClick={() => setIsFastModalOpen(true)}
             className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-md hover:shadow-emerald-500/20 transition-all cursor-pointer"
-            title="إضافة سريعة بدون ذكاء اصطناعي: لصق رسالة واتساب، جدول عائلي متعدد، أو استيراد ملف إكسيل"
+            title="العملاء المحتملين"
           >
             <Zap className="w-4 h-4 text-amber-300" />
-            <span>⚡ إدخال سريع بدون ذكاء اصطناعي (لصق / جدول / إكسيل)</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setFastModalTab("grid");
-              setIsFastModalOpen(true);
-            }}
-            className="px-3 py-2.5 bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/30 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
-            title="إدخال عدة أفراد من الأسرة في جدول واحد بسرعة"
-          >
-            <Table2 className="w-4 h-4" />
-            <span>جدول متعدد</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setIsManualModalOpen(true)}
-            className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            <span>إضافة يدوية</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setIsScannerOpen(true)}
-            className="px-3.5 py-2.5 bg-indigo-600/80 hover:bg-indigo-500 text-white border border-indigo-400/30 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
-            title="فتح الكاميرا ومسح البطاقة الشخصية أو شهادة الميلاد بالذكاء الاصطناعي"
-          >
-            <Camera className="w-4 h-4 text-indigo-200" />
-            <span>📸 مسح ذكي (كاميرا)</span>
+            <span>العملاء المحتملين</span>
           </button>
 
           <button
@@ -533,23 +475,31 @@ export default function PotentialCustomersPanel({
 
         {/* Selected Items Bulk Actions Bar */}
         {selectedIds.length > 0 && (
-          <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-2.5 flex items-center justify-between text-xs text-indigo-950 font-bold animate-in fade-in">
+          <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-2.5 flex flex-wrap items-center justify-between gap-2 text-xs text-indigo-950 font-bold animate-in fade-in">
             <div className="flex items-center gap-2">
               <CheckSquare className="w-4 h-4 text-indigo-600" />
               <span>تم تحديد {selectedIds.length} عميل محتمل</span>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleUseSelectedInInvoice}
+                className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors flex items-center gap-1 cursor-pointer shadow-2xs"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>إنشاء فاتورة للمحددين ({selectedIds.length})</span>
+              </button>
               <button
                 type="button"
                 onClick={handleExportExcel}
-                className="px-2.5 py-1 bg-white border border-indigo-300 hover:bg-indigo-100 rounded-lg text-indigo-800 transition-colors"
+                className="px-2.5 py-1 bg-white border border-indigo-300 hover:bg-indigo-100 rounded-lg text-indigo-800 transition-colors cursor-pointer"
               >
                 تصدير المحددين لإكسيل
               </button>
               <button
                 type="button"
                 onClick={handleBulkDelete}
-                className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition-colors flex items-center gap-1"
+                className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 <span>حذف المحددين</span>
@@ -595,127 +545,195 @@ export default function PotentialCustomersPanel({
                     <Users className="w-10 h-10 mx-auto text-slate-300 mb-2" />
                     <p className="font-bold text-sm text-slate-600">لا يوجد عملاء محتملون يطابقون البحث</p>
                     <p className="text-xs text-slate-400 mt-1">
-                      اضغط "⚡ إدخال سريع بدون ذكاء اصطناعي" للصق رسالة واتساب أو إدخال جدول عائلي فوراً، أو استخدم المسح بالكاميرا
+                      اضغط زر "العملاء المحتملين" لإضافة بيانات عميل أو أسرة فوراً
                     </p>
                   </td>
                 </tr>
               ) : (
-                filteredCustomers.map((cust, idx) => {
-                  const isSelected = selectedIds.includes(cust.id);
-                  const isUsed = cust.status === "تم_التحويل_لفاتورة";
+                groupedCustomers.map((group) => {
+                  const isFamilyGroup = group.members.length > 1;
+                  const groupMemberIds = group.members.map((m) => m.id);
+                  const isGroupFullySelected =
+                    groupMemberIds.length > 0 &&
+                    groupMemberIds.every((id) => selectedIds.includes(id));
 
                   return (
-                    <tr
-                      key={cust.id}
-                      className={`hover:bg-slate-50/80 transition-colors ${
-                        isSelected ? "bg-indigo-50/50" : ""
-                      }`}
-                    >
-                      <td className="p-3.5 text-center">
-                        <button
-                          type="button"
-                          onClick={() => handleToggleSelect(cust.id)}
-                          className="cursor-pointer"
-                        >
-                          {isSelected ? (
-                            <CheckSquare className="w-4 h-4 text-indigo-600" />
-                          ) : (
-                            <Square className="w-4 h-4 text-slate-300 hover:text-slate-500" />
-                          )}
-                        </button>
-                      </td>
+                    <React.Fragment key={group.key}>
+                      {isFamilyGroup && (
+                        <tr className="bg-indigo-50/85 border-t-2 border-indigo-200">
+                          <td className="px-3.5 py-2.5 text-center">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleSelectGroup(groupMemberIds)}
+                              className="cursor-pointer"
+                              title="تحديد أو إلغاء تحديد جميع أفراد الأسرة"
+                            >
+                              {isGroupFullySelected ? (
+                                <CheckSquare className="w-4 h-4 text-indigo-700" />
+                              ) : (
+                                <Square className="w-4 h-4 text-indigo-400 hover:text-indigo-700" />
+                              )}
+                            </button>
+                          </td>
+                          <td colSpan={7} className="px-3.5 py-2.5">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="inline-flex items-center gap-1.5 font-extrabold text-indigo-950 text-xs">
+                                <Users className="w-4 h-4 text-indigo-600" />
+                                <span>{group.label}</span>
+                              </span>
+                              <span className="text-[11px] font-bold bg-white text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-lg">
+                                {group.members.length} أفراد معاً — فاتورة واحدة
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-3.5 py-2.5 text-center">
+                            <button
+                              type="button"
+                              onClick={() => onUseCustomerInInvoice(group.members)}
+                              className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[11px] font-extrabold inline-flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer whitespace-nowrap"
+                              title="إدراج جميع أفراد هذه الأسرة معاً في فاتورة واحدة"
+                            >
+                              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                              <span>إنشاء فاتورة للأسرة ({group.members.length})</span>
+                            </button>
+                          </td>
+                        </tr>
+                      )}
 
-                      <td className="p-3.5">
-                        <div className="font-bold text-slate-900 text-xs">
-                          {idx + 1}. {cust.arabicName}
-                        </div>
-                        {cust.englishName && (
-                          <div className="text-[10px] text-slate-500 font-mono mt-0.5">
-                            {cust.englishName}
-                          </div>
-                        )}
-                        {cust.notes && (
-                          <div className="text-[10px] text-amber-700 bg-amber-50 rounded-sm px-1.5 py-0.2 mt-0.5 inline-block">
-                            📝 {cust.notes}
-                          </div>
-                        )}
-                      </td>
+                      {group.members.map((cust, memberIdx) => {
+                        const isSelected = selectedIds.includes(cust.id);
+                        const isUsed = cust.status === "تم_التحويل_لفاتورة";
 
-                      <td className="p-3.5 font-mono font-bold text-slate-800 tracking-wider">
-                        {cust.nationalId}
-                      </td>
-
-                      <td className="p-3.5 font-mono text-slate-600">
-                        {cust.birthDate || "-"}
-                      </td>
-
-                      <td className="p-3.5">
-                        <span className="font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded-md">
-                          {cust.profession || (cust.documentType === "شهادة_ميلاد" ? "طالب" : "غير محدد")}
-                        </span>
-                      </td>
-
-                      <td className="p-3.5">
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${
-                          cust.documentType === "شهادة_ميلاد"
-                            ? "bg-amber-50 text-amber-800 border-amber-200"
-                            : "bg-indigo-50 text-indigo-800 border-indigo-200"
-                        }`}>
-                          {cust.documentType === "شهادة_ميلاد" ? "📜 شهادة ميلاد" : "🆔 بطاقة شخصية"}
-                        </span>
-                      </td>
-
-                      <td className="p-3.5 font-mono text-slate-600">
-                        {cust.phone || <span className="text-slate-300 text-[10px]">يكتب عند الفاتورة</span>}
-                      </td>
-
-                      <td className="p-3.5">
-                        {isUsed ? (
-                          <span className="text-[10px] font-bold bg-blue-100 text-blue-800 px-2 py-0.5 rounded-md border border-blue-200">
-                            فاتورة #{cust.invoiceId || ""}
-                          </span>
-                        ) : (
-                          <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md border border-emerald-200">
-                            متاح للاستخدام ✨
-                          </span>
-                        )}
-                      </td>
-
-                      <td className="p-3.5">
-                        <div className="flex items-center justify-center gap-1.5">
-                          {/* Use immediately in invoice */}
-                          <button
-                            type="button"
-                            onClick={() => onUseCustomerInInvoice(cust)}
-                            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
-                            title="إدراج هذا العميل في فاتورة جديدة الآن"
+                        return (
+                          <tr
+                            key={cust.id}
+                            className={`hover:bg-slate-50/80 transition-colors ${
+                              isSelected
+                                ? "bg-indigo-50/50"
+                                : isFamilyGroup
+                                  ? "bg-indigo-50/15"
+                                  : ""
+                            } ${isFamilyGroup ? "border-r-4 border-r-indigo-400" : ""}`}
                           >
-                            <Sparkles className="w-3 h-3" />
-                            <span>إنشاء فاتورة</span>
-                          </button>
+                            <td className="p-3.5 text-center">
+                              <button
+                                type="button"
+                                onClick={() => handleToggleSelect(cust.id)}
+                                className="cursor-pointer"
+                              >
+                                {isSelected ? (
+                                  <CheckSquare className="w-4 h-4 text-indigo-600" />
+                                ) : (
+                                  <Square className="w-4 h-4 text-slate-300 hover:text-slate-500" />
+                                )}
+                              </button>
+                            </td>
 
-                          {/* Edit */}
-                          <button
-                            type="button"
-                            onClick={() => setEditingCustomer(cust)}
-                            className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
-                            title="تعديل بيانات العميل"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
+                            <td className="p-3.5">
+                              <div className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                                {isFamilyGroup && (
+                                  <span className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-indigo-100 text-indigo-800 font-mono text-[10px] font-extrabold shrink-0">
+                                    {memberIdx + 1}
+                                  </span>
+                                )}
+                                <span>{cust.arabicName}</span>
+                              </div>
+                              {cust.englishName && (
+                                <div className="text-[10px] text-slate-500 font-mono mt-0.5">
+                                  {cust.englishName}
+                                </div>
+                              )}
+                              {cust.notes && (
+                                <div className="text-[10px] text-amber-700 bg-amber-50 rounded-sm px-1.5 py-0.2 mt-0.5 inline-block">
+                                  📝 {cust.notes}
+                                </div>
+                              )}
+                            </td>
 
-                          {/* Delete */}
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteCustomer(cust.id)}
-                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                            title="حذف العميل"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
+                            <td className="p-3.5 font-mono font-bold text-slate-800 tracking-wider">
+                              {cust.nationalId || <span className="text-slate-300 text-[10px] font-cairo font-normal">غير مسجل</span>}
+                            </td>
+
+                            <td className="p-3.5 font-mono text-slate-600">
+                              {cust.birthDate || "-"}
+                            </td>
+
+                            <td className="p-3.5">
+                              <span className="font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded-md">
+                                {cust.profession || (cust.documentType === "شهادة_ميلاد" ? "طالب" : "غير محدد")}
+                              </span>
+                            </td>
+
+                            <td className="p-3.5">
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${
+                                cust.documentType === "شهادة_ميلاد"
+                                  ? "bg-amber-50 text-amber-800 border-amber-200"
+                                  : cust.documentType === "يدوي" || !cust.nationalId
+                                    ? "bg-slate-50 text-slate-700 border-slate-200"
+                                    : "bg-indigo-50 text-indigo-800 border-indigo-200"
+                              }`}>
+                                {cust.documentType === "شهادة_ميلاد"
+                                  ? "📜 شهادة ميلاد"
+                                  : cust.documentType === "يدوي" || !cust.nationalId
+                                    ? "📝 خدمة عامة"
+                                    : "🆔 بطاقة شخصية"}
+                              </span>
+                            </td>
+
+                            <td className="p-3.5 font-mono text-slate-600">
+                              {cust.phone || <span className="text-slate-300 text-[10px]">يكتب عند الفاتورة</span>}
+                            </td>
+
+                            <td className="p-3.5">
+                              {isUsed ? (
+                                <span className="text-[10px] font-bold bg-blue-100 text-blue-800 px-2 py-0.5 rounded-md border border-blue-200">
+                                  فاتورة #{cust.invoiceId || ""}
+                                </span>
+                              ) : (
+                                <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md border border-emerald-200">
+                                  متاح للاستخدام ✨
+                                </span>
+                              )}
+                            </td>
+
+                            <td className="p-3.5">
+                              <div className="flex items-center justify-center gap-1.5">
+                                {/* Use immediately in invoice */}
+                                <button
+                                  type="button"
+                                  onClick={() => onUseCustomerInInvoice([cust])}
+                                  className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
+                                  title="إدراج هذا العميل بمفرده في فاتورة جديدة"
+                                >
+                                  <Sparkles className="w-3 h-3" />
+                                  <span>{isFamilyGroup ? "فاتورة فردية" : "إنشاء فاتورة"}</span>
+                                </button>
+
+                                {/* Edit */}
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingCustomer(cust)}
+                                  className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
+                                  title="تعديل بيانات العميل"
+                                >
+                                  <Edit2 className="w-3.5 h-3.5" />
+                                </button>
+
+                                {/* Delete */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteCustomer(cust.id)}
+                                  className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                  title="حذف العميل"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </React.Fragment>
                   );
                 })
               )}
@@ -724,193 +742,15 @@ export default function PotentialCustomersPanel({
         </div>
       </div>
 
-      {/* AI OCR Document Scanner Modal */}
-      <DocumentScannerModal
-        isOpen={isScannerOpen}
-        onClose={() => setIsScannerOpen(false)}
-        onSaveCustomer={handleSaveScannedCustomer}
-        dictionary={dictionary}
-        applicantCapacities={settings?.applicantCapacities}
-        allowDirectUse={true}
-      />
-
-      {/* Fast Non-AI Potential Customer Modal (Paste / Family Grid / CSV) */}
+      {/* Fast Potential Customer Modal (WhatsApp Paste + Smart Voice Dictation) */}
       <FastPotentialCustomerModal
         isOpen={isFastModalOpen}
         onClose={() => setIsFastModalOpen(false)}
-        initialTab={fastModalTab}
         dictionary={dictionary}
         applicantCapacities={settings?.applicantCapacities}
         onSaveBatch={handleSaveFastBatch}
         allowDirectUse={true}
       />
-
-      {/* Manual Add Customer Modal */}
-      {isManualModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs font-cairo">
-          <div className="bg-white rounded-3xl p-6 shadow-2xl border border-slate-200 w-full max-w-lg space-y-4">
-            <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
-              <Plus className="w-5 h-5 text-indigo-600" />
-              <span>إضافة عميل محتمل يدوياً</span>
-            </h2>
-
-            <form onSubmit={handleSaveManual} className="space-y-3.5 text-xs">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="font-bold text-slate-700 block">
-                    الاسم بالكامل (عربي) <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={manualForm.arabicName}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      const autoEn = translateNameWithDictionary(val, dictionary);
-                      setManualForm({
-                        ...manualForm,
-                        arabicName: val,
-                        englishName: autoEn || manualForm.englishName,
-                      });
-                    }}
-                    placeholder="الاسم الرباعي..."
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-900"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="font-bold text-slate-700 block">الاسم بالإنجليزي (ترجمة فورية من القاموس)</label>
-                  <input
-                    type="text"
-                    value={manualForm.englishName}
-                    onChange={(e) => setManualForm({ ...manualForm, englishName: e.target.value.toUpperCase() })}
-                    placeholder="FULL NAME..."
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono font-bold"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="font-bold text-slate-700 block">
-                    الرقم القومي (14 رقم) <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    maxLength={14}
-                    value={manualForm.nationalId}
-                    onChange={(e) => {
-                      const cleanNid = normalizeDigits(e.target.value).replace(/\D/g, "").slice(0, 14);
-                      let nextBirth = manualForm.birthDate;
-                      let nextDoc = manualForm.documentType;
-                      let nextProf = manualForm.profession;
-                      if (cleanNid.length === 14) {
-                        const derivedBirth = extractBirthDateFromNationalId(cleanNid);
-                        if (derivedBirth) {
-                          nextBirth = derivedBirth;
-                          const inferred = inferDocAndProfessionFromBirthDate(derivedBirth);
-                          nextDoc = inferred.documentType;
-                          if (!nextProf.trim() && inferred.suggestedProfession) {
-                            nextProf = inferred.suggestedProfession;
-                          }
-                        }
-                      }
-                      setManualForm({
-                        ...manualForm,
-                        nationalId: cleanNid,
-                        birthDate: nextBirth,
-                        documentType: nextDoc,
-                        profession: nextProf,
-                      });
-                    }}
-                    placeholder="29508121601234"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono font-bold"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="font-bold text-slate-700 block">تاريخ الميلاد (يُحسب تلقائياً)</label>
-                  <input
-                    type="date"
-                    value={manualForm.birthDate}
-                    onChange={(e) => setManualForm({ ...manualForm, birthDate: e.target.value })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono font-bold"
-                  />
-                </div>
-
-                <div className="space-y-1 sm:col-span-2">
-                  <div className="flex items-center justify-between flex-wrap gap-1">
-                    <label className="font-bold text-slate-700 block">المهنة</label>
-                    <div className="flex flex-wrap items-center gap-1">
-                      {QUICK_PROFESSIONS.slice(0, 6).map((chip) => (
-                        <button
-                          key={chip}
-                          type="button"
-                          onClick={() => setManualForm({ ...manualForm, profession: chip })}
-                          className={`text-[10px] px-2 py-0.5 rounded-md font-bold cursor-pointer transition-colors ${
-                            manualForm.profession === chip
-                              ? "bg-emerald-600 text-white"
-                              : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                          }`}
-                        >
-                          {chip}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <input
-                    type="text"
-                    value={manualForm.profession}
-                    onChange={(e) => setManualForm({ ...manualForm, profession: e.target.value })}
-                    placeholder="المهنة بالبطاقة..."
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="font-bold text-slate-700 block">رقم الهاتف (اختياري)</label>
-                  <input
-                    type="tel"
-                    maxLength={11}
-                    value={manualForm.phone}
-                    onChange={(e) => setManualForm({ ...manualForm, phone: normalizeDigits(e.target.value).replace(/\D/g, "") })}
-                    placeholder="01XXXXXXXXX"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono font-bold"
-                  />
-                </div>
-
-                <div className="space-y-1 sm:col-span-2">
-                  <label className="font-bold text-slate-700 block">نوع المستند</label>
-                  <select
-                    value={manualForm.documentType}
-                    onChange={(e: any) => setManualForm({ ...manualForm, documentType: e.target.value })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold"
-                  >
-                    <option value="بطاقة_رقم_قومي">بطاقة رقم قومي</option>
-                    <option value="شهادة_ميلاد">شهادة ميلاد</option>
-                    <option value="يدوي">إدخال يدوي</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200">
-                <button
-                  type="button"
-                  onClick={() => setIsManualModalOpen(false)}
-                  className="px-4 py-2 border border-slate-300 text-slate-700 hover:bg-slate-100 rounded-xl font-bold cursor-pointer"
-                >
-                  إلغاء
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold cursor-pointer"
-                >
-                  حفظ العميل
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* Edit Customer Modal */}
       {editingCustomer && (
@@ -945,13 +785,13 @@ export default function PotentialCustomersPanel({
                 </div>
 
                 <div className="space-y-1">
-                  <label className="font-bold text-slate-700 block">الرقم القومي</label>
+                  <label className="font-bold text-slate-700 block">الرقم القومي (اختياري)</label>
                   <input
                     type="text"
-                    required
                     maxLength={14}
-                    value={editingCustomer.nationalId}
+                    value={editingCustomer.nationalId || ""}
                     onChange={(e) => setEditingCustomer({ ...editingCustomer, nationalId: e.target.value.replace(/\D/g, "") })}
+                    placeholder="اختياري (14 رقماً)"
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono font-bold"
                   />
                 </div>
