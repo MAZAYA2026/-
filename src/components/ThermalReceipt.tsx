@@ -1,6 +1,6 @@
 import React, { useRef } from "react";
 import { Invoice, AppSettings, Service } from "../types";
-import { calculateWorkingDaysDeliveryDate, getArabicDayName, recalculateCustomerServicesDeliveryDates } from "../lib/businessDays";
+import { calculateWorkingDaysDeliveryDate, getArabicDayName, recalculateCustomerServicesDeliveryDates, formatArabicInvoiceDateTime } from "../lib/businessDays";
 import { Printer, X, Send, RefreshCw } from "lucide-react";
 
 interface ThermalReceiptProps {
@@ -147,9 +147,9 @@ export default function ThermalReceipt({ invoice, settings, services, onClose, o
                 <span>رقم الفاتورة:</span>
                 <span className="font-bold font-mono text-black text-xs">#{invoice.invoiceId}</span>
               </div>
-              <div className="flex justify-between">
-                <span>تاريخ الفاتورة:</span>
-                <span className="font-mono text-black">{String(invoice.date || "").replace(/\s*GMT[+-]\d+.*$/i, "").replace(/\s*\([^)]*\)$/i, "").trim()}</span>
+              <div className="flex justify-between gap-2">
+                <span className="shrink-0">تاريخ الفاتورة:</span>
+                <span className="font-bold text-black text-left">{formatArabicInvoiceDateTime(invoice.date)}</span>
               </div>
               <div className="flex justify-between">
                 <span>الموظف المسؤول:</span>
@@ -391,8 +391,8 @@ export default function ThermalReceipt({ invoice, settings, services, onClose, o
             </div>
 
             {/* Print Date */}
-            <div className="text-center text-[9px] text-black mt-2 font-mono font-bold">
-              طباعة: {new Date().toLocaleString('ar-EG')}
+            <div className="text-center text-[9.5px] text-black mt-2 font-bold">
+              طباعة: {formatArabicInvoiceDateTime(new Date())}
             </div>
           </div>
         </div>

@@ -2,7 +2,7 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 import dotenv from "dotenv";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type, ThinkingLevel } from "@google/genai";
 
 // Load environment variables
 dotenv.config();
@@ -21,6 +21,7 @@ if (geminiApiKey && geminiApiKey !== "MY_GEMINI_API_KEY") {
   try {
     ai = new GoogleGenAI({
       apiKey: geminiApiKey,
+      apiVersion: "v1beta",
       httpOptions: {
         headers: {
           'User-Agent': 'aistudio-build',
@@ -328,53 +329,9 @@ function writeDB(data: any) {
 // Ensure database is populated
 readDB();
 
-// Helper to automatically learn and register Arabic to English name translations
-function autoLearnCustomerNames(customers: any[], db: any): boolean {
-  if (!Array.isArray(customers) || !db) return false;
-  let changed = false;
-  db.dictionary = db.dictionary || [];
-
-  const normalizeArabic = (str: string) => {
-    return (str || "")
-      .replace(/[أإآ]/g, "ا")
-      .replace(/ة/g, "ه")
-      .replace(/[\u064B-\u065F]/g, "")
-      .trim();
-  };
-
-  customers.forEach((cust: any) => {
-    if (!cust.arabicName || !cust.englishName) return;
-    const arName = cust.arabicName.trim();
-    const enName = cust.englishName.trim().toUpperCase();
-
-    // Skip special placeholders
-    if (enName === "نفس ترجمة الجواز السابق" || enName.includes("N/A") || enName.length < 2) return;
-
-    const arWords = arName.split(/\s+/).filter(Boolean);
-    const enWords = enName.split(/\s+/).filter(Boolean);
-
-    // If word counts match exactly, learn word-by-word
-    if (arWords.length === enWords.length && arWords.length > 0) {
-      for (let i = 0; i < arWords.length; i++) {
-        const arW = arWords[i].trim();
-        const enW = enWords[i].toUpperCase().replace(/[^A-Z]/g, "").trim();
-        if (!enW || arW.length < 2) continue;
-
-        const normAr = normalizeArabic(arW);
-        const exists = db.dictionary.find((d: any) => normalizeArabic(d.arabic) === normAr);
-        if (!exists) {
-          db.dictionary.push({ arabic: arW, english: enW });
-          changed = true;
-        } else if (exists.english !== enW) {
-          exists.english = enW;
-          changed = true;
-        }
-      }
-    }
-  });
-
-  return changed;
-}
+// NOTE: Custom English name edits on passport invoices are strictly temporary for that specific customer/invoice
+// and must NEVER modify, overwrite, or auto-sync db.dictionary or Google Sheets.
+// Dictionary modifications occur ONLY through explicit dictionary management routes (/api/db/dictionary).
 
 // API Endpoints
 
@@ -1108,8 +1065,7 @@ app.post("/api/db/invoices", async (req, res) => {
 
   db.invoices.push(newInvoice);
 
-  // Automatically learn customer names into the dictionary
-  autoLearnCustomerNames(newInvoice.customers, db);
+  // Keep per-customer English name edits isolated to this invoice only; never overwrite db.dictionary.
 
   // User requirement: Automatically register services starting with # into Aman Report
   const amanModified = syncInvoiceToAmanReport(newInvoice, db);
@@ -1185,8 +1141,7 @@ app.put("/api/db/invoices/:id", async (req, res) => {
     invoiceId // maintain the same ID
   };
   
-  // Automatically learn customer names into the dictionary
-  autoLearnCustomerNames(db.invoices[index].customers, db);
+  // Keep per-customer English name edits isolated to this invoice only; never overwrite db.dictionary.
 
   // User requirement: Automatically register services starting with # into Aman Report
   const amanUpdated = syncInvoiceToAmanReport(db.invoices[index], db);
@@ -3218,6 +3173,325 @@ app.post("/api/ocr/scan-document", async (req, res) => {
   } catch (err: any) {
     console.error("AI OCR Document Scanner Error:", err);
     res.status(500).json({ error: "فشل استخراج البيانات من المستند: " + err.message });
+  }
+});
+
+// 1B. AI Smart One-Sentence Voice Dictation (Arabic Egyptian Speech -> Structured Customer Fields)
+app.post("/api/voice/parse-customer", async (req, res) => {
+  const { audio, mimeType: rawMimeType, applicantCapacities } = req.body || {};
+
+  if (!audio || typeof audio !== "string") {
+    return res.status(400).json({ error: "لم يتم استلام التسجيل الصوتي للمعالجة." });
+  }
+
+  let mimeType = typeof rawMimeType === "string" && rawMimeType.trim()
+    ? rawMimeType.split(";")[0].trim().toLowerCase()
+    : "audio/webm";
+  let base64Data = audio.trim();
+
+  if (base64Data.startsWith("data:")) {
+    const parts = base64Data.split(";base64,");
+    if (parts.length === 2) {
+      mimeType = parts[0].replace("data:", "").split(";")[0].trim().toLowerCase() || mimeType;
+      base64Data = parts[1].trim();
+    }
+  }
+
+  const allowedAudioMimes = new Set([
+    "audio/webm",
+    "audio/mp4",
+    "audio/m4a",
+    "audio/ogg",
+    "audio/wav",
+    "audio/wave",
+    "audio/x-wav",
+    "audio/mpeg",
+    "audio/mp3",
+    "audio/aac",
+    "audio/flac",
+  ]);
+  if (!allowedAudioMimes.has(mimeType)) {
+    mimeType = "audio/webm";
+  }
+
+  if (base64Data.length < 200) {
+    return res.status(400).json({ error: "التسجيل الصوتي قصير جداً، يرجى التحدث بوضوح ثم الضغط على إيقاف." });
+  }
+  if (base64Data.length > 16 * 1024 * 1024) {
+    return res.status(413).json({ error: "حجم التسجيل الصوتي كبير جداً، يرجى اختصار الإملاء لأقل من 45 ثانية." });
+  }
+
+  if (!ai) {
+    return res.status(503).json({
+      error: "ميزة الإملاء الصوتي الذكي تتطلب ضبط GEMINI_API_KEY في إعدادات الخادم (Settings > Secrets أو Render Environment Variables)."
+    });
+  }
+
+  const callWithTransientRetry = async <T>(fn: () => Promise<T>, label: string): Promise<T> => {
+    let lastErr: any = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await fn();
+      } catch (err: any) {
+        lastErr = err;
+        const msg = err?.message || JSON.stringify(err);
+        const isTransient = msg.includes("503") || msg.includes("UNAVAILABLE") || msg.includes("429") || msg.includes("high demand");
+        if (isTransient && attempt === 0) {
+          console.warn(`[Voice ${label}] Transient error, retrying in 600ms...`);
+          await new Promise((r) => setTimeout(r, 600));
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw lastErr;
+  };
+
+  try {
+    const audioPart = {
+      inlineData: {
+        mimeType,
+        data: base64Data,
+      },
+    };
+
+    const capacitiesList = Array.isArray(applicantCapacities) && applicantCapacities.length > 0
+      ? applicantCapacities.map((c: any) => String(c || "").trim()).filter(Boolean)
+      : ["بنفسه", "الأب", "الأم", "الزوج", "الزوجة", "الأخ", "الأخت", "الابن", "الابنة", "الوكيل"];
+
+    const extractionRules = `قواعد الاستخراج الصارمة:
+1. arabicName: الاسم الكامل باللغة العربية فقط (بدون كلمات توضيحية مثل: الاسم، العميل، المواطن، أستاذ، السيد، اسمه). إذا لم يُذكر اسم أرجع سلسلة فارغة "".
+2. nationalId: الرقم القومي المصري المكون من 14 رقماً بأرقام إنجليزية (0-9) بدون مسافات (يبدأ عادةً بـ 2 أو 3). حوّل الأرقام المنطوقة بالعربية المصرية مثل (اتنين تسعة خمسة صفر واحد...) إلى أرقام إنجليزية بدقة. لا تخلط بينه وبين رقم الهاتف. إذا لم يُذكر أرجع "".
+3. phone: رقم الهاتف بأرقام إنجليزية (0-9) بدون مسافات (مثل رقم مصري من 11 رقم يبدأ بـ 010 أو 011 أو 012 أو 015، وحوّل "زيرو عشرة" إلى 010 و"زيرو حداشر" إلى 011 و"زيرو اتناشر" إلى 012 و"زيرو خمستاشر" إلى 015). إذا لم يُذكر أرجع "".
+4. profession: المهنة أو الوظيفة باللغة العربية (بحد أقصى 32 حرفاً، بدون كلمة "المهنة" أو "شغال" أو "وظيفته"، مثل: مهندس مدني، محاسب، ربة منزل، طالب، حاصل على بكالوريوس تجارة، طبيب، سائق، بدون عمل). إذا لم تُذكر أرجع "".
+5. applicantCapacity: صفة مقدم الطلب إذا ذُكرت صراحةً، واختر أقرب قيمة مطابقة من هذه القائمة فقط: [${capacitiesList.join("، ")}]. إذا لم تُذكر أرجع "".
+6. لا تخترع أو تخمّن أي حقل لم يُذكر في التسجيل الصوتي.`;
+
+    const baseExtractionSchemaProps = {
+      arabicName: {
+        type: Type.STRING,
+        description: "Full customer Arabic name without label words, or empty string if not spoken.",
+      },
+      nationalId: {
+        type: Type.STRING,
+        description: "14-digit Egyptian National ID in Western digits (0-9), or empty string if not spoken.",
+      },
+      phone: {
+        type: Type.STRING,
+        description: "Phone number in Western digits (0-9), or empty string if not spoken.",
+      },
+      profession: {
+        type: Type.STRING,
+        description: "Customer Arabic profession (max 32 chars), or empty string if not spoken.",
+      },
+      applicantCapacity: {
+        type: Type.STRING,
+        description: "Applicant capacity matching the provided Arabic options, or empty string if not spoken.",
+      },
+    };
+
+    const candidateFlashModels = ["gemini-4-hydrogen", "gemini-3.1-flash-lite", "gemini-flash-latest"];
+
+    let transcript = "";
+    let parsed: any = null;
+    let transcribeSucceeded = false;
+
+    // Stage 1: Try dedicated Egyptian Arabic audio transcription via gemini-3.5-transcribe (v1beta)
+    try {
+      const transcribeResp = await callWithTransientRetry(
+        () =>
+          ai!.models.generateContent({
+            model: "gemini-3.5-transcribe",
+            contents: {
+              parts: [
+                audioPart,
+                {
+                  text: "Transcribe this Egyptian Arabic audio accurately in Arabic script. Preserve all spoken Arabic person names, Egyptian national ID digits, phone numbers, professions, and applicant relationship terms accurately.",
+                },
+              ],
+            },
+          }),
+        "Transcribe"
+      );
+
+      transcript = (transcribeResp.text || "").trim();
+      transcribeSucceeded = true;
+    } catch (transcribeErr: any) {
+      const tMsg = String(transcribeErr?.message || "");
+      console.warn(
+        "[Voice Transcribe] gemini-3.5-transcribe unavailable, falling back to direct multimodal audio extraction:",
+        tMsg
+      );
+    }
+
+    if (transcribeSucceeded) {
+      if (!transcript) {
+        return res.status(422).json({
+          error: "لم يتم التقاط كلام واضح في التسجيل الصوتي، يرجى التحدث بالقرب من الميكروفون وإعادة المحاولة.",
+        });
+      }
+
+      // Stage 2: Structured Customer Field Extraction from transcript
+      const extractionPrompt = `النص المفرغ من إملاء موظف مكتب جوازات مصري:
+"""
+${transcript}
+"""
+
+استخرج فقط البيانات المذكورة فعلياً في النص وأرجعها بصيغة JSON حسب المخطط المحدد.
+${extractionRules}`;
+
+      let extractLastErr: any = null;
+      for (const modelName of candidateFlashModels) {
+        try {
+          const extractConfig: any = {
+            systemInstruction:
+              "You are an accurate Arabic data extraction assistant for an Egyptian passports and government services office. Extract only explicitly spoken customer fields into strict JSON without hallucinating missing fields.",
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: baseExtractionSchemaProps,
+              required: ["arabicName", "nationalId", "phone", "profession", "applicantCapacity"],
+            },
+          };
+          if (modelName === "gemini-4-hydrogen") {
+            extractConfig.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
+          }
+
+          const extractResp = await callWithTransientRetry(
+            () =>
+              ai!.models.generateContent({
+                model: modelName,
+                contents: extractionPrompt,
+                config: extractConfig,
+              }),
+            `Extract:${modelName}`
+          );
+
+          const rawJson = (extractResp.text || "{}").replace(/```(?:json)?\n?/gi, "").replace(/```/g, "").trim();
+          parsed = JSON.parse(rawJson);
+          break;
+        } catch (err: any) {
+          extractLastErr = err;
+          console.warn(`[Voice Extract Fallback] ${modelName} failed:`, err?.message || err);
+        }
+      }
+
+      if (!parsed) {
+        throw extractLastErr || new Error("تعذر استخراج بيانات العميل من النص المفرغ.");
+      }
+    } else {
+      // Fallback Direct Multimodal Audio -> Transcript + Structured JSON in one request
+      const directAudioPrompt = `استمع إلى التسجيل الصوتي باللهجة العربية المصرية لموظف مكتب جوازات يملي بيانات عميل في جملة واحدة.
+أولاً: فرّغ الكلام المسموع بدقة في الحقل transcript باللغة العربية.
+ثانياً: استخرج فقط البيانات المذكورة فعلياً في التسجيل وأرجعها بصيغة JSON حسب المخطط المحدد.
+${extractionRules}`;
+
+      let directLastErr: any = null;
+      for (const modelName of candidateFlashModels) {
+        try {
+          const directConfig: any = {
+            systemInstruction:
+              "You are an accurate Egyptian Arabic speech-to-data assistant for an Egyptian passports office. Transcribe the audio accurately in Arabic script into 'transcript', and extract only explicitly spoken customer fields into strict JSON without hallucinating.",
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                transcript: {
+                  type: Type.STRING,
+                  description: "Exact Arabic transcription of the spoken audio.",
+                },
+                ...baseExtractionSchemaProps,
+              },
+              required: ["transcript", "arabicName", "nationalId", "phone", "profession", "applicantCapacity"],
+            },
+          };
+          if (modelName === "gemini-4-hydrogen") {
+            directConfig.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
+          }
+
+          const directResp = await callWithTransientRetry(
+            () =>
+              ai!.models.generateContent({
+                model: modelName,
+                contents: {
+                  parts: [audioPart, { text: directAudioPrompt }],
+                },
+                config: directConfig,
+              }),
+            `DirectAudio:${modelName}`
+          );
+
+          const rawJson = (directResp.text || "{}").replace(/```(?:json)?\n?/gi, "").replace(/```/g, "").trim();
+          parsed = JSON.parse(rawJson);
+          transcript = String(parsed.transcript || "").trim();
+          break;
+        } catch (err: any) {
+          directLastErr = err;
+          console.warn(`[Voice DirectAudio Fallback] ${modelName} failed:`, err?.message || err);
+        }
+      }
+
+      if (!parsed) {
+        throw directLastErr || new Error("تعذر معالجة التسجيل الصوتي عبر نماذج الذكاء الاصطناعي المتاحة.");
+      }
+
+      if (!transcript && !parsed.arabicName && !parsed.nationalId && !parsed.phone && !parsed.profession) {
+        return res.status(422).json({
+          error: "لم يتم التقاط كلام واضح في التسجيل الصوتي، يرجى التحدث بالقرب من الميكروفون وإعادة المحاولة.",
+        });
+      }
+    }
+
+    const toWesternDigits = (val: string) =>
+      String(val || "")
+        .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+        .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0));
+
+    const arabicName = String(parsed.arabicName || "").replace(/[a-zA-Z0-9]/g, "").replace(/\s+/g, " ").trim();
+    const nationalId = toWesternDigits(parsed.nationalId || "").replace(/\D/g, "").slice(0, 14);
+    const phone = toWesternDigits(parsed.phone || "").replace(/\D/g, "");
+    const profession = String(parsed.profession || "").replace(/[a-zA-Z]/g, "").replace(/\s+/g, " ").trim().slice(0, 32);
+    const rawCapacity = String(parsed.applicantCapacity || "").trim();
+    const matchedCapacity = rawCapacity
+      ? capacitiesList.find((opt) => opt === rawCapacity || opt.includes(rawCapacity) || rawCapacity.includes(opt)) || ""
+      : "";
+
+    let birthDate = "";
+    if (nationalId.length >= 7) {
+      const nidInfo = parseEgyptianNationalId(nationalId.padEnd(14, "0"));
+      if (nidInfo?.birthDate) {
+        birthDate = nidInfo.birthDate.replace(/-/g, "/");
+      }
+    }
+
+    return res.json({
+      status: "success",
+      transcript,
+      extracted: {
+        arabicName,
+        nationalId,
+        birthDate,
+        phone,
+        profession,
+        applicantCapacity: matchedCapacity,
+      },
+    });
+  } catch (err: any) {
+    console.error("AI Voice Dictation Error:", err);
+    const msg = String(err?.message || "");
+    if (msg.includes("API_KEY_INVALID") || msg.includes("PERMISSION_DENIED") || msg.includes("403")) {
+      return res.status(403).json({
+        error: "مفتاح GEMINI_API_KEY غير صالح أو غير مفعل على الخادم. يرجى مراجعة إعدادات الأسرار (Settings > Secrets).",
+      });
+    }
+    if (msg.includes("RESOURCE_EXHAUSTED") || msg.includes("429")) {
+      return res.status(429).json({
+        error: "تم تجاوز حد الطلبات المؤقت لخدمة الذكاء الاصطناعي، يرجى المحاولة بعد قليل.",
+      });
+    }
+    return res.status(500).json({
+      error: "تعذر تفريغ الصوت واستخراج البيانات: " + (msg || "خطأ غير متوقع"),
+    });
   }
 });
 

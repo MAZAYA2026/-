@@ -1,5 +1,5 @@
 import { Invoice, Service, AppSettings, MojeebTemplateConfig, MojeebTemplateScenario } from "../types";
-import { getArabicDayName, recalculateCustomerServicesDeliveryDates } from "./businessDays";
+import { getArabicDayName, recalculateCustomerServicesDeliveryDates, formatArabicInvoiceDateTime } from "./businessDays";
 import { sendWhatsAppViaMojeeb, sendWhatsAppTemplateViaMojeeb, MojeebSendResponse, MojeebTemplateButtonInput } from "./api";
 
 export const WHATSAPP_DIVIDER = "────────────────────────────";
@@ -169,15 +169,7 @@ export function buildReceiptFormattedWhatsAppMessage(
   const headerTitle = (settings.headerText || "مكتب مزايا للجوازات").trim();
   const headerSub = (settings.subHeaderText !== undefined ? settings.subHeaderText : "جوازات طنطا والمعاملات الحكومية").trim();
 
-  let invDate = inv.date || new Date().toISOString().split("T")[0];
-  if (invDate.includes("GMT") || invDate.length > 10) {
-    try {
-      const d = new Date(invDate);
-      if (!isNaN(d.getTime())) {
-        invDate = d.toISOString().split("T")[0];
-      }
-    } catch {}
-  }
+  const invDateDisplay = formatArabicInvoiceDateTime(inv.date);
 
   const statusText = inv.status === "NEW" 
     ? "جديدة" 
@@ -197,7 +189,7 @@ export function buildReceiptFormattedWhatsAppMessage(
   // 2. Invoice Meta (matches ThermalReceipt)
   const metaLines: string[] = [
     `📄 *رقم الفاتورة:* #${inv.invoiceId}`,
-    `📅 *تاريخ الفاتورة:* ${invDate}`,
+    `📅 *تاريخ الفاتورة:* ${invDateDisplay}`,
     `👤 *الموظف المسؤول:* ${inv.employeeName || "شريف"}`,
     `📌 *حالة الفاتورة:* ${statusText}`
   ];
@@ -485,15 +477,8 @@ export function generateWhatsAppWelcomeMessage(
     ? inv.customers.filter(c => c.applicantCapacity && c.applicantCapacity.trim()).map(c => c.applicantCapacity).join(" و ")
     : (inv.customers[0]?.applicantCapacity || "");
 
-  let invDate = inv.date || new Date().toISOString().split("T")[0];
-  if (invDate.includes("GMT") || invDate.length > 10) {
-    try {
-      const d = new Date(invDate);
-      if (!isNaN(d.getTime())) {
-        invDate = d.toISOString().split("T")[0];
-      }
-    } catch {}
-  }
+  const invBaseDate = inv.date || new Date().toISOString().split("T")[0];
+  const invDateDisplay = formatArabicInvoiceDateTime(inv.date);
 
   const customHolidays = settings.customHolidays || [];
   const includeSaturday = settings.includeSaturdayAsWeekend !== false;
@@ -501,7 +486,7 @@ export function generateWhatsAppWelcomeMessage(
   inv.customers.forEach((c) => {
     const seq = recalculateCustomerServicesDeliveryDates(
       c.services,
-      invDate,
+      invBaseDate,
       services,
       customHolidays,
       includeSaturday
@@ -571,8 +556,8 @@ export function generateWhatsAppWelcomeMessage(
     .replace(/{المبلغ_الاجمالي}/g, `${inv.totalAmount.toFixed(2)} ج.م`)
     .replace(/{الاجمالي}/g, `${inv.totalAmount.toFixed(2)} ج.م`)
     .replace(/{التكلفة}/g, `• إجمالي الفاتورة: ${inv.totalAmount.toFixed(2)} ج.م`)
-    .replace(/{تاريخ_اليوم}/g, invDate)
-    .replace(/{تاريخ_الفاتورة}/g, invDate)
+    .replace(/{تاريخ_اليوم}/g, invDateDisplay)
+    .replace(/{تاريخ_الفاتورة}/g, invDateDisplay)
     .replace(/{موعد_التسليم}/g, deliveryDisplay)
     .replace(/{الميعاد_النهائي}/g, deliveryDisplay)
     .replace(/{الخاتمة}/g, footerTextDisplay)
@@ -676,7 +661,7 @@ export const MOJEEB_TEMPLATE_PLACEHOLDERS: { token: string; label: string }[] = 
   { token: "{رقم_الارشيف}", label: "درج الأرشيف" },
   { token: "{اسم_المكتب}", label: "اسم المكتب" },
   { token: "{هاتف_التواصل}", label: "هاتف المكتب" },
-  { token: "{تاريخ_اليوم}", label: "تاريخ الفاتورة" },
+  { token: "{تاريخ_اليوم}", label: "تاريخ ووقت الفاتورة (يوم/تاريخ/وقت)" },
   { token: "{الموظف}", label: "الموظف" },
   { token: "{ملاحظة_التنفيذ}", label: "ملاحظة التنفيذ" },
 ];
@@ -880,10 +865,7 @@ export function buildInvoiceTemplateVariables(
       : (inv.customers[0]?.arabicName || "عميلنا العزيز")
   );
 
-  const invoiceDateClean = String(inv.date || new Date().toLocaleDateString("ar-EG"))
-    .replace(/\s*GMT[+-]\d+.*$/i, "")
-    .replace(/\s*\([^)]*\)$/i, "")
-    .trim();
+  const invoiceDateFormatted = formatArabicInvoiceDateTime(inv.date);
 
   const statusText =
     inv.status === "NEW"
@@ -900,7 +882,8 @@ export function buildInvoiceTemplateVariables(
     "{الترويسة_الفرعية}": subHeader,
     "{اسم_العميل}": customerNames,
     "{رقم_الفاتورة}": String(inv.invoiceId ?? ""),
-    "{تاريخ_اليوم}": invoiceDateClean,
+    "{تاريخ_اليوم}": invoiceDateFormatted,
+    "{تاريخ_الفاتورة}": invoiceDateFormatted,
     "{الموظف}": inv.employeeName || "-",
     "{حالة_الفاتورة}": statusText,
     "{الخدمات}": extra?.servicesSummary || allServicesSummary.join(" + ") || "-",

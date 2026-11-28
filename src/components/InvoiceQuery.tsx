@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Invoice, InvoiceStatus, AppSettings, Service, Employee, CustomerInput, GovernmentFine, DEFAULT_APPLICANT_CAPACITIES, MojeebTemplateScenario } from "../types";
 import { updateInvoiceOnServer, deleteInvoiceOnServer, importInvoicesFromGoogleSheet } from "../lib/api";
-import { calculateWorkingDaysDeliveryDate, getArabicDayName, recalculateCustomerServicesDeliveryDates } from "../lib/businessDays";
+import { calculateWorkingDaysDeliveryDate, getArabicDayName, recalculateCustomerServicesDeliveryDates, formatArabicInvoiceDateTime } from "../lib/businessDays";
 import { generateWhatsAppWelcomeMessage, generateWhatsAppReadyMessage, generateWhatsAppPartialReadyMessage, buildInvoiceTemplateVariables, dispatchWhatsAppViaMojeebSmart } from "../lib/whatsapp";
 import { Search, Edit3, Trash2, Printer, Send, CheckCircle, PackageOpen, X, MapPin, Calendar, Info, RefreshCw, AlertCircle, Save, AlertTriangle, CheckSquare, Square, Clock, MessageSquare, Check, Sparkles } from "lucide-react";
 import ThermalReceipt from "./ThermalReceipt";
@@ -113,15 +113,10 @@ export default function InvoiceQuery({
     }
   }, [handleLoadInvoicesFromSheet, invoices.length]);
 
-  // Clean date helper function: strips GMT+... and (Eastern European Summer Time)
+  // Format invoice date as: DD/MM/YYYY <ArabicDay> h:mmص/م
   const formatInvoiceDateDisplay = (dateVal: string | undefined): string => {
     if (!dateVal) return "";
-    let s = String(dateVal).trim();
-    // Remove GMT offset and any timezone text like GMT+0300 (Eastern European Summer Time)
-    s = s.replace(/\s*GMT[+-]\d+.*$/i, "")
-         .replace(/\s*\([^)]*\)$/i, "")
-         .trim();
-    return s;
+    return formatArabicInvoiceDateTime(dateVal);
   };
 
   // Filtered invoices, sorted by invoiceId descending so newest operations appear at the top
@@ -1273,6 +1268,9 @@ export default function InvoiceQuery({
                       placeholder="MOHAMED AHMED..."
                       className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3.5 py-2.5 text-xs font-bold font-mono tracking-wide text-slate-800 focus:outline-hidden focus:border-blue-500 focus:bg-white"
                     />
+                    <p className="text-[10.5px] text-slate-500 font-cairo">
+                      تعديل الاسم الإنجليزي هنا خاص بهذه الفاتورة فقط ولن يغيّر الترجمة الثابتة المحفوظة على الشيت.
+                    </p>
                   </div>
 
                   <div className="grid md:grid-cols-3 gap-4">

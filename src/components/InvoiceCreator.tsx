@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { Service, CustomerInput, Invoice, InvoiceStatus, AppSettings, Employee, DictionaryItem, GovernmentFine, DEFAULT_APPLICANT_CAPACITIES, PotentialCustomer } from "../types";
-import { createInvoiceOnServer, saveDictionaryWord } from "../lib/api";
+import { createInvoiceOnServer, saveDictionaryWord, parseVoiceCustomerWithAI } from "../lib/api";
 import { calculateWorkingDaysDeliveryDate, getArabicDayName, isNonWorkingDay, recalculateCustomerServicesDeliveryDates } from "../lib/businessDays";
 import { generateWhatsAppWelcomeMessage, buildInvoiceTemplateVariables, dispatchWhatsAppViaMojeebSmart } from "../lib/whatsapp";
 import { breakdownArabicName, extractAtomicWordTokens, normalizeArabic } from "../lib/dictionary";
 import { playLanguageWarningSound } from "../lib/audio";
-import { Plus, Trash2, FileText, UserPlus, Sparkles, Printer, Send, Check, AlertCircle, Info, Calendar, BookOpen, ShieldAlert, CalendarCheck, AlertTriangle, Volume2, Users, Camera, CheckSquare, Square, Search, X, RefreshCw, ChevronDown, ChevronUp } from "lucide-react";
+import { Plus, Trash2, FileText, UserPlus, Sparkles, Printer, Send, Check, AlertCircle, Info, Calendar, BookOpen, ShieldAlert, CalendarCheck, AlertTriangle, Volume2, Users, Camera, CheckSquare, Square, Search, X, RefreshCw, ChevronDown, ChevronUp, Mic, Loader2, Lock } from "lucide-react";
 import ThermalReceipt from "./ThermalReceipt";
 import DocumentScannerModal from "./DocumentScannerModal";
 import { getCustomerTheme, getArabicOrdinalLabel, getServiceItemTheme } from "../lib/customerVisualThemes";
@@ -66,6 +66,379 @@ export default function InvoiceCreator({
   const [createdInvoiceId, setCreatedInvoiceId] = useState<number | null>(null);
   const [sendingWhatsApp, setSendingWhatsApp] = useState(false);
   const [whatsappNotice, setWhatsappNotice] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  // Smart One-Sentence Voice Dictation state (server-side Gemini Audio)
+  const [voiceTargetIdx, setVoiceTargetIdx] = useState<number | null>(null);
+  const [voiceStatus, setVoiceStatus] = useState<"idle" | "recording" | "processing">("idle");
+  const [voiceElapsedSec, setVoiceElapsedSec] = useState<number>(0);
+  const [voiceFeedbackByCustomer, setVoiceFeedbackByCustomer] = useState<
+    Record<number, { type: "success" | "error"; text: string; transcript?: string; filledFields?: string[] }>
+  >({});
+
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const voiceTimerRef = useRef<number | null>(null);
+  const voiceCancelledRef = useRef<boolean>(false);
+  const voiceTargetIdxRef = useRef<number | null>(null);
+
+  const cleanupVoiceResources = () => {
+    if (voiceTimerRef.current !== null) {
+      window.clearInterval(voiceTimerRef.current);
+      voiceTimerRef.current = null;
+    }
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((track) => {
+        try {
+          track.stop();
+        } catch {}
+      });
+      mediaStreamRef.current = null;
+    }
+    mediaRecorderRef.current = null;
+  };
+
+  useEffect(() => {
+    return () => {
+      voiceCancelledRef.current = true;
+      try {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+          mediaRecorderRef.current.stop();
+        }
+      } catch {}
+      cleanupVoiceResources();
+    };
+  }, []);
+
+  const formatVoiceTimer = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  };
+
+  const cancelVoiceDictation = () => {
+    voiceCancelledRef.current = true;
+    try {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+        mediaRecorderRef.current.stop();
+      }
+    } catch {}
+    cleanupVoiceResources();
+    voiceTargetIdxRef.current = null;
+    setVoiceStatus("idle");
+    setVoiceTargetIdx(null);
+    setVoiceElapsedSec(0);
+  };
+
+  const stopVoiceDictation = () => {
+    voiceCancelledRef.current = false;
+    try {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+        mediaRecorderRef.current.stop();
+      } else {
+        cleanupVoiceResources();
+        voiceTargetIdxRef.current = null;
+        setVoiceStatus("idle");
+        setVoiceTargetIdx(null);
+        setVoiceElapsedSec(0);
+      }
+    } catch {
+      cleanupVoiceResources();
+      voiceTargetIdxRef.current = null;
+      setVoiceStatus("idle");
+      setVoiceTargetIdx(null);
+      setVoiceElapsedSec(0);
+    }
+  };
+
+  const startVoiceDictation = async (cIdx: number) => {
+    if (voiceStatus !== "idle") return;
+
+    if (
+      typeof navigator === "undefined" ||
+      !navigator.mediaDevices?.getUserMedia ||
+      typeof MediaRecorder === "undefined"
+    ) {
+      setVoiceFeedbackByCustomer((prev) => ({
+        ...prev,
+        [cIdx]: {
+          type: "error",
+          text: "المتصفح الحالي لا يدعم تسجيل الصوت بالميكروفون. يرجى استخدام متصفح حديث مثل Chrome أو Edge.",
+        },
+      }));
+      return;
+    }
+
+    // Clear previous feedback for this customer
+    setVoiceFeedbackByCustomer((prev) => {
+      const next = { ...prev };
+      delete next[cIdx];
+      return next;
+    });
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+
+      const preferredTypes = [
+        "audio/webm;codecs=opus",
+        "audio/webm",
+        "audio/mp4",
+        "audio/ogg;codecs=opus",
+        "audio/ogg",
+      ];
+      const chosenType = preferredTypes.find((t) => {
+        try {
+          return MediaRecorder.isTypeSupported(t);
+        } catch {
+          return false;
+        }
+      });
+
+      const recorder = chosenType
+        ? new MediaRecorder(stream, { mimeType: chosenType })
+        : new MediaRecorder(stream);
+
+      mediaStreamRef.current = stream;
+      mediaRecorderRef.current = recorder;
+      audioChunksRef.current = [];
+      voiceCancelledRef.current = false;
+      voiceTargetIdxRef.current = cIdx;
+
+      recorder.ondataavailable = (event: BlobEvent) => {
+        if (event.data && event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onerror = () => {
+        cleanupVoiceResources();
+        const targetIdx = voiceTargetIdxRef.current;
+        voiceTargetIdxRef.current = null;
+        setVoiceStatus("idle");
+        setVoiceTargetIdx(null);
+        setVoiceElapsedSec(0);
+        if (targetIdx !== null) {
+          setVoiceFeedbackByCustomer((prev) => ({
+            ...prev,
+            [targetIdx]: {
+              type: "error",
+              text: "حدث خطأ غير متوقع أثناء التسجيل الصوتي. يرجى المحاولة مرة أخرى.",
+            },
+          }));
+        }
+      };
+
+      recorder.onstop = async () => {
+        const targetIdx = voiceTargetIdxRef.current;
+        const wasCancelled = voiceCancelledRef.current;
+        const rawMime = recorder.mimeType || chosenType || "audio/webm";
+        const baseMime = rawMime.split(";")[0].trim() || "audio/webm";
+        const chunks = [...audioChunksRef.current];
+        audioChunksRef.current = [];
+        cleanupVoiceResources();
+
+        if (wasCancelled || targetIdx === null) {
+          voiceTargetIdxRef.current = null;
+          setVoiceStatus("idle");
+          setVoiceTargetIdx(null);
+          setVoiceElapsedSec(0);
+          return;
+        }
+
+        const audioBlob = new Blob(chunks, { type: baseMime });
+        if (audioBlob.size < 400) {
+          voiceTargetIdxRef.current = null;
+          setVoiceStatus("idle");
+          setVoiceTargetIdx(null);
+          setVoiceElapsedSec(0);
+          setVoiceFeedbackByCustomer((prev) => ({
+            ...prev,
+            [targetIdx]: {
+              type: "error",
+              text: "التسجيل قصير جداً أو لم يُلتقط صوت واضح. اضغط على الميكروفون وتحدث بجملة واضحة ثم اضغط إيقاف.",
+            },
+          }));
+          return;
+        }
+
+        setVoiceStatus("processing");
+        try {
+          const dataUrl: string = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              if (typeof reader.result === "string") {
+                resolve(reader.result);
+              } else {
+                reject(new Error("تعذر قراءة الملف الصوتي."));
+              }
+            };
+            reader.onerror = () => reject(new Error("تعذر قراءة الملف الصوتي."));
+            reader.readAsDataURL(audioBlob);
+          });
+
+          const response = await parseVoiceCustomerWithAI({
+            audio: dataUrl,
+            mimeType: baseMime,
+            applicantCapacities: applicantCapacityOptions,
+          });
+
+          const ex = response.extracted || {
+            arabicName: "",
+            nationalId: "",
+            birthDate: "",
+            phone: "",
+            profession: "",
+            applicantCapacity: "",
+          };
+
+          const filledFields: string[] = [];
+          const keysToClear: string[] = [];
+
+          if (ex.arabicName) {
+            filledFields.push("الاسم العربي");
+            keysToClear.push(`c-${targetIdx}-arabicName`, `c-${targetIdx}-englishName`);
+          }
+          if (ex.nationalId) {
+            filledFields.push("الرقم القومي");
+            keysToClear.push(`c-${targetIdx}-nationalId`);
+          }
+          if (ex.birthDate || (ex.nationalId && ex.nationalId.length >= 7)) {
+            filledFields.push("تاريخ الميلاد");
+          }
+          if (ex.phone) {
+            filledFields.push("الهاتف");
+            keysToClear.push(`c-${targetIdx}-phone`);
+          }
+          if (ex.profession) {
+            filledFields.push("المهنة");
+            keysToClear.push(`c-${targetIdx}-profession`);
+          }
+          if (ex.applicantCapacity) {
+            filledFields.push("صفة مقدم الطلب");
+            keysToClear.push(`c-${targetIdx}-applicantCapacity`);
+          }
+
+          if (filledFields.length === 0) {
+            setVoiceFeedbackByCustomer((prev) => ({
+              ...prev,
+              [targetIdx]: {
+                type: "error",
+                text: "لم يتم التعرف على بيانات عميل من التسجيل الصوتي. يرجى ذكر الاسم أو الرقم القومي أو المهنة بوضوح.",
+                transcript: response.transcript || undefined,
+              },
+            }));
+          } else {
+            setCustomers((prev) => {
+              if (!prev[targetIdx]) return prev;
+              const next = [...prev];
+              const current = { ...next[targetIdx] };
+
+              if (ex.arabicName) {
+                current.arabicName = ex.arabicName;
+                if (current.englishNameOption !== "previous") {
+                  const breakdown = breakdownArabicName(ex.arabicName, dictionary);
+                  if (breakdown.assembledEnglish) {
+                    current.englishName = breakdown.assembledEnglish;
+                  }
+                }
+              }
+              if (ex.nationalId) {
+                const numericId = ex.nationalId.replace(/\D/g, "").substring(0, 14);
+                current.nationalId = numericId;
+                const computedBirth =
+                  ex.birthDate ||
+                  (numericId.length >= 7 ? calculateBirthDateFromNationalId(numericId) : "");
+                if (computedBirth) {
+                  current.birthDate = computedBirth;
+                }
+              }
+              if (ex.phone) {
+                current.phone = ex.phone.replace(/\D/g, "");
+              }
+              if (ex.profession) {
+                current.profession = ex.profession.substring(0, 32);
+              }
+              if (ex.applicantCapacity) {
+                current.applicantCapacity = ex.applicantCapacity;
+              }
+
+              next[targetIdx] = current;
+              return next;
+            });
+
+            if (keysToClear.length > 0) {
+              setErrors((prev) => {
+                const next = { ...prev };
+                keysToClear.forEach((k) => {
+                  delete next[k];
+                });
+                return next;
+              });
+            }
+
+            setVoiceFeedbackByCustomer((prev) => ({
+              ...prev,
+              [targetIdx]: {
+                type: "success",
+                text: `تم إدراج الحقول تلقائياً: ${filledFields.join("، ")}`,
+                transcript: response.transcript || undefined,
+                filledFields,
+              },
+            }));
+          }
+        } catch (err: any) {
+          setVoiceFeedbackByCustomer((prev) => ({
+            ...prev,
+            [targetIdx]: {
+              type: "error",
+              text: err?.message || "تعذر تحليل التسجيل الصوتي، يرجى المحاولة مرة أخرى.",
+            },
+          }));
+        } finally {
+          voiceTargetIdxRef.current = null;
+          setVoiceStatus("idle");
+          setVoiceTargetIdx(null);
+          setVoiceElapsedSec(0);
+        }
+      };
+
+      setVoiceTargetIdx(cIdx);
+      setVoiceElapsedSec(0);
+      setVoiceStatus("recording");
+      recorder.start(250);
+
+      voiceTimerRef.current = window.setInterval(() => {
+        setVoiceElapsedSec((prev) => {
+          const next = prev + 1;
+          if (next >= 45) {
+            stopVoiceDictation();
+          }
+          return next;
+        });
+      }, 1000);
+    } catch (err: any) {
+      cleanupVoiceResources();
+      let msg = "تعذر الوصول إلى الميكروفون. يرجى التأكد من توصيله والسماح به من إعدادات المتصفح.";
+      if (err?.name === "NotAllowedError" || err?.name === "PermissionDeniedError") {
+        msg = "تم رفض إذن الميكروفون. يرجى السماح للموقع باستخدام الميكروفون من شريط العنوان ثم المحاولة مجدداً.";
+      } else if (err?.name === "NotFoundError" || err?.name === "DevicesNotFoundError") {
+        msg = "لم يتم العثور على ميكروفون متصل بهذا الجهاز.";
+      }
+      setVoiceFeedbackByCustomer((prev) => ({
+        ...prev,
+        [cIdx]: {
+          type: "error",
+          text: msg,
+        },
+      }));
+    }
+  };
 
   // Auto pre-fill if initialCustomerToCreate is provided from Potential Customers tab
   useEffect(() => {
@@ -317,6 +690,10 @@ export default function InvoiceCreator({
 
   // Handler for service dropdown selection
   const handleServiceChange = (cIdx: number, sIdx: number, val: string) => {
+    const wasUnlocked = customers[cIdx].services.some(
+      (s) => Boolean(s.serviceId) && services.some((srv) => srv.id === s.serviceId || srv.name === s.serviceId)
+    );
+
     const updated = [...customers];
     const item = updated[cIdx].services[sIdx];
     item.serviceId = val;
@@ -347,7 +724,31 @@ export default function InvoiceCreator({
       settings.includeSaturdayAsWeekend !== false
     );
 
+    const nowUnlocked = updated[cIdx].services.some(
+      (s) => Boolean(s.serviceId) && services.some((srv) => srv.id === s.serviceId || srv.name === s.serviceId)
+    );
+
+    if (!nowUnlocked && voiceTargetIdx === cIdx && voiceStatus === "recording") {
+      cancelVoiceDictation();
+    }
+
+    if (matched && errors[`c-${cIdx}-s-${sIdx}-id`]) {
+      setErrors((prev) => {
+        const next = { ...prev };
+        delete next[`c-${cIdx}-s-${sIdx}-id`];
+        return next;
+      });
+    }
+
     setCustomers(updated);
+
+    // Smooth counter workflow: once the first valid service is selected, auto-focus customer Arabic name
+    if (!wasUnlocked && nowUnlocked) {
+      setTimeout(() => {
+        const nameInput = document.getElementById(`customer-arabic-name-${cIdx}`) as HTMLInputElement | null;
+        nameInput?.focus();
+      }, 40);
+    }
   };
 
   const handleQtyChange = (cIdx: number, sIdx: number, qty: number) => {
@@ -539,8 +940,8 @@ export default function InvoiceCreator({
     setTimeout(() => {
       const cardEl = document.getElementById(`invoice-customer-card-${newIdx}`);
       cardEl?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-      const nameInput = document.getElementById(`customer-arabic-name-${newIdx}`) as HTMLInputElement | null;
-      nameInput?.focus();
+      const serviceSelect = document.getElementById(`customer-service-select-${newIdx}-0`) as HTMLSelectElement | null;
+      serviceSelect?.focus();
     }, 60);
   };
 
@@ -554,9 +955,13 @@ export default function InvoiceCreator({
     const confirmed = window.confirm(`⚠️ تأكيد الحذف:\nهل أنت متأكد من حذف بيانات ${custName} من الفاتورة؟`);
     if (!confirmed) return;
 
+    if (voiceStatus !== "idle") {
+      cancelVoiceDictation();
+    }
     const updated = customers.filter((_, idx) => idx !== cIdx);
     setCustomers(updated);
     setCollapsedCustomers({});
+    setVoiceFeedbackByCustomer({});
   };
 
   const addServiceToCustomer = (cIdx: number) => {
@@ -765,8 +1170,12 @@ export default function InvoiceCreator({
       setShowSuccessToast(true);
 
       // Clear Form
+      if (voiceStatus !== "idle") {
+        cancelVoiceDictation();
+      }
       setCustomers([createEmptyCustomer()]);
       setCollapsedCustomers({});
+      setVoiceFeedbackByCustomer({});
       setErrors({});
     } catch (err) {
       console.error(err);
@@ -798,7 +1207,8 @@ export default function InvoiceCreator({
   const handleArabicNameBlur = (cIdx: number) => {
     const cust = customers[cIdx];
     const isPass = isPassportRelated(cust);
-    if (isPass && cust.arabicName.trim() && cust.englishNameOption !== "previous") {
+    // Only auto-fill on blur when English name is empty, so temporary manual edits for this customer are never overwritten
+    if (isPass && cust.arabicName.trim() && cust.englishNameOption !== "previous" && !cust.englishName.trim()) {
       const breakdown = breakdownArabicName(cust.arabicName, dictionary);
       if (breakdown.assembledEnglish) {
         const updated = [...customers];
@@ -1148,6 +1558,9 @@ export default function InvoiceCreator({
         <div className="space-y-3">
           {customers.map((customer, cIdx) => {
             const isPass = isPassportRelated(customer);
+            const hasSelectedService = customer.services.some(
+              (s) => Boolean(s.serviceId) && services.some((srv) => srv.id === s.serviceId || srv.name === s.serviceId)
+            );
             const theme = getCustomerTheme(cIdx);
             const customerTotal = customer.services.reduce((sum, s) => sum + (s.price || 0), 0);
             const customerOrdinal = getArabicOrdinalLabel(cIdx);
@@ -1238,18 +1651,146 @@ export default function InvoiceCreator({
                     {/* RIGHT COLUMN: Customer Info, Phone, Passport Data & Name Translation */}
                     {/* =================================================================== */}
                     <div className="lg:col-span-6 p-3.5 space-y-2.5 bg-white min-w-0">
-                      <div className="flex items-center justify-between border-b border-slate-100 pb-1.5">
-                        <span className="text-[11px] font-extrabold text-slate-700">
-                          بيانات العميل{isPass ? " والاستمارة والترجمة" : ""}
-                        </span>
-                        {isPass && (
-                          <span className="text-[10px] font-bold text-blue-700 flex items-center gap-1">
-                            <Sparkles className="w-3 h-3" />
-                            <span>حقول الجوازات مفعّلة</span>
+                      <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-1.5">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-[11px] font-extrabold text-slate-700 whitespace-nowrap">
+                            بيانات العميل{isPass ? " والاستمارة والترجمة" : ""}
                           </span>
-                        )}
+                          {isPass && (
+                            <span className="text-[10px] font-bold text-blue-700 hidden sm:inline-flex items-center gap-1 whitespace-nowrap">
+                              <Sparkles className="w-3 h-3" />
+                              <span>جوازات</span>
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Smart One-Sentence Voice Dictation Control */}
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {voiceStatus === "recording" && voiceTargetIdx === cIdx ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={stopVoiceDictation}
+                                className="px-2.5 py-1 bg-red-600 hover:bg-red-700 text-white rounded-lg text-[11px] font-extrabold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shadow-xs transition-colors"
+                                title="إيقاف التسجيل وتوزيع البيانات تلقائياً في الحقول"
+                              >
+                                <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
+                                <Square className="w-3 h-3 fill-current" />
+                                <span>إيقاف وإدراج</span>
+                                <span className="font-mono tabular-nums text-[10px] bg-red-800/70 px-1.5 py-0.5 rounded">
+                                  {formatVoiceTimer(voiceElapsedSec)}
+                                </span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={cancelVoiceDictation}
+                                className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-[11px] font-bold cursor-pointer whitespace-nowrap transition-colors"
+                                title="إلغاء التسجيل"
+                              >
+                                إلغاء
+                              </button>
+                            </>
+                          ) : voiceStatus === "processing" && voiceTargetIdx === cIdx ? (
+                            <span className="px-2.5 py-1 bg-amber-50 border border-amber-200 text-amber-800 rounded-lg text-[11px] font-bold inline-flex items-center gap-1.5 whitespace-nowrap">
+                              <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-600" />
+                              <span>جاري تفريغ الصوت...</span>
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => startVoiceDictation(cIdx)}
+                              disabled={voiceStatus !== "idle" || !hasSelectedService}
+                              className="px-2.5 py-1 bg-slate-100 hover:bg-red-50 text-slate-700 hover:text-red-700 border border-slate-200 hover:border-red-200 rounded-lg text-[11px] font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap transition-colors disabled:opacity-45 disabled:cursor-not-allowed"
+                              title={
+                                !hasSelectedService
+                                  ? "اختر الخدمة المطلوبة أولاً لتفعيل الإملاء الصوتي"
+                                  : "إملاء الاسم والرقم القومي والمهنة والهاتف بجملة واحدة عبر الميكروفون"
+                              }
+                            >
+                              <Mic className="w-3.5 h-3.5 text-red-600 shrink-0" />
+                              <span>إملاء بالصوت</span>
+                            </button>
+                          )}
+                        </div>
                       </div>
 
+                      {/* Live Recording Guidance Strip */}
+                      {voiceStatus === "recording" && voiceTargetIdx === cIdx && (
+                        <div className="bg-red-50 border border-red-200 text-red-900 rounded-lg px-2.5 py-2 text-[11px] flex items-start gap-2">
+                          <Mic className="w-3.5 h-3.5 text-red-600 shrink-0 mt-0.5 animate-pulse" />
+                          <div className="min-w-0 leading-relaxed">
+                            <span className="font-extrabold">جاري الاستماع... </span>
+                            <span className="text-red-800">
+                              انطق البيانات في جملة واحدة مثل: «الاسم أحمد محمد علي، الرقم القومي 2950101...، المهنة مهندس مدني، الهاتف 010...» ثم اضغط <strong>إيقاف وإدراج</strong>.
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Voice Dictation Result / Error Feedback */}
+                      {voiceFeedbackByCustomer[cIdx] && (
+                        <div
+                          className={`rounded-lg px-2.5 py-1.5 text-[11px] flex items-start justify-between gap-2 border ${
+                            voiceFeedbackByCustomer[cIdx].type === "success"
+                              ? "bg-emerald-50 border-emerald-200 text-emerald-900"
+                              : "bg-rose-50 border-rose-200 text-rose-900"
+                          }`}
+                        >
+                          <div className="min-w-0 space-y-0.5">
+                            <div className="font-bold flex items-center gap-1.5">
+                              {voiceFeedbackByCustomer[cIdx].type === "success" ? (
+                                <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                              ) : (
+                                <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                              )}
+                              <span>{voiceFeedbackByCustomer[cIdx].text}</span>
+                            </div>
+                            {voiceFeedbackByCustomer[cIdx].transcript && (
+                              <p className="text-[10px] opacity-85 truncate" title={voiceFeedbackByCustomer[cIdx].transcript}>
+                                النص المسموع: «{voiceFeedbackByCustomer[cIdx].transcript}»
+                              </p>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setVoiceFeedbackByCustomer((prev) => {
+                                const next = { ...prev };
+                                delete next[cIdx];
+                                return next;
+                              })
+                            }
+                            className="p-0.5 opacity-60 hover:opacity-100 cursor-pointer shrink-0"
+                            title="إغلاق التنبيه"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Service-First Gate Banner: Locks customer fields until a valid service is selected */}
+                      {!hasSelectedService && (
+                        <div className="bg-amber-50 border border-amber-200 text-amber-950 rounded-lg px-3 py-2 text-[11px] flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Lock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                            <span className="font-bold leading-snug">
+                              اختر الخدمة المطلوبة من القائمة على اليسار أولاً للتحقق من توفرها ثم اكتب بيانات العميل.
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const selectEl = document.getElementById(`customer-service-select-${cIdx}-0`) as HTMLSelectElement | null;
+                              selectEl?.focus();
+                            }}
+                            className="px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-md text-[10.5px] font-extrabold whitespace-nowrap shrink-0 cursor-pointer transition-colors"
+                          >
+                            اختيار الخدمة ←
+                          </button>
+                        </div>
+                      )}
+
+                      <fieldset disabled={!hasSelectedService} className="space-y-2.5 disabled:opacity-55">
                       {/* Row 1: Arabic Name & Phone side by side */}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                         <div className="space-y-1">
@@ -1560,6 +2101,28 @@ export default function InvoiceCreator({
                               const breakdown = breakdownArabicName(customer.arabicName, dictionary);
 
                               if (breakdown.allFound) {
+                                const dictEn = (breakdown.assembledEnglish || "").trim().replace(/\s+/g, " ").toUpperCase();
+                                const currentEn = (customer.englishName || "").trim().replace(/\s+/g, " ").toUpperCase();
+                                const isTemporaryOverride = Boolean(dictEn && currentEn && currentEn !== dictEn);
+
+                                if (isTemporaryOverride) {
+                                  return (
+                                    <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-indigo-900 bg-indigo-50 px-2.5 py-1.5 rounded-lg border border-indigo-200">
+                                      <span className="flex items-center gap-1.5 font-bold">
+                                        <Info className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                                        <span>تعديل مؤقت لهذا العميل فقط — لن يتم تعديل الاسم المحفوظ على الشيت</span>
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleTranslateName(cIdx)}
+                                        className="text-[10.5px] font-bold text-indigo-700 hover:text-indigo-950 underline cursor-pointer whitespace-nowrap"
+                                      >
+                                        استعادة ترجمة القاموس
+                                      </button>
+                                    </div>
+                                  );
+                                }
+
                                 return (
                                   <div className="flex items-center gap-1.5 text-[11px] text-emerald-800 bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-200">
                                     <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
@@ -1654,6 +2217,7 @@ export default function InvoiceCreator({
                           </div>
                         </div>
                       )}
+                      </fieldset>
                     </div>
 
                     {/* =================================================================== */}
@@ -1665,6 +2229,11 @@ export default function InvoiceCreator({
                           <h4 className={`text-[11px] font-extrabold truncate ${theme.titleText}`}>
                             الخدمات المطلوبة ({customer.services.length})
                           </h4>
+                          {!hasSelectedService && (
+                            <span className="text-[10px] font-extrabold text-amber-800 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-md whitespace-nowrap">
+                              الخطوة 1: اختر الخدمة أولاً
+                            </span>
+                          )}
                         </div>
                         <button
                           type="button"
@@ -1721,11 +2290,16 @@ export default function InvoiceCreator({
                                       الخدمة المطلوبة <span className="text-rose-500">*</span>
                                     </label>
                                     <select
+                                      id={`customer-service-select-${cIdx}-${sIdx}`}
                                       name={`c-${cIdx}-s-${sIdx}-id`}
                                       value={srv.serviceId}
                                       onChange={(e) => handleServiceChange(cIdx, sIdx, e.target.value)}
                                       className={`w-full bg-white border rounded-lg px-2.5 py-1.5 text-xs font-semibold focus:outline-hidden focus:border-red-500 focus:ring-2 focus:ring-red-100 transition-all ${
-                                        errors[`c-${cIdx}-s-${sIdx}-id`] ? "border-rose-400 text-rose-900 bg-rose-50/20" : "border-slate-200"
+                                        errors[`c-${cIdx}-s-${sIdx}-id`]
+                                          ? "border-rose-400 text-rose-900 bg-rose-50/20"
+                                          : !hasSelectedService && sIdx === 0
+                                            ? "border-amber-400 ring-2 ring-amber-200/80 bg-amber-50/30 text-slate-900"
+                                            : "border-slate-200"
                                       }`}
                                       required
                                     >

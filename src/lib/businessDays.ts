@@ -431,3 +431,79 @@ export function getArabicDayName(dateStr: string): string {
   }
 }
 
+const ARABIC_WEEKDAYS = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
+
+/**
+ * Formats an invoice creation date/time into the exact Arabic format:
+ *   DD/MM/YYYY <ArabicWeekday> h:mmص  (or م for PM)
+ * Example: "24/11/2026 الثلاثاء 10:19ص"
+ *
+ * - Preserves already-formatted strings containing Arabic weekday or ص/م.
+ * - For date-only strings (YYYY-MM-DD or DD/MM/YYYY without time), omits time rather than fabricating a timezone-shifted hour.
+ */
+export function formatArabicInvoiceDateTime(dateInput?: string | Date | null): string {
+  const formatFromDate = (d: Date, includeTime: boolean): string => {
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const yyyy = d.getFullYear();
+    const dayName = ARABIC_WEEKDAYS[d.getDay()] || "";
+
+    if (!includeTime) {
+      return `${dd}/${mm}/${yyyy} ${dayName}`.trim();
+    }
+
+    const hours24 = d.getHours();
+    const hours12 = hours24 % 12 || 12;
+    const minutes = String(d.getMinutes()).padStart(2, "0");
+    const period = hours24 < 12 ? "ص" : "م";
+
+    return `${dd}/${mm}/${yyyy} ${dayName} ${hours12}:${minutes}${period}`;
+  };
+
+  if (!dateInput) {
+    return formatFromDate(new Date(), true);
+  }
+
+  if (dateInput instanceof Date) {
+    return isNaN(dateInput.getTime()) ? formatFromDate(new Date(), true) : formatFromDate(dateInput, true);
+  }
+
+  const raw = String(dateInput).trim();
+  if (!raw) {
+    return formatFromDate(new Date(), true);
+  }
+
+  // Already formatted in Arabic (e.g. "24/11/2026 الثلاثاء 10:19ص")
+  if (/\d{1,2}\/\d{1,2}\/\d{4}/.test(raw) && ARABIC_WEEKDAYS.some((w) => raw.includes(w))) {
+    return raw;
+  }
+
+  // Date-only YYYY-MM-DD (no time component)
+  const ymdOnly = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (ymdOnly) {
+    const d = new Date(parseInt(ymdOnly[1], 10), parseInt(ymdOnly[2], 10) - 1, parseInt(ymdOnly[3], 10), 12, 0, 0);
+    return isNaN(d.getTime()) ? raw : formatFromDate(d, false);
+  }
+
+  // Date-only DD/MM/YYYY (no time component)
+  const dmyOnly = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (dmyOnly) {
+    const d = new Date(parseInt(dmyOnly[3], 10), parseInt(dmyOnly[2], 10) - 1, parseInt(dmyOnly[1], 10), 12, 0, 0);
+    return isNaN(d.getTime()) ? raw : formatFromDate(d, false);
+  }
+
+  // Full timestamp (e.g. "Tue Nov 24 2026 10:19:00", ISO string, "YYYY-MM-DD HH:mm:ss", etc.)
+  const cleaned = raw
+    .replace(/\s*\([^)]*\)\s*$/i, "")
+    .trim();
+  const parsed = new Date(cleaned);
+  if (!isNaN(parsed.getTime())) {
+    const hasTimeInfo = /\d{1,2}:\d{2}/.test(cleaned) || cleaned.includes("T");
+    return formatFromDate(parsed, hasTimeInfo);
+  }
+
+  // Fallback stripping GMT if Date couldn't parse
+  return raw.replace(/\s*GMT[+-]\d+.*$/i, "").replace(/\s*\([^)]*\)$/i, "").trim();
+}
+
+

@@ -665,6 +665,34 @@ export async function scanDocumentWithAI(params: {
   return response.json();
 }
 
+export async function parseVoiceCustomerWithAI(params: {
+  audio: string; // base64 or data URL
+  mimeType: string;
+  applicantCapacities?: string[];
+}): Promise<{
+  status: string;
+  transcript: string;
+  extracted: {
+    arabicName?: string;
+    nationalId?: string;
+    birthDate?: string;
+    phone?: string;
+    profession?: string;
+    applicantCapacity?: string;
+  };
+}> {
+  const response = await fetch("/api/voice/parse-customer", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || "تعذر تفريغ التسجيل الصوتي بالذكاء الاصطناعي");
+  }
+  return response.json();
+}
+
 export async function syncPotentialCustomersToGoogleSheets(webhookUrl?: string): Promise<{ status: string; message: string }> {
   const response = await fetch("/api/sheets/webhook/sync-potential-customers", {
     method: "POST",

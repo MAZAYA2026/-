@@ -59,7 +59,8 @@ import {
   shiftDateToThursday,
   shiftDateToSunday,
   shiftHolidayToDate,
-  revertHolidayShift
+  revertHolidayShift,
+  formatArabicInvoiceDateTime
 } from "../lib/businessDays";
 
 import { GovernmentFine } from "../types";
@@ -1742,7 +1743,8 @@ export default function SettingsConfig({
                             "{الترويسة_الفرعية}": subHeaderText.trim() || "جوازات طنطا والمعاملات الحكومية",
                             "{اسم_العميل}": "أحمد محمد علي (تجربة)",
                             "{رقم_الفاتورة}": "1001",
-                            "{تاريخ_اليوم}": new Date().toISOString().split("T")[0],
+                            "{تاريخ_اليوم}": formatArabicInvoiceDateTime(new Date()),
+                            "{تاريخ_الفاتورة}": formatArabicInvoiceDateTime(new Date()),
                             "{الموظف}": activeEmployee.name || "الموظف",
                             "{حالة_الفاتورة}": "جديدة",
                             "{الخدمات}": "استخراج جواز سفر مستعجل + شهادة تحركات",
